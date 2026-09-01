@@ -143,7 +143,13 @@ function AnswerInput({ question, value, onChange }) {
       return <button type="button" key={option} role="checkbox" aria-checked={checked} onClick={() => onChange(checked ? selected.filter(item => item !== option) : [...selected, option])} className={`min-h-14 border px-4 text-left ${checked ? 'border-xert-steel bg-xert-steel/15 text-white' : 'border-xert-steel/20 bg-xert-deep text-xert-pale'}`}><span className="mr-3 inline-flex h-5 w-5 items-center justify-center border border-current">{checked && <Check className="h-3 w-3" />}</span>{option}</button>;
     })}</div>;
   }
-  if (['single_choice', 'yes_no'].includes(question.type)) return <div role="radiogroup" aria-labelledby={`question-${question.id}`} className="grid gap-2 sm:grid-cols-2">{options.map(option => <button type="button" role="radio" aria-checked={value === option} key={option} onClick={() => onChange(option)} className={`min-h-14 border px-4 text-left ${value === option ? 'border-xert-steel bg-xert-steel/15 text-white' : 'border-xert-steel/20 bg-xert-deep text-xert-pale'}`}>{option}</button>)}</div>;
+  if (['single_choice', 'yes_no'].includes(question.type)) {
+    const compactConsent = question.type === 'single_choice' && options.length === 1;
+    return <div role="radiogroup" aria-labelledby={`question-${question.id}`} className={`grid gap-2 ${compactConsent ? '' : 'sm:grid-cols-2'}`}>{options.map(option => {
+      const checked = value === option;
+      return <button type="button" role="radio" aria-checked={checked} key={option} onClick={() => onChange(option)} className={`flex min-h-14 items-center gap-3 border px-4 text-left ${checked ? 'border-xert-steel bg-xert-steel/15 text-white' : 'border-xert-steel/20 bg-xert-deep text-xert-pale'}`}><span aria-hidden="true" className={`grid h-6 w-6 shrink-0 place-items-center border-2 ${checked ? 'border-xert-steel bg-xert-steel text-xert-navy' : 'border-xert-pale/55 bg-transparent'}`}>{checked && <Check className="h-4 w-4" strokeWidth={3} />}</span><span className="min-w-0 flex-1">{option}</span></button>;
+    })}</div>;
+  }
   if (question.type === 'star_rating') return <div role="radiogroup" aria-labelledby={`question-${question.id}`} className="flex flex-wrap gap-2">{[1,2,3,4,5].map(star => <button type="button" role="radio" aria-checked={Number(value) === star} aria-label={`${star} ${star === 1 ? 'star' : 'stars'}`} key={star} onClick={() => onChange(star)} className="min-h-12 min-w-12"><Star className={`h-9 w-9 ${star <= Number(value) ? 'fill-xert-steel text-xert-steel' : 'text-xert-steel/30'}`} /></button>)}</div>;
   if (['linear_scale', 'nps'].includes(question.type)) {
     const min = question.type === 'nps' ? 0 : Number(question.scale_min ?? 1); const max = question.type === 'nps' ? 10 : Number(question.scale_max ?? 10);

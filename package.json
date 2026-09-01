@@ -20,7 +20,9 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "forms:terms:check": "node scripts/apply-xert-terms-form.mjs",
+    "forms:terms:apply": "node scripts/apply-xert-terms-form.mjs --apply"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
