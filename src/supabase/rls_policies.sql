@@ -109,16 +109,19 @@ create policy "admin_all_private_session_requests" on public.private_session_req
 
 
 -- ── class_sessions ──────────────────────────────────────────────────────────
--- The public site shows published, publicly-visible classes (getClassSessions
--- with publicOnly=true). So: public may READ only published+visible rows;
--- admins get full access.
+-- The public site shows live, publicly-visible classes (getClassSessions with
+-- publicOnly=true). So: public may READ only visible rows that are published
+-- or full; admins get full access.
 -- ----------------------------------------------------------------------------
 alter table public.class_sessions enable row level security;
 drop policy if exists "public_read_published_class_sessions" on public.class_sessions;
 drop policy if exists "admin_all_class_sessions" on public.class_sessions;
+-- 'full' is a live, listed class: the timetable offers its waitlist. Widened by
+-- supabase/migrations/20260906030000_booking_repair_followups.sql; kept in step
+-- here so re-running this file cannot quietly hide full classes again.
 create policy "public_read_published_class_sessions" on public.class_sessions
   for select to anon, authenticated
-  using (public_visible = true and status = 'published');
+  using (public_visible = true and status in ('published', 'full'));
 create policy "admin_all_class_sessions" on public.class_sessions
   for all to authenticated using (public.is_admin()) with check (public.is_admin());
 

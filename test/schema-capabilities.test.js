@@ -10,7 +10,7 @@ test('reports the exact missing production database capabilities', () => {
     ready: false,
     actions: [
       'Apply supabase/migrations/20260714005500_credit_grant_audit.sql in Supabase.',
-      'Reapply src/supabase/booking_modes_upgrade.sql in Supabase.',
+      'Reapply src/supabase/booking_modes_upgrade.sql in Supabase, then reapply supabase/migrations/20260906020000_booking_overhaul_repair.sql.',
       'Apply supabase/migrations/20260727030000_member_cancellation_receipt.sql in Supabase.',
       'Apply supabase/migrations/20260721000000_member_booking_switch_guard.sql in Supabase.',
       'Apply supabase/migrations/20260721010000_member_onboarding_foundation.sql in Supabase.',

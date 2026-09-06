@@ -1,7 +1,10 @@
 export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   admin_role_safety: 'Apply src/supabase/admin_role_safety_upgrade.sql in Supabase.',
   audited_credit_grants: 'Apply supabase/migrations/20260714005500_credit_grant_audit.sql in Supabase.',
-  booking_waitlist_withdrawal: 'Reapply src/supabase/booking_modes_upgrade.sql in Supabase.',
+  // That file predates the booking overhaul and carries an older
+  // admin_set_booking_status, so reapplying it alone walks the capacity fix
+  // back. The follow-up migration restores it and must be run after.
+  booking_waitlist_withdrawal: 'Reapply src/supabase/booking_modes_upgrade.sql in Supabase, then reapply supabase/migrations/20260906020000_booking_overhaul_repair.sql.',
   member_cancellation_receipt: 'Apply supabase/migrations/20260727030000_member_cancellation_receipt.sql in Supabase.',
   member_booking_switch_guard: 'Apply supabase/migrations/20260721000000_member_booking_switch_guard.sql in Supabase.',
   member_onboarding_foundation: 'Apply supabase/migrations/20260721010000_member_onboarding_foundation.sql in Supabase.',
