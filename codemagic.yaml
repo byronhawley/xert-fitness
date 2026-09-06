@@ -350,6 +350,11 @@ workflows:
               "fitbox_get_user_refresh",
               "fitbox_live_mirror",
               "email_notifications",
+              "form_prerequisites",
+              "casual_visit_payments",
+              "booking_integrity_overhaul",
+              "booking_overhaul_repair",
+              "booking_repair_followups",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {
