@@ -1,3 +1,4 @@
+import { skipRuleProblems } from './formBranching.js';
 // ─── Shared building blocks for repo-owned form definitions ──────────────────
 // The PEQ and the terms agreement are legal documents, so their field IDs must
 // stay stable across deploys: a response snapshot references them forever.
@@ -47,7 +48,7 @@ export function acknowledgement(id, question, description) {
   });
 }
 
-/** Mirrors validateFormDraft's rules for definitions the Command Centre never edits. */
+/** Shares validateFormDraft's rules for definitions the Command Centre never edits. */
 export function validateXertFormDefinition(definition) {
   const questions = definition?.questions || [];
   const ids = questions.map(question => question.id);
@@ -56,10 +57,9 @@ export function validateXertFormDefinition(definition) {
     return 'Every question needs a stable ID of 1 to 128 characters.';
   }
   if (questions.length > 100) return 'The form exceeds the 100-field platform limit.';
-  const invalidRule = questions.some((question, index) => (question.skip_rules || []).some(rule => (
-    !Number.isInteger(rule.skip_to)
-      || rule.skip_to <= index + 2
-      || rule.skip_to > questions.length + 1
-  )));
-  return invalidRule ? 'A conditional skip destination is invalid.' : null;
+  // Same rules as the builder, and the same named reason: these definitions are
+  // checked in a test, and "a skip destination is invalid" across a 40-field
+  // waiver was the least useful thing that check could have said.
+  const [problem] = skipRuleProblems(questions);
+  return problem ? `${problem.message} ${problem.fix}` : null;
 }
