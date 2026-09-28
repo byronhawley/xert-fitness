@@ -4,12 +4,15 @@ import test from 'node:test';
 import { buildPublicFormSteps } from '../src/lib/formBranching.js';
 
 const source = await readFile(new URL('../src/pages/PublicForm.jsx', import.meta.url), 'utf8');
+const formText = await readFile(new URL('../src/components/public/FormText.jsx', import.meta.url), 'utf8');
 
 test('public forms display statement and section content in the respondent step flow', () => {
   assert.match(source, /function InformationalBlocks/);
   assert.match(source, /item\.type === 'section_break'/);
   assert.match(source, /<InformationalBlocks items=\{currentStep\.information\}/);
-  assert.match(source, /whitespace-pre-wrap/);
+  // Line breaks survive through the shared renderer.
+  assert.match(source, /<FormText text=\{title\}/);
+  assert.match(formText, /whitespace-pre-wrap/);
 });
 
 test('public skip logic uses the complete builder sequence before grouping response steps', () => {

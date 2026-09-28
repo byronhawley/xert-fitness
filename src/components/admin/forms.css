@@ -13,6 +13,11 @@
    selected treatment, so Required and Optional, On and Off, read at a glance
    instead of as two identical outlined buttons that have to be read. */
 .forms-workspace [role="switch"][aria-checked="true"] { color: var(--text-inverse); background: var(--accent-default); border-color: var(--accent-default); }
+/* Writing boxes. The kit's input takes `font: inherit`, and with it the tiny
+   line height of the label it sits in: fine for one line, a solid block for a
+   paragraph. The height follows the text (set from the component) up to most
+   of the screen, then the box scrolls. */
+.forms-workspace textarea.admin-kit-input { line-height: var(--line-body); padding-block: var(--space-inline); max-height: 60vh; overflow-y: auto; resize: vertical; }
 :is(.forms-grid, .forms-field-heading, .forms-branch-row) { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-control); }
 .forms-field-heading { padding: var(--space-group); }
 .forms-grid > *, .forms-field-heading > * { min-width: 0; }

@@ -193,3 +193,34 @@ test('skip logic is one button until there is a rule, not a dropdown per option'
   assert.ok(withRule.includes('aria-label="Skip destination for A"'), 'an existing rule shows every option in full');
   assert.ok(!withRule.includes('Set up skip logic'));
 });
+
+// ─── Dot points ────────────────────────────────────────────────────────────
+// The hint was a one-line box and the form ran it together as one paragraph,
+// so points typed with "•" between them read as one long sentence.
+
+const pointed = {id:'svc',type:'single_choice',question:'Which service?',options:['Group','PT'],required:true,
+  description:'A new agreement is needed when:\n• Changing from PT to Group\n• Adding Group Classes'};
+
+test('the hint is a writing box with a Dot points button', () => {
+  const html = renderForm({title:'x',questions:[pointed]});
+  assert.match(html, /<textarea[^>]*aria-label="Hint for question 1"[^>]*>A new agreement is needed when:\n• Changing from PT to Group\n• Adding Group Classes<\/textarea>/);
+  assert.match(html, /<\/svg> Dot points<\/button>/);
+});
+
+test('the preview shows the hint’s dot points as a list, the way the form will', () => {
+  const html = renderForm({title:'x',questions:[pointed]});
+  const preview = html.slice(html.indexOf('<aside aria-label="Preview of question 1"'));
+  assert.match(preview, /<p class="whitespace-pre-wrap">A new agreement is needed when:<\/p><ul class="list-disc pl-5 space-y-1"><li>Changing from PT to Group<\/li><li>Adding Group Classes<\/li><\/ul>/);
+});
+
+test('a statement is written in a box that keeps its line breaks', () => {
+  const html = renderForm({title:'x',questions:[{id:'s',type:'statement',content:'Please note:\n• Bring your certificates',description:''}]});
+  assert.match(html, /<textarea[^>]*aria-label="Question 1"[^>]*>Please note:\n• Bring your certificates<\/textarea>/);
+  assert.ok(!/<input[^>]*aria-label="Question 1"/.test(html), 'a one-line input strips the line breaks out of whatever it edits');
+});
+
+test('the signed record lays dot points out the way the person read them', () => {
+  const response = {id:'r',completed_at:'2026-09-28T12:00:00Z',status:'new',answers:{svc:'PT'}};
+  const html = renderToStaticMarkup(React.createElement(FormResponseRecord, {form:{title:'Contractor',questions:[pointed]},response,responses:[response]}));
+  assert.match(html, /<li>Changing from PT to Group<\/li><li>Adding Group Classes<\/li>/);
+});
