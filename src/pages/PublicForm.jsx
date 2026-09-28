@@ -221,6 +221,41 @@ function FieldAnswerInput({ question, value, onChange }) {
   return null;
 }
 
+// One question as a respondent sees it. The live form and the builder's
+// preview both render through this, so the preview cannot drift from what
+// people are actually shown. The preview sits inside the builder's own page,
+// so it takes a lower heading level than the form's h1.
+/** @param {{ question: any, value: any, onChange: (value: any) => void, audience?: string | null, Heading?: 'h1' | 'h3' }} props */
+export function QuestionBody({ question, value, onChange, audience = null, Heading = 'h1' }) {
+  return <>
+    <Media type={question.media_type} url={question.media_url} caption={question.media_caption} />
+    <Heading id={`question-${question.id}`} className="font-display text-3xl uppercase leading-tight tracking-wide text-white sm:text-4xl">{question.question}{question.required && <span className="ml-2 text-xert-steel">*</span>}</Heading>
+    {question.minor_only && audience === 'minor' && (
+      <p className="mt-3 rounded-xl border border-xert-steel/30 bg-xert-steel/10 p-3 text-sm text-xert-offwhite">
+        The date of birth on the questionnaire makes this member under 18, so a parent or legal guardian must complete this.
+      </p>
+    )}
+    {question.description && <p className="mt-3 text-xert-pale/60">{question.description}</p>}
+    <div className="mt-7"><AnswerInput question={question} value={value} onChange={onChange} /></div>
+  </>;
+}
+
+// The builder's preview: the live form's own card and renderer. It keeps its
+// own answer so trying a question out saves nothing; the builder remounts it
+// when the question type changes, since an answer of one type is meaningless
+// to another.
+export function QuestionPreview({ question }) {
+  const [value, setValue] = useState(undefined);
+  const layout = question.type === 'section_break' || question.type === 'statement';
+  return (
+    <div className="rounded-2xl bg-xert-navy p-3 text-xert-offwhite">
+      <div className="xert-card p-5">
+        {layout ? <InformationalBlocks items={[question]} /> : <QuestionBody question={question} value={value} onChange={setValue} Heading="h3" />}
+      </div>
+    </div>
+  );
+}
+
 export default function PublicForm() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -369,15 +404,7 @@ export default function PublicForm() {
             <InformationalBlocks items={currentStep.information} />
             {question ? <>
               <p className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-xert-steel">Question {questionNumber} of {questionCount}</p>
-              <Media type={question.media_type} url={question.media_url} caption={question.media_caption} />
-              <h1 id={`question-${question.id}`} className="font-display text-3xl uppercase leading-tight tracking-wide text-white sm:text-4xl">{question.question}{question.required && <span className="ml-2 text-xert-steel">*</span>}</h1>
-              {question.minor_only && audience === 'minor' && (
-                <p className="mt-3 rounded-xl border border-xert-steel/30 bg-xert-steel/10 p-3 text-sm text-xert-offwhite">
-                  The date of birth on the questionnaire makes this member under 18, so a parent or legal guardian must complete this.
-                </p>
-              )}
-              {question.description && <p className="mt-3 text-xert-pale/60">{question.description}</p>}
-              <div className="mt-7"><AnswerInput question={question} value={answers[question.id]} onChange={value => setAnswers(current => ({ ...current, [question.id]: value }))} /></div>
+              <QuestionBody question={question} value={answers[question.id]} onChange={value => setAnswers(current => ({ ...current, [question.id]: value }))} audience={audience} />
             </> : <><h1 className="font-display text-4xl uppercase text-white">Review and submit</h1><p className="mt-3 text-xert-pale/65">Confirm the information above, or go back before sending your response.</p></>}
           </> : <><h1 className="font-display text-4xl uppercase text-white">Ready to submit?</h1><p className="mt-3 text-xert-pale/65">Review your answers with Back, or send your response now.</p></>}
           {error && <p role="alert" className="mt-5 rounded-xl border p-3 text-sm" style={errorStyle}>{error}</p>}
