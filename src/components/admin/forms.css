@@ -9,6 +9,10 @@
 .forms-workspace :is(input, select, textarea) { max-width: 100%; }
 .forms-workspace :is(h1, h2, h3, p, span, a, label) { overflow-wrap: anywhere; }
 .forms-workspace a { display: inline-flex; align-items: center; }
+/* Every on/off in the builder is a switch. Filled when on, with the kit's own
+   selected treatment, so Required and Optional, On and Off, read at a glance
+   instead of as two identical outlined buttons that have to be read. */
+.forms-workspace [role="switch"][aria-checked="true"] { color: var(--text-inverse); background: var(--accent-default); border-color: var(--accent-default); }
 :is(.forms-grid, .forms-field-heading, .forms-branch-row) { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-control); }
 .forms-field-heading { padding: var(--space-group); }
 .forms-grid > *, .forms-field-heading > * { min-width: 0; }

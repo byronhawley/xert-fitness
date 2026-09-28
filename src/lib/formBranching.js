@@ -54,6 +54,37 @@ export function buildPublicFormSteps(questions, answers, omitted = []) {
   return { skipped, steps };
 }
 
+/**
+ * Keeps every skip rule aimed at the question it was written for, across any
+ * change to the list: a move, a delete, a duplicate or an addition.
+ *
+ * Rules store a one-based position, not a question. Without this, moving a
+ * question silently re-aims every jump past it at whatever now sits in that
+ * slot, and adding one at the end re-aims every "End form" jump at the new
+ * question. Neither raises an error — the form just branches wrong.
+ *
+ * `before` and `after` are the question lists either side of the change. A
+ * rule whose destination was deleted loses its destination rather than
+ * guessing a replacement, so the builder reports it and the owner decides.
+ */
+export function remapSkipTargets(before = [], after = []) {
+  const endBefore = before.length + 1;
+  const endAfter = after.length + 1;
+  const positionAfter = new Map(after.map((question, index) => [question?.id, index + 1]));
+  return after.map(question => {
+    if (!question?.skip_rules?.length) return question;
+    const skipRules = question.skip_rules.map(rule => {
+      const target = Number(rule?.skip_to);
+      // Already broken before this change; leave it for skipRuleProblems to name.
+      if (!Number.isInteger(target) || target < 1 || target > endBefore) return rule;
+      if (target === endBefore) return { ...rule, skip_to: endAfter };
+      const destination = before[target - 1];
+      return { ...rule, skip_to: positionAfter.get(destination?.id) ?? null };
+    });
+    return { ...question, skip_rules: skipRules };
+  });
+}
+
 export function fieldPositionLabel(question, index) {
   const label = question?.question?.trim() || question?.content?.trim() || 'Untitled field';
   return `Q${index + 1} \u201c${label}\u201d`;

@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { protectCSVFormula } from '@/lib/csvSafety';
 import { skipRuleProblems } from '@/lib/formBranching';
-export { computeSkippedQuestionIDs, fieldPositionLabel, skipRuleProblems } from '@/lib/formBranching';
+export { computeSkippedQuestionIDs, fieldPositionLabel, remapSkipTargets, skipRuleProblems } from '@/lib/formBranching';
 
 export const FORM_TYPES = Object.freeze([
   ['contact', 'Contact Form'], ['registration', 'Registration'], ['application', 'Application'],

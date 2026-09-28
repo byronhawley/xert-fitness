@@ -17,8 +17,8 @@ test('the public form shows supporting text under a section break and a statemen
 
 test('the builder can edit the supporting text it renders', async () => {
   const manager = await read('../src/components/admin/FormsSurveysManager.jsx');
-  // The non-layout row stays as it was: helper text plus placeholder.
-  assert.match(manager, /\{!layout && <div className="forms-grid forms-grid-two">.*Helper text/);
+  // The non-layout row: the hint, plus example text where the answer box shows it.
+  assert.match(manager, /\{!layout && <div className="forms-grid forms-grid-two">.*Hint<span className="forms-secondary">/);
   // Layout fields get their own control, because a placeholder is meaningless
   // on a heading and the text is long enough to want more than one line.
   assert.match(manager, /\{layout && <label[^>]*>Supporting text<textarea/);

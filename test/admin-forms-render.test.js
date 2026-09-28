@@ -118,3 +118,78 @@ test('the answers table can take the width its columns need', () => {
   // nothing, and overflow-wrap finished the job one character per line.
   assert.ok(!/<table[^>]*class="[^"]*\bw-full\b/.test(html), 'the table must not be forced to the container width');
 });
+
+// ─── The builder a person can actually read ────────────────────────────────
+// Every field used to open fully expanded, Required sat at the bottom of each
+// one, and text typed into a field that the public form never shows was kept
+// without a word. These render the real editor, not its source.
+
+const longForm = {title:'Contractor agreement',questions:[
+  {id:'a',type:'short_text',question:'Business name',required:true,placeholder:'e.g. Kirra Coaching',options:[]},
+  {id:'b',type:'multiple_choice',question:'Which do you hold?',required:false,options:['CPR','First aid'],placeholder:'Before signing, you confirm the below are current'},
+  {id:'c',type:'section_break',content:'Qualifications',description:'Bring a copy to your first session.'},
+]};
+const renderForm = draftValue => renderToStaticMarkup(React.createElement(FormEditor, {draft:draftValue,setDraft:()=>{},onSave:()=>{},onCancel:()=>{}}));
+
+test('the builder opens on the first question and shows the rest as one line each', () => {
+  const html = renderForm(longForm);
+  assert.ok(html.includes('aria-label="Question 1"'), 'the first question is open for editing');
+  assert.ok(!html.includes('aria-label="Option 1 for question 2"'), 'a closed question does not render its editor');
+  assert.match(html, /Which do you hold\?<\/button>/, 'a closed question still says what it asks');
+  assert.match(html, /aria-label="Edit question 2"/);
+  assert.match(html, /aria-expanded="true"[^>]*>Business name<\/button>/);
+});
+
+test('every question says whether it is required without being opened', () => {
+  const html = renderForm(longForm);
+  assert.match(html, /role="switch" aria-checked="true" aria-label="Question 1 is required"[^>]*>Required</);
+  assert.match(html, /role="switch" aria-checked="false" aria-label="Question 2 is required"[^>]*>Optional</);
+  assert.ok(!html.includes('aria-label="Question 3 is required"'), 'a heading has no answer to require');
+  assert.match(html, /1 of 2 questions are marked required/);
+});
+
+test('fields are named for what they do, not for what HTML calls them', () => {
+  const html = renderForm(longForm);
+  assert.match(html, /What are you asking\?/);
+  assert.match(html, />Hint<span class="forms-secondary">Shown under the question, in smaller text\./);
+  assert.match(html, />Example answer<span class="forms-secondary">Faint text inside the answer box/);
+  assert.ok(!/>Helper text</.test(html) && !/>Placeholder</.test(html));
+});
+
+test('example text on a question with no answer box is flagged, not silently kept', () => {
+  const html = renderForm(longForm);
+  // Closed, the heading warns; the choice question offers no example field at all.
+  assert.match(html, /Unseen text/);
+  const opened = renderToStaticMarkup(React.createElement(FormEditor, {draft:{...longForm,questions:[longForm.questions[1]]},setDraft:()=>{},onSave:()=>{},onCancel:()=>{}}));
+  assert.match(opened, /Nobody sees this text/);
+  assert.match(opened, /Before signing, you confirm the below are current/);
+  assert.match(opened, />Move into hint</);
+  assert.ok(!opened.includes('aria-label="Example answer for question 1"'), 'a choice question has no answer box to show it in');
+});
+
+test('the open question is previewed through the public form’s own renderer', () => {
+  const html = renderForm(longForm);
+  assert.match(html, /<aside aria-label="Preview of question 1"/);
+  assert.match(html, /What they will see/);
+  // The live form's card, and its heading markup with the required asterisk.
+  assert.match(html, /<div class="xert-card p-5"><h3 id="question-a"[^>]*>Business name<span class="ml-2 text-xert-steel">\*<\/span><\/h3>/);
+  // And its real answer box, carrying the example answer the owner typed.
+  assert.match(html, /placeholder="e\.g\. Kirra Coaching"/);
+});
+
+test('questions are added by choosing what they are, and can be dragged into place', () => {
+  const html = renderForm(longForm);
+  assert.match(html, /aria-expanded="false"[^>]*><svg[\s\S]*?<\/svg> Add a question<\/button>/);
+  assert.match(html, /aria-label="Drag to reorder question 1"/);
+  assert.match(html, /data-rfd-drag-handle-draggable-id="a"/);
+});
+
+test('skip logic is one button until there is a rule, not a dropdown per option', () => {
+  const choice = (id, skip_rules = []) => ({id,type:'single_choice',question:id,options:['A','B','C','D'],skip_rules});
+  const noRules = renderForm({title:'x',questions:[choice('first'),choice('second'),choice('third')]});
+  assert.match(noRules, /Set up skip logic<\/button>/);
+  assert.ok(!noRules.includes('aria-label="Skip destination for A"'), 'no dropdown wall before a rule exists');
+  const withRule = renderForm({title:'x',questions:[choice('first',[{option:'B',skip_to:3}]),choice('second'),choice('third')]});
+  assert.ok(withRule.includes('aria-label="Skip destination for A"'), 'an existing rule shows every option in full');
+  assert.ok(!withRule.includes('Set up skip logic'));
+});
