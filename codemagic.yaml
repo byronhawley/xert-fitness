@@ -350,6 +350,16 @@ workflows:
               "fitbox_get_user_refresh",
               "fitbox_live_mirror",
               "email_notifications",
+              "form_prerequisites",
+              "casual_visit_payments",
+              "three_day_visitor_pass",
+              "three_month_membership",
+              "visitor_pass_pricing",
+              "class_attendee_search",
+              "signed_document_copies",
+              "booking_integrity_overhaul",
+              "booking_overhaul_repair",
+              "booking_repair_followups",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

@@ -59,7 +59,17 @@ with required (capability, migration) as (
     ('fitbox_zapier_bridge', 'supabase/migrations/20260902010000_fitbox_zapier_bridge.sql'),
     ('fitbox_get_user_refresh', 'supabase/migrations/20260902020000_fitbox_get_user_refresh.sql'),
     ('fitbox_live_mirror', 'supabase/migrations/20260903000000_fitbox_live_mirror.sql'),
-    ('email_notifications', 'supabase/migrations/20260903010000_email_notifications.sql')
+    ('email_notifications', 'supabase/migrations/20260903010000_email_notifications.sql'),
+    ('form_prerequisites', 'supabase/migrations/20260904010000_form_prerequisites.sql'),
+    ('casual_visit_payments', 'supabase/migrations/20260905010000_casual_visit_payments.sql'),
+    ('three_day_visitor_pass', 'supabase/migrations/20260908010000_three_day_visitor_pass.sql'),
+    ('three_month_membership', 'supabase/migrations/20260908060000_three_month_membership.sql'),
+    ('visitor_pass_pricing', 'supabase/migrations/20260908070000_visitor_pass_pricing_and_discounts.sql'),
+    ('class_attendee_search', 'supabase/migrations/20260908080000_admin_search_class_attendees.sql'),
+    ('signed_document_copies', 'supabase/migrations/20260914010000_email_signed_document_copy.sql'),
+    ('booking_integrity_overhaul', 'supabase/migrations/20260906010000_booking_integrity_overhaul.sql'),
+    ('booking_overhaul_repair', 'supabase/migrations/20260906020000_booking_overhaul_repair.sql'),
+    ('booking_repair_followups', 'supabase/migrations/20260906030000_booking_repair_followups.sql')
 ), readiness as (
   select
     required.capability,

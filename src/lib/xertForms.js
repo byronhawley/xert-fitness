@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { protectCSVFormula } from '@/lib/csvSafety';
-export { computeSkippedQuestionIDs } from '@/lib/formBranching';
+import { skipRuleProblems } from '@/lib/formBranching';
+export { computeSkippedQuestionIDs, fieldPositionLabel, skipRuleProblems } from '@/lib/formBranching';
 
 export const FORM_TYPES = Object.freeze([
   ['contact', 'Contact Form'], ['registration', 'Registration'], ['application', 'Application'],
@@ -79,11 +80,14 @@ export function validateFormDraft(form) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(form.slug || '')) return 'Use lowercase letters, numbers and hyphens in the link slug.';
   const questions = form.questions || [];
   if (!questions.length) return 'Add at least one field.';
-  const invalidSkipRule = questions.some((question, index) => (question.skip_rules || []).some(rule => {
-    const target = Number(rule?.skip_to);
-    return !Number.isInteger(target) || target <= index + 2 || target > questions.length + 1;
-  }));
-  if (invalidSkipRule) return 'Skip logic can only jump forward to a later field or the end of the form.';
+  // Naming the field and the reason, because the rule that broke is usually on
+  // a collapsed field the owner was not editing — the old message said a rule
+  // was wrong somewhere and left them to find it.
+  const [problem, ...rest] = skipRuleProblems(questions);
+  if (problem) {
+    const more = rest.length ? ` ${rest.length} other skip ${rest.length === 1 ? 'rule needs' : 'rules need'} attention too.` : '';
+    return `Skip logic: ${problem.message} ${problem.fix}${more}`;
+  }
   if (form.one_response_per_email && !form.collect_email_required) return 'Require email before limiting responses by email.';
   const incomplete = questions.find(question => question.type !== 'statement' && question.type !== 'section_break' && !question.question?.trim());
   if (incomplete) return 'Every response field needs a question or label.';

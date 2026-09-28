@@ -555,7 +555,11 @@ final class XertAPI {
             beginner_friendly: draft.beginnerFriendly,
             intensity_level: draft.intensity,
             status: draft.status,
-            public_visible: draft.status == "published" && draft.publicVisible,
+            // 'full' is a live, listed class — the timetable shows its Full badge
+            // and offers the waitlist. Dropping it out of public view here deleted
+            // the class from the timetable instead, taking its waitlist with it,
+            // every time the owner saved a class they had marked Full.
+            public_visible: ["published", "full"].contains(draft.status) && draft.publicVisible,
             booking_mode: draft.bookingMode,
             notes: draft.notes.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         )

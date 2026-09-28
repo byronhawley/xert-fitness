@@ -34,7 +34,11 @@ test('desktop command centre exposes the full responsive builder and analytics w
   assert.match(manager, /forwardDestinations[\s\S]*Jump to Q[\s\S]*End form/);
   assert.match(manager, /hasInvalidSkipRules[\s\S]*Clear obsolete skip rules/);
   assert.doesNotMatch(manager, /aria-label=\{`Skip destination[^\n]*type="number"/);
-  assert.match(data, /invalidSkipRule[\s\S]*target <= index \+ 2[\s\S]*target > questions\.length \+ 1/);
+  // The rule itself lives in formBranching.js and is covered by behaviour in
+  // form-skip-logic-diagnosis.test.js. What matters here is that the builder's
+  // validator delegates to it rather than keeping a second copy that can drift.
+  assert.match(data, /skipRuleProblems\(questions\)/);
+  assert.match(data, /Skip logic: \$\{problem\.message\}/);
   for (const type of ['short_text', 'multiple_choice', 'star_rating', 'nps', 'signature', 'address', 'file_upload']) {
     assert.match(data, new RegExp(`['"]${type}['"]`));
   }

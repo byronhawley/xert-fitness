@@ -1,7 +1,10 @@
 export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   admin_role_safety: 'Apply src/supabase/admin_role_safety_upgrade.sql in Supabase.',
   audited_credit_grants: 'Apply supabase/migrations/20260714005500_credit_grant_audit.sql in Supabase.',
-  booking_waitlist_withdrawal: 'Reapply src/supabase/booking_modes_upgrade.sql in Supabase.',
+  // That file predates the booking overhaul and carries an older
+  // admin_set_booking_status, so reapplying it alone walks the capacity fix
+  // back. The follow-up migration restores it and must be run after.
+  booking_waitlist_withdrawal: 'Reapply src/supabase/booking_modes_upgrade.sql in Supabase, then reapply supabase/migrations/20260906020000_booking_overhaul_repair.sql.',
   member_cancellation_receipt: 'Apply supabase/migrations/20260727030000_member_cancellation_receipt.sql in Supabase.',
   member_booking_switch_guard: 'Apply supabase/migrations/20260721000000_member_booking_switch_guard.sql in Supabase.',
   member_onboarding_foundation: 'Apply supabase/migrations/20260721010000_member_onboarding_foundation.sql in Supabase.',
@@ -57,6 +60,12 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   fitbox_live_mirror: 'Apply supabase/migrations/20260903000000_fitbox_live_mirror.sql in Supabase.',
   email_notifications: 'Apply supabase/migrations/20260903010000_email_notifications.sql in Supabase.',
   form_prerequisites: 'Apply supabase/migrations/20260904010000_form_prerequisites.sql in Supabase.',
+  casual_visit_payments: 'Apply supabase/migrations/20260905010000_casual_visit_payments.sql in Supabase.',
+  three_day_visitor_pass: 'Apply supabase/migrations/20260908010000_three_day_visitor_pass.sql in Supabase.',
+  three_month_membership: 'Apply supabase/migrations/20260908060000_three_month_membership.sql in Supabase.',
+  visitor_pass_pricing: 'Apply supabase/migrations/20260908070000_visitor_pass_pricing_and_discounts.sql in Supabase.',
+  class_attendee_search: 'Apply supabase/migrations/20260908080000_admin_search_class_attendees.sql in Supabase.',
+  signed_document_copies: 'Apply supabase/migrations/20260914010000_email_signed_document_copy.sql in Supabase.',
   booking_integrity_overhaul: 'Apply supabase/migrations/20260906010000_booking_integrity_overhaul.sql in Supabase.',
   booking_overhaul_repair: 'Apply supabase/migrations/20260906020000_booking_overhaul_repair.sql in Supabase.',
   booking_repair_followups: 'Apply supabase/migrations/20260906030000_booking_repair_followups.sql in Supabase.',
