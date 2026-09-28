@@ -77,3 +77,43 @@
   .xert-response-print-record .forms-record-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-row-comfortable) var(--space-section); }
   .xert-response-print-record .forms-record-wide { grid-column: 1 / -1; }
 }
+/* ─── The form builder ──────────────────────────────────────────────────────
+   Narrow first: the toolbar puts the views on their own row, and a field's
+   actions sit under its wording. The admin-kit container queries widen both. */
+.forms-toolbar { position: sticky; top: 0; z-index: 20; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-inline) var(--space-control); margin: calc(var(--space-group) * -1) calc(var(--space-group) * -1) 0; padding: var(--space-control) var(--space-group); background: var(--surface-base); border-bottom: var(--nav-line-width) solid var(--border-hairline); }
+.forms-toolbar-title { min-width: 0; }
+.forms-toolbar-views { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+.forms-save-more { display: none; }
+.forms-workspace .forms-title-input { display: block; width: 100%; min-width: 0; padding: 0 var(--space-inline); font-family: var(--font-display); font-size: 1.125rem; line-height: 1.3; text-transform: uppercase; letter-spacing: 0.02em; color: var(--text-primary); background: transparent; border: var(--nav-line-width) solid transparent; border-radius: var(--radius-control); text-overflow: ellipsis; }
+.forms-workspace .forms-title-input:hover { border-color: var(--border-hairline); }
+.forms-workspace .forms-title-input:focus { border-color: var(--border-strong); background: var(--surface-raised); }
+.forms-toolbar-title > .forms-secondary { padding-inline: var(--space-inline); }
+/* The kit's button rule loads after Tailwind and flattens the primary fill, so
+   Save looked like every other button on the page. */
+.forms-workspace .forms-save { color: var(--text-inverse); background: var(--accent-default); border-color: var(--accent-default); font-weight: 600; }
+.forms-workspace .forms-save:hover { background: var(--accent-hover); }
+.forms-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-control); }
+.forms-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: var(--space-inline) var(--space-control); padding: var(--space-control); }
+.forms-row-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--space-inline); }
+.forms-type-icon { display: grid; place-items: center; width: var(--control-height); height: var(--control-height); border-radius: var(--radius-control); color: var(--accent-default); background: var(--surface-sunken); }
+.forms-type-label { display: none; }
+.forms-section-card { border-inline-start: calc(var(--nav-line-width) * 4) solid var(--accent-default); }
+/* A section's only action is Edit, so it keeps its row even on a phone. */
+.forms-workspace .forms-section-card > .forms-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.forms-workspace .forms-section-card > .forms-row > .forms-row-actions { grid-column: auto; }
+.forms-workspace .forms-section-toggle { display: grid; gap: var(--space-label); min-height: var(--control-height); padding: 0; color: inherit; background: transparent; border: 0; }
+.forms-open-card { border-color: var(--border-strong); }
+/* Fields under a section sit inside it, so the form reads as its parts. */
+.forms-nested { margin-inline-start: var(--space-control); padding-inline-start: var(--space-control); border-inline-start: var(--nav-line-width) solid var(--border-strong); }
+.forms-workspace .forms-add-inline { display: inline-flex; align-items: center; gap: var(--space-inline); margin-block-start: var(--space-control); padding-inline: var(--space-control); color: var(--text-secondary); font-size: var(--font-size-label); background: transparent; border: var(--nav-line-width) dashed var(--border-strong); border-radius: var(--radius-control); }
+.forms-workspace .forms-add-inline:hover { color: var(--text-primary); background: var(--surface-overlay); }
+.forms-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: var(--space-inline); }
+.forms-workspace .forms-type-card { display: grid; justify-content: stretch; justify-items: start; align-items: start; align-content: start; gap: var(--space-label); padding: var(--space-control); text-align: start; }
+/* The kit's hover grey outranks its selected fill, so the chosen view turned
+   grey with dark text under the pointer. */
+.forms-workspace .admin-segmented [aria-checked="true"]:hover { background: var(--accent-hover); }
+.forms-undo { position: sticky; bottom: var(--space-control); z-index: 20; display: flex; align-items: center; gap: var(--space-control); padding: var(--space-inline) var(--space-inline) var(--space-inline) var(--space-group); color: var(--text-primary); background: var(--surface-raised); border: var(--nav-line-width) solid var(--border-strong); border-radius: var(--radius-card); }
+.forms-undo > span { flex: 1; }
+.forms-link-field { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-label); margin-block-start: var(--space-label); }
+.forms-link-field > .forms-secondary { min-width: 0; }
+.forms-link-field > input { flex: 1 1 10rem; }

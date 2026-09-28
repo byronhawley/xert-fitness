@@ -8,11 +8,12 @@ import {StaticRouter} from 'react-router-dom/server.js';
 
 // Expose the real editor at the test boundary; no production test-only API.
 const server = await createServer({configFile:false, resolve:{alias:{'@':fileURLToPath(new URL('../src', import.meta.url))}},
-  plugins:[{name:'forms-render-boundary',transform(code,id){if (id.endsWith('/FormsSurveysManager.jsx')) return `${code}\nexport {FormEditor, Analytics, WrittenAnswers};`;}}],
+  plugins:[{name:'forms-render-boundary',transform(code,id){if (id.endsWith('/FormsSurveysManager.jsx')) return `${code}\nexport {FormEditor, Analytics, WrittenAnswers, DetailAsk, FormPreview, TypePicker};`;}}],
   define:{'import.meta.env.VITE_SUPABASE_URL':JSON.stringify('https://ugmkwoapjcpiucsrxwzt.supabase.co'),'import.meta.env.VITE_SUPABASE_ANON_KEY':JSON.stringify('sb_publishable_fixture_render_key_not_real')},
   optimizeDeps:{noDiscovery:true,include:[]}, server:{middlewareMode:true,watch:null}, appType:'custom'});
 after(() => server.close());
-const {default: FormsSurveysManager, FormEditor, Analytics, WrittenAnswers} = await server.ssrLoadModule('/src/components/admin/FormsSurveysManager.jsx');
+const {default: FormsSurveysManager, FormEditor, Analytics, WrittenAnswers, DetailAsk, FormPreview, TypePicker} = await server.ssrLoadModule('/src/components/admin/FormsSurveysManager.jsx');
+const {XERT_CONTRACTOR_FORM_DEFINITION} = await server.ssrLoadModule('/src/lib/xertContractorForm.js');
 const recordModule = await server.ssrLoadModule('/src/components/admin/FormResponseRecord.jsx');
 const {default: FormResponseRecord} = recordModule;
 const draft = {title:'Survey',questions:[{id:'one',type:'single_choice',question:'Preferred time?',options:['Morning','Evening']}]};
@@ -223,4 +224,63 @@ test('the signed record lays dot points out the way the person read them', () =>
   const response = {id:'r',completed_at:'2026-09-28T12:00:00Z',status:'new',answers:{svc:'PT'}};
   const html = renderToStaticMarkup(React.createElement(FormResponseRecord, {form:{title:'Contractor',questions:[pointed]},response,responses:[response]}));
   assert.match(html, /<li>Changing from PT to Group<\/li><li>Adding Group Classes<\/li>/);
+});
+
+// ─── The builder as a whole ────────────────────────────────────────────────
+// A 45-field agreement used to open as 45 identical rows with Save out of
+// reach at the top. These render the real editor.
+
+test('a long form opens as an outline: every section one line, saying what it holds', () => {
+  const html = renderForm(structuredClone(XERT_CONTRACTOR_FORM_DEFINITION));
+  const sections = XERT_CONTRACTOR_FORM_DEFINITION.questions.filter(field => field.type === 'section_break');
+  assert.equal([...html.matchAll(/class="[^"]*forms-section-card/g)].length, sections.length);
+  assert.equal([...html.matchAll(/<article id="form-field-/g)].length, sections.length, 'nothing inside a folded section is drawn');
+  assert.match(html, /aria-expanded="false" aria-label="XERT Fitness Independent Contractor Agreement: show the \d+ fields in it"/);
+  assert.match(html, /· 2 questions · 1 text block/);
+  assert.ok(!html.includes('What they will see'), 'no field is open on arrival');
+  assert.match(html, /Expand all/);
+});
+
+test('a short form opens on its first question, with each section holding its fields', () => {
+  const html = renderForm(longForm);
+  assert.match(html, /aria-expanded="true" aria-label="Qualifications: hide the 0 fields in it"/);
+  assert.match(html, /Add to this section<\/button>/, 'a section can be added to where it is, not only at the end of the form');
+  assert.match(html, /forms-type-icon/, 'each question shows what kind it is');
+});
+
+test('the name, the views and Save stay in one toolbar', () => {
+  const html = renderForm(longForm);
+  const toolbar = html.slice(html.indexOf('class="forms-toolbar"'), html.indexOf('Save<span'));
+  assert.match(toolbar, /aria-label="Form title"[^>]*value="Contractor agreement"/);
+  assert.match(toolbar, /role="radiogroup" aria-label="Form editor view"/);
+  for (const view of ['Build', 'Preview', 'Settings']) assert.match(toolbar, new RegExp(`role="radio"[^>]*>${view}</button>`));
+  assert.match(html, /class="admin-kit-button [^"]*forms-save"[^>]*title="Save \(Ctrl or Cmd \+ S\)"/);
+});
+
+test('the list of types says what each one collects', () => {
+  const html = renderToStaticMarkup(React.createElement(TypePicker, {label:'Add to this section', onPick:()=>{}, onClose:()=>{}}));
+  assert.match(html, /aria-label="Add to this section"/);
+  assert.match(html, /Yes \/ No<\/span><span class="forms-secondary">A yes or a no<\/span>/);
+  assert.match(html, /Statement<\/span><span class="forms-secondary">Something to read, nothing to answer<\/span>/);
+  assert.equal([...html.matchAll(/forms-type-card/g)].length, 22);
+});
+
+test('name, email and phone are each asked for, optional, or not asked, in one control', () => {
+  const html = state => renderToStaticMarkup(React.createElement(DetailAsk, {label:'Email', onChange:()=>{}, ...state}));
+  assert.match(html({collect:false, required:false}), /aria-checked="true"[^>]*>Don&#x27;t ask</);
+  assert.match(html({collect:true, required:false}), /aria-checked="true"[^>]*>Optional</);
+  assert.match(html({collect:true, required:true}), /aria-checked="true"[^>]*>Required</);
+  // One response per email needs the email, so only Required is left open.
+  const locked = html({collect:true, required:true, locked:true});
+  assert.equal([...locked.matchAll(/disabled=""/g)].length, 2);
+});
+
+test('Preview runs the unsaved draft through the public form itself', () => {
+  const draftForm = {...longForm, form_type:'registration', description:'Before you start', collect_name:true, collect_name_required:true, show_progress_bar:true, questions:longForm.questions};
+  const html = renderToStaticMarkup(React.createElement(FormPreview, {draft:draftForm}));
+  assert.match(html, /including unsaved changes/);
+  assert.match(html, /Nothing you enter is saved or sent/);
+  assert.match(html, /<h1 class="font-display[^"]*">Contractor agreement<\/h1>/, 'the respondent’s first page, with the draft’s title');
+  assert.match(html, /Name \*/);
+  assert.match(html, />Continue/);
 });

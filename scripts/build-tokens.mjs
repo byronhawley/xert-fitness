@@ -178,9 +178,18 @@ ${durationNames}
   .forms-workspace .forms-span-two { grid-column: span 2; }
   .forms-workspace .forms-span-all { grid-column: 1 / -1; }
   .forms-workspace .forms-field-heading { grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+  .forms-workspace .forms-row { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .forms-workspace .forms-row-actions { grid-column: auto; }
+  .forms-workspace .forms-nested { margin-inline-start: var(--space-group); }
+  .forms-workspace .forms-open-card aside { position: sticky; top: 6rem; align-self: start; }
 }
 @container admin-kit (min-width: ${resolved['components.admin.kit.breakpoint.table']}) {
   .forms-workspace .forms-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .forms-workspace .forms-toolbar { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .forms-workspace .forms-toolbar-views { grid-column: auto; grid-row: auto; }
+  .forms-workspace .forms-save-more { display: inline; }
+  .forms-workspace .forms-title-input { font-size: 1.5rem; }
+  .forms-workspace .forms-type-label { display: inline; }
   .forms-workspace .forms-written-cards { display: none; }
   .forms-workspace .forms-written-table { display: block; }
 }

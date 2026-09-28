@@ -257,48 +257,21 @@ export function QuestionPreview({ question }) {
   );
 }
 
-export default function PublicForm() {
-  const { slug } = useParams();
-  const navigate = useNavigate();
-  const { search } = useLocation();
-  const [form, setForm] = useState(null); const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(''); const [step, setStep] = useState(0); const [answers, setAnswers] = useState({});
-  const [name, setName] = useState(''); const [email, setEmail] = useState(''); const [phone, setPhone] = useState('');
-  const [submitting, setSubmitting] = useState(false); const [submitted, setSubmitted] = useState(false);
-  const [handingOver, setHandingOver] = useState(false);
-  const [carried, setCarried] = useState(null);
+// One run through a form: the contact details, then each step, then submit.
+// The public page runs it against the published form, and the builder's
+// preview runs it against the unsaved draft, so what an owner tries out is
+// what a respondent gets. Submitting hands the answers to `onSubmit`; the
+// page sends them, the preview does not.
+/** @param {{ form: any, carried?: any, initialAnswers?: any, onSubmit: (payload: any) => Promise<any>, preview?: boolean }} props */
+export function FormRunner({ form, carried = null, initialAnswers = null, onSubmit, preview = false }) {
+  const [error, setError] = useState(''); const [step, setStep] = useState(0); const [answers, setAnswers] = useState(() => initialAnswers || {});
+  const [name, setName] = useState(carried?.name || ''); const [email, setEmail] = useState(carried?.email || ''); const [phone, setPhone] = useState(carried?.phone || '');
+  const [submitting, setSubmitting] = useState(false);
   const startedAt = useRef(Date.now());
-  // A different slug is a different form: nothing from the previous one may
-  // survive, or a handover would carry stale answers into the next document.
-  useEffect(() => {
-    let active = true;
-    setLoading(true); setForm(null); setError(''); setStep(0); setAnswers({});
-    setName(''); setEmail(''); setPhone(''); setSubmitted(false); setHandingOver(false); setCarried(null);
-    startedAt.current = Date.now();
-    loadPublicForm(slug).then(data => {
-      if (!active) return;
-      setForm(data);
-      document.title = data ? `${data.title} | XERT` : 'Form unavailable | XERT';
-      // Carry across what they already typed on the form that led here.
-      const details = data?.prerequisite_slug ? readFormCompletion(data.prerequisite_slug) : null;
-      if (details) {
-        setCarried(details);
-        setName(details.name || ''); setEmail(details.email || ''); setPhone(details.phone || '');
-        // A question can ask for something the previous form already recorded.
-        // Seeding the answer saves typing it twice while leaving it editable.
-        const seeded = Object.fromEntries((data.questions || [])
-          .filter(item => item.prefill && details[item.prefill])
-          .map(item => [item.id, details[item.prefill]]));
-        if (Object.keys(seeded).length) setAnswers(seeded);
-      }
-    }).catch(err => active && setError(err.message)).finally(() => active && setLoading(false));
-    return () => { active = false; };
-  }, [slug]);
-  // A prerequisite says what leads here, not what bars the door. Sharing the
-  // agreement's own link used to bounce the reader to the questionnaire first,
-  // so a link sent to somebody who only needed to sign the terms opened a
-  // questionnaire instead. The questionnaire still hands over to the agreement
-  // when it is finished; that is the direction this relationship is for.
+  const card = useRef(null);
+  // The page scrolls the window; the preview sits inside the builder's own
+  // scrolling panel, where the window does not move.
+  const toTop = () => (preview ? card.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }) : window.scrollTo({ top: 0, behavior: 'smooth' }));
   // Skip destinations are indexed against the complete builder sequence, so
   // layout blocks must stay in this calculation even though they do not hold
   // answers. Each statement/section is then displayed with the next question.
@@ -351,7 +324,7 @@ export default function PublicForm() {
     // Catch what the database would reject while the answer is still on screen.
     const answerProblem = question ? answerValidationMessage(question, answers[question.id]) : null;
     if (answerProblem) { setError(answerProblem); return; }
-    if (step < steps.length) { setStep(value => value + 1); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (step < steps.length) { setStep(value => value + 1); toTop(); return; }
     const kept = Object.fromEntries(Object.entries(answers).filter(([id]) => !skipped.has(id)));
     // A last sweep, so an answer edited earlier can never fail at the very end
     // with nothing to act on: send them back to the question that needs fixing.
@@ -360,61 +333,106 @@ export default function PublicForm() {
       const target = steps.findIndex(item => item.question?.id === offender.question.id);
       if (target >= 0) setStep(target + 1);
       setError(offender.message);
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      toTop();
       return;
     }
     setSubmitting(true);
     try {
-      const responseID = await submitPublicForm({ slug, formUpdatedAt: form.updated_at, answers: kept, name, email, phone, elapsedSeconds: Math.round((Date.now() - startedAt.current) / 1000), sourceURL: window.location.href });
-      writeFormCompletion(slug, formCompletionMarker(
-        slug, formItems, kept, { name, email, phone }, responseID,
-      ));
-      // Either the form that sent them here, or the form that names this one as
-      // its prerequisite: opening the questionnaire directly must still lead to
-      // the agreement, and a questionnaire with nothing after it must not.
-      const handoff = nextFormSlug(search) || form.follow_on_slug || null;
-      if (handoff && handoff !== slug) { setHandingOver(true); navigate(formPath(handoff, null, returnKeyAfterForm(search)), { replace: true }); return; }
-      // Someone sent here mid-way through paying goes back to finish paying.
-      const returnPath = returnPathAfterForm(search);
-      if (returnPath) { setHandingOver(true); navigate(returnPath, { replace: true }); return; }
-      setSubmitted(true);
-      if (safeURL(form.redirect_url)) window.setTimeout(() => window.location.assign(form.redirect_url), 1400);
+      await onSubmit({ answers: kept, name, email, phone, elapsedSeconds: Math.round((Date.now() - startedAt.current) / 1000) });
     } catch (err) { setError(err.message); } finally { setSubmitting(false); }
+  };
+  const progress = steps.length ? Math.min(100, Math.max(0, step / steps.length * 100)) : 100;
+  return (
+    <section ref={card} className="xert-card mx-auto w-full max-w-2xl overflow-hidden">
+      <header className="border-b border-xert-steel/15 px-5 py-5 sm:px-8"><img src="/assets/xert-logo-horizontal-light.png" alt="XERT" className="h-8 w-auto" /></header>
+      {form.show_progress_bar && step > 0 && <div className="h-1 bg-white/[0.06]" aria-label={`Form progress ${Math.round(progress)} percent`}><div className="h-full rounded-r-full bg-xert-steel transition-all" style={{ width: `${progress}%` }} /></div>}
+      <div className="p-5 sm:p-8">
+        {step === 0 ? <>
+          <Media type={form.header_media_type} url={form.header_media_url} caption={form.header_media_caption} />
+          <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-xert-steel">{FORM_LABELS[form.form_type] || 'XERT Form'}</p>
+          <h1 className="font-display text-4xl uppercase tracking-wide text-white sm:text-5xl">{form.title}</h1>
+          {form.description && <FormText text={form.description} className="mt-4 text-xert-pale/70" />}
+          {(form.collect_name || form.collect_email || form.collect_phone) && <div className="mt-8 grid gap-4">
+            {form.collect_name && <label><span className="xert-label">Name {form.collect_name_required && '*'}</span><input id="form-name" className={inputClass} autoComplete="name" autoCapitalize="words" value={name} onChange={event => setName(event.target.value)} /></label>}
+            {form.collect_email && <label><span className="xert-label">Email {form.collect_email_required && '*'}</span><input id="form-email" type="email" className={inputClass} autoComplete="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={event => setEmail(event.target.value)} /></label>}
+            {form.collect_phone && <label><span className="xert-label">Phone {form.collect_phone_required && '*'}</span><input id="form-phone" type="tel" className={inputClass} autoComplete="tel" value={phone} onChange={event => setPhone(event.target.value)} /></label>}
+          </div>}
+        </> : currentStep ? <>
+          <InformationalBlocks items={currentStep.information} />
+          {question ? <>
+            <p className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-xert-steel">Question {questionNumber} of {questionCount}</p>
+            <QuestionBody question={question} value={answers[question.id]} onChange={value => setAnswers(current => ({ ...current, [question.id]: value }))} audience={audience} />
+          </> : <><h1 className="font-display text-4xl uppercase text-white">Review and submit</h1><p className="mt-3 text-xert-pale/65">Confirm the information above, or go back before sending your response.</p></>}
+        </> : <><h1 className="font-display text-4xl uppercase text-white">Ready to submit?</h1><p className="mt-3 text-xert-pale/65">Review your answers with Back, or send your response now.</p></>}
+        {error && <p role="alert" className="mt-5 rounded-xl border p-3 text-sm" style={errorStyle}>{error}</p>}
+        <div className="mt-8 flex gap-3">
+          {step > 0 && <button type="button" onClick={() => { setError(''); setStep(value => Math.max(0, value - 1)); }} className="xert-btn-ghost inline-flex min-h-[52px] items-center gap-2 px-5 font-display text-sm uppercase tracking-wide"><ArrowLeft className="h-4 w-4" /> Back</button>}
+          <button type="button" disabled={submitting} onClick={next} className="xert-btn-primary ml-auto inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 px-6 font-display text-base uppercase tracking-wide sm:flex-none disabled:opacity-60">{submitting ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Sending</> : step >= steps.length ? <>Submit <Check className="h-4 w-4" /></> : <>Continue <ArrowRight className="h-4 w-4" /></>}</button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export default function PublicForm() {
+  const { slug } = useParams();
+  const navigate = useNavigate();
+  const { search } = useLocation();
+  const [form, setForm] = useState(null); const [loading, setLoading] = useState(true);
+  const [submitted, setSubmitted] = useState(false);
+  const [handingOver, setHandingOver] = useState(false);
+  const [carried, setCarried] = useState(null); const [seededAnswers, setSeededAnswers] = useState(null);
+  // A different slug is a different form: nothing from the previous one may
+  // survive, or a handover would carry stale answers into the next document.
+  // The run itself is keyed by slug below, so its answers go with it.
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setForm(null); setSubmitted(false); setHandingOver(false); setCarried(null); setSeededAnswers(null);
+    loadPublicForm(slug).then(data => {
+      if (!active) return;
+      document.title = data ? `${data.title} | XERT` : 'Form unavailable | XERT';
+      // Carry across what they already typed on the form that led here.
+      const details = data?.prerequisite_slug ? readFormCompletion(data.prerequisite_slug) : null;
+      if (details) {
+        setCarried(details);
+        // A question can ask for something the previous form already recorded.
+        // Seeding the answer saves typing it twice while leaving it editable.
+        const seeded = Object.fromEntries((data.questions || [])
+          .filter(item => item.prefill && details[item.prefill])
+          .map(item => [item.id, details[item.prefill]]));
+        if (Object.keys(seeded).length) setSeededAnswers(seeded);
+      }
+      setForm(data);
+    }).catch(() => {}).finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [slug]);
+  // A prerequisite says what leads here, not what bars the door. Sharing the
+  // agreement's own link used to bounce the reader to the questionnaire first,
+  // so a link sent to somebody who only needed to sign the terms opened a
+  // questionnaire instead. The questionnaire still hands over to the agreement
+  // when it is finished; that is the direction this relationship is for.
+  const submit = async ({ answers: kept, name, email, phone, elapsedSeconds }) => {
+    const responseID = await submitPublicForm({ slug, formUpdatedAt: form.updated_at, answers: kept, name, email, phone, elapsedSeconds, sourceURL: window.location.href });
+    writeFormCompletion(slug, formCompletionMarker(
+      slug, form.questions || [], kept, { name, email, phone }, responseID,
+    ));
+    // Either the form that sent them here, or the form that names this one as
+    // its prerequisite: opening the questionnaire directly must still lead to
+    // the agreement, and a questionnaire with nothing after it must not.
+    const handoff = nextFormSlug(search) || form.follow_on_slug || null;
+    if (handoff && handoff !== slug) { setHandingOver(true); navigate(formPath(handoff, null, returnKeyAfterForm(search)), { replace: true }); return; }
+    // Someone sent here mid-way through paying goes back to finish paying.
+    const returnPath = returnPathAfterForm(search);
+    if (returnPath) { setHandingOver(true); navigate(returnPath, { replace: true }); return; }
+    setSubmitted(true);
+    if (safeURL(form.redirect_url)) window.setTimeout(() => window.location.assign(form.redirect_url), 1400);
   };
   if (loading || handingOver) return <main className="min-h-screen bg-xert-navy grid place-items-center text-xert-pale" role="status"><LoaderCircle className="mr-3 inline h-6 w-6 animate-spin text-xert-steel" /> {handingOver ? 'Saved. Opening the next form…' : 'Loading form…'}</main>;
   if (!form) return <main className="min-h-screen bg-xert-navy grid place-items-center p-6 text-center"><div><img src="/assets/xert-logo-horizontal-light.png" alt="XERT" className="mx-auto mb-8 h-10" /><h1 className="font-display text-4xl text-white">Form unavailable</h1><p className="mt-3 text-xert-pale/60">This link may be paused, archived or incorrect.</p></div></main>;
   if (submitted) return <main className="min-h-screen bg-xert-navy xert-glow-top grid place-items-center p-6"><section className="xert-card w-full max-w-xl p-8 text-center"><span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-full bg-status-success-400/10 text-status-success-300"><Check /></span><h1 className="font-display text-4xl uppercase tracking-wide text-white">Response received</h1><p className="mt-4 text-xert-pale/70">{form.thank_you_message}</p></section></main>;
-  const progress = steps.length ? Math.min(100, Math.max(0, step / steps.length * 100)) : 100;
   return (
     <main className="min-h-screen bg-xert-navy xert-glow-top px-4 py-6 text-xert-offwhite sm:px-6 sm:py-12">
-      <section className="xert-card mx-auto w-full max-w-2xl overflow-hidden">
-        <header className="border-b border-xert-steel/15 px-5 py-5 sm:px-8"><img src="/assets/xert-logo-horizontal-light.png" alt="XERT" className="h-8 w-auto" /></header>
-        {form.show_progress_bar && step > 0 && <div className="h-1 bg-white/[0.06]" aria-label={`Form progress ${Math.round(progress)} percent`}><div className="h-full rounded-r-full bg-xert-steel transition-all" style={{ width: `${progress}%` }} /></div>}
-        <div className="p-5 sm:p-8">
-          {step === 0 ? <>
-            <Media type={form.header_media_type} url={form.header_media_url} caption={form.header_media_caption} />
-            <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-xert-steel">{FORM_LABELS[form.form_type] || 'XERT Form'}</p>
-            <h1 className="font-display text-4xl uppercase tracking-wide text-white sm:text-5xl">{form.title}</h1>
-            {form.description && <FormText text={form.description} className="mt-4 text-xert-pale/70" />}
-            {(form.collect_name || form.collect_email || form.collect_phone) && <div className="mt-8 grid gap-4">
-              {form.collect_name && <label><span className="xert-label">Name {form.collect_name_required && '*'}</span><input id="form-name" className={inputClass} autoComplete="name" autoCapitalize="words" value={name} onChange={event => setName(event.target.value)} /></label>}
-              {form.collect_email && <label><span className="xert-label">Email {form.collect_email_required && '*'}</span><input id="form-email" type="email" className={inputClass} autoComplete="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={event => setEmail(event.target.value)} /></label>}
-              {form.collect_phone && <label><span className="xert-label">Phone {form.collect_phone_required && '*'}</span><input id="form-phone" type="tel" className={inputClass} autoComplete="tel" value={phone} onChange={event => setPhone(event.target.value)} /></label>}
-            </div>}
-          </> : currentStep ? <>
-            <InformationalBlocks items={currentStep.information} />
-            {question ? <>
-              <p className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-xert-steel">Question {questionNumber} of {questionCount}</p>
-              <QuestionBody question={question} value={answers[question.id]} onChange={value => setAnswers(current => ({ ...current, [question.id]: value }))} audience={audience} />
-            </> : <><h1 className="font-display text-4xl uppercase text-white">Review and submit</h1><p className="mt-3 text-xert-pale/65">Confirm the information above, or go back before sending your response.</p></>}
-          </> : <><h1 className="font-display text-4xl uppercase text-white">Ready to submit?</h1><p className="mt-3 text-xert-pale/65">Review your answers with Back, or send your response now.</p></>}
-          {error && <p role="alert" className="mt-5 rounded-xl border p-3 text-sm" style={errorStyle}>{error}</p>}
-          <div className="mt-8 flex gap-3">
-            {step > 0 && <button type="button" onClick={() => { setError(''); setStep(value => Math.max(0, value - 1)); }} className="xert-btn-ghost inline-flex min-h-[52px] items-center gap-2 px-5 font-display text-sm uppercase tracking-wide"><ArrowLeft className="h-4 w-4" /> Back</button>}
-            <button type="button" disabled={submitting} onClick={next} className="xert-btn-primary ml-auto inline-flex min-h-[52px] flex-1 items-center justify-center gap-2 px-6 font-display text-base uppercase tracking-wide sm:flex-none disabled:opacity-60">{submitting ? <><LoaderCircle className="h-4 w-4 animate-spin" /> Sending</> : step >= steps.length ? <>Submit <Check className="h-4 w-4" /></> : <>Continue <ArrowRight className="h-4 w-4" /></>}</button>
-          </div>
-        </div>
-      </section>
+      <FormRunner key={slug} form={form} carried={carried} initialAnswers={seededAnswers} onSubmit={submit} />
     </main>
   );
 }

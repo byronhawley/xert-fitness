@@ -1,19 +1,23 @@
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import {
-  Archive, ArrowDown, ArrowLeft, ArrowUp, BarChart3, Check, ChevronRight,
-  Copy, Download, ExternalLink, Eye, GitBranch, GripVertical, Link2,
-  List, LoaderCircle, Pause, Pencil, Play, Plus, Search, Trash2, X,
+  AlignLeft, Archive, ArrowDown, ArrowLeft, ArrowUp, BarChart3, Calendar, CalendarClock, Check, ChevronDown, ChevronRight,
+  ChevronsDownUp, ChevronsUpDown, CircleDot, Clock, Copy, Download, ExternalLink, Eye, Gauge, GitBranch, Globe, GripVertical,
+  Hash, Heading, Link2, List, ListChecks, LoaderCircle, Mail, MapPin, Pause, Pencil, Phone, Pilcrow, Play, Plus, RotateCcw,
+  Search, Signature, SlidersHorizontal, SquareChevronDown, Star, ToggleLeft, Trash2, TriangleAlert, Type, Undo2, Upload,
+  UserRound, X,
 } from 'lucide-react';
 import { DragDropContext, Draggable, Droppable } from '@hello-pangea/dnd';
 import { canOfferAlreadyProvided } from '@/lib/formAlreadyProvided';
 import { activeQuestions, archiveFormResponse, archiveOwnerForm, CHARTABLE_TYPES, FORM_CHANGED_ELSEWHERE, CHOICE_TYPES, createField, createFormDraft, FIELD_TYPES, FORM_TYPES, getFormResponse, listFormResponses, listOwnerForms, publicFormURL, remapSkipTargets, responseCSV, saveOwnerForm, slugifyFormTitle, skipRuleProblems, updateFormResponseStatus, validateFormDraft } from '@/lib/xertForms';
 import { answerImage, answerTable } from '@/lib/formAnswers';
 import { continueDotPoints, toggleDotPoints } from '@/lib/formText';
+import { builderRows, moveVisibleRow, sectionEnd, sectionOf } from '@/lib/formBuilderLayout';
 import AdminConfirmDialog from './AdminConfirmDialog';
 import FormQRCode from './FormQRCode';
 import FormResponseRecord, { FormRecordLoading } from './FormResponseRecord';
 import { respondentIdentity, respondentLabel } from '@/lib/formResponseRecord';
-import { QuestionPreview } from '@/pages/PublicForm';
+import { FormRunner, QuestionPreview } from '@/pages/PublicForm';
 import { ADMIN_BUTTON, ADMIN_PANEL, AdminBadge, AdminDataTable, AdminEmptyState, AdminFilterBar, AdminFormField, AdminPageHeader, AdminSegmented, AdminSkeleton, AdminStatCard } from './ui';
 import './forms.css';
 
@@ -41,8 +45,36 @@ function Toggle({ checked, onChange, label, description = '' }) {
 const EXAMPLE_ANSWER_TYPES = new Set(['short_text', 'long_text', 'email', 'phone', 'url', 'number']);
 const TYPE_LABELS = Object.fromEntries(FIELD_TYPES.map(type => [type.value, type.label]));
 const TYPE_GROUPS = [...new Set(FIELD_TYPES.map(type => type.group))];
-const GROUP_LABELS = { Layout: 'Headings and text' };
+const GROUP_LABELS = { Text: 'Typed answers', Choice: 'Choices', Rating: 'Ratings', Date: 'Dates and times', Other: 'Other', Layout: 'Headings and text' };
+// A picture for every kind of field, so a long form can be scanned by shape
+// before it is read, and the add menu says what each type is at a glance.
+const TYPE_ICONS = {
+  short_text: Type, long_text: AlignLeft, number: Hash, email: Mail, phone: Phone, url: Globe,
+  single_choice: CircleDot, multiple_choice: ListChecks, dropdown: SquareChevronDown, yes_no: ToggleLeft,
+  star_rating: Star, linear_scale: SlidersHorizontal, nps: Gauge, date: Calendar, time: Clock, datetime: CalendarClock,
+  file_upload: Upload, signature: Signature, address: MapPin, name_fields: UserRound, section_break: Heading, statement: Pilcrow,
+};
+const TYPE_HINTS = {
+  short_text: 'A word or a line', long_text: 'Room for a paragraph', number: 'Digits only', email: 'Checked to look like an email',
+  phone: 'A phone number', url: 'A web address', single_choice: 'Pick one from a list', multiple_choice: 'Tick any that apply',
+  dropdown: 'Pick one from a menu', yes_no: 'A yes or a no', star_rating: 'One to five stars', linear_scale: 'A number on a scale',
+  nps: 'Would they recommend you, 0 to 10', date: 'A day on a calendar', time: 'A time of day', datetime: 'A day and a time',
+  file_upload: 'Records the file’s name and size', signature: 'Signed with a finger or mouse', address: 'Street, suburb and postcode',
+  name_fields: 'First and last name', section_break: 'Starts a new part of the form', statement: 'Something to read, nothing to answer',
+};
 const sectionTitle = 'text-xs font-bold uppercase tracking-wider text-text-secondary';
+const isLayout = field => ['section_break', 'statement'].includes(field?.type);
+// Example text typed into a question with no answer box is shown to nobody.
+const hasUnseenExample = field => !isLayout(field) && !EXAMPLE_ANSWER_TYPES.has(field.type) && Boolean(String(field.placeholder || '').trim());
+// Forms longer than this open as an outline: every section folded to one line.
+const OUTLINE_FROM = 12;
+// What a folded section holds, in the words the builder uses for it.
+function sectionSummary(fields) {
+  const questions = fields.filter(field => !isLayout(field)).length;
+  const blocks = fields.length - questions;
+  const parts = [questions && `${questions} ${questions === 1 ? 'question' : 'questions'}`, blocks && `${blocks} text ${blocks === 1 ? 'block' : 'blocks'}`].filter(Boolean);
+  return parts.join(' · ') || 'Empty';
+}
 
 // Anything people read on the form: a hint, supporting text, a statement, the
 // introduction. Dot points work the way they do in a document. The button
@@ -90,9 +122,27 @@ function WritingBox({ label, note = '', value, onChange, ariaLabel = undefined, 
   </div>;
 }
 
-function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = false, dragHandleProps = null, onUpdate, onPatch, onMove, onDuplicate, onRemove }) {
+// What to add, chosen by what it is. Every type is a card with its picture and
+// one line on what it collects, grouped the way people think of them.
+function TypePicker({ label, onPick, onClose }) {
+  return <div role="group" aria-label={label} className={`${panel} forms-type-picker space-y-4 p-4`}>
+    <div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold text-text-primary">{label}</p><button type="button" className={`${button} px-3`} aria-label="Close the list of question types" onClick={onClose}><X className="h-4 w-4" /></button></div>
+    {TYPE_GROUPS.map(group => <div key={group}><p className={`${sectionTitle} mb-2`}>{GROUP_LABELS[group] || group}</p><div className="forms-type-grid">{FIELD_TYPES.filter(type => type.group === group).map(type => { const Icon = TYPE_ICONS[type.value] || Type; return <button key={type.value} type="button" className={`${button} forms-type-card`} onClick={() => onPick(type.value)}><Icon className="h-5 w-5 text-accent-default" aria-hidden="true" /><span className="text-sm text-text-primary">{type.label}</span><span className="forms-secondary">{TYPE_HINTS[type.value]}</span></button>; })}</div></div>)}
+  </div>;
+}
+
+// Name, email and phone are each asked for up front, or not. Three states,
+// one control: the old pair of Collect and Require switches let "require"
+// sit on for something that was not being asked.
+function DetailAsk({ label, collect, required, locked = false, onChange }) {
+  const value = !collect ? 'no' : required ? 'required' : 'optional';
+  const options = [{ value: 'no', label: "Don't ask", disabled: locked }, { value: 'optional', label: 'Optional', disabled: locked }, { value: 'required', label: 'Required' }];
+  return <div className="forms-toggle border-b border-border-hairline pb-3"><span className="admin-kit-label">{label}</span><AdminSegmented label={`Ask for their ${label.toLowerCase()}`} options={options} value={value} onValueChange={next => onChange({ collect: next !== 'no', required: next === 'required' })} /></div>;
+}
+
+function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = false, dragHandleProps = null, section = null, onUpdate, onPatch, onMove, onDuplicate, onAddBelow, onRemove }) {
   const choices = field.type === 'yes_no' ? ['Yes', 'No'] : field.options || [];
-  const layout = ['section_break', 'statement'].includes(field.type);
+  const layout = isLayout(field);
   const forwardDestinations = fields
     .map((destination, destinationIndex) => ({ destination, destinationIndex }))
     .filter(({ destinationIndex }) => destinationIndex >= index + 2);
@@ -112,31 +162,43 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
   const kind = field.type === 'section_break' ? 'Section' : field.type === 'statement' ? 'Statement' : `Q${index + 1}`;
   const name = layout ? kind.toLowerCase() : `question ${index + 1}`;
   const wording = String((layout ? field.content : field.question) || '').trim();
-  // Example text typed into a question with no answer box is shown to nobody.
-  // Say so where it was typed, rather than hide the field and leave the words
-  // stranded where the owner can no longer see them either.
-  const unseenExample = !layout && !EXAMPLE_ANSWER_TYPES.has(field.type) && Boolean(String(field.placeholder || '').trim());
+  const TypeIcon = TYPE_ICONS[field.type] || Type;
+  // Say where unseen example text was typed, rather than hide the field and
+  // leave the words stranded where the owner can no longer see them either.
+  const unseenExample = hasUnseenExample(field);
   const moveExampleIntoHint = () => onPatch({
     description: [field.description, field.placeholder].map(text => String(text || '').trim()).filter(Boolean).join('\n\n'),
     placeholder: '',
   });
-  return <article id={`form-field-${field.id}`} className={`${panel} ${field.hidden ? 'opacity-60' : ''}`}>
+  return <article id={`form-field-${field.id}`} className={`${panel} ${section ? 'forms-section-card' : ''} ${open ? 'forms-open-card' : ''} ${field.hidden ? 'opacity-60' : ''}`}>
     {/* The heading is the whole field when it is closed: enough to scan a long
         form, find the one to change, and flip Required without opening it. */}
-    <div className="flex flex-wrap items-center gap-2 p-3">
-      <span className={`${button} cursor-grab px-2`} aria-label={`Drag to reorder ${name}`} {...(dragHandleProps || {})}><GripVertical className="h-4 w-4" aria-hidden="true" /></span>
-      <span className="text-xs font-bold uppercase tracking-widest text-accent-default">{kind}</span>
-      <button type="button" aria-expanded={open} onClick={onToggle} className="line-clamp-2 grow basis-48 text-left text-sm text-text-primary">{wording || <span className="text-text-secondary">{layout ? 'Untitled' : 'Untitled question'}</span>}</button>
-      <span className="text-xs text-text-secondary">{TYPE_LABELS[field.type] || field.type}</span>
-      {field.hidden && <AdminBadge status="inactive">Hidden</AdminBadge>}
-      {hasSkipRules && !hasInvalidSkipRules && <AdminBadge status="new">Skip logic</AdminBadge>}
-      {hasInvalidSkipRules && <span className="inline-flex items-center gap-1 self-start rounded-full border border-status-warning-300/40 bg-status-warning-300/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-status-warning-100"><GitBranch className="h-3 w-3" /> Skip logic</span>}
-      {unseenExample && <AdminBadge status="pending">Unseen text</AdminBadge>}
-      {/* Required lives on the heading so it can be read and changed without
-          opening the field. It used to sit at the bottom of the expanded
-          editor, so a collapsed field never said whether it was required. */}
-      {!layout && <button type="button" role="switch" aria-checked={Boolean(field.required)} aria-label={`Question ${index + 1} is required`} className={`${button} px-3`} onClick={() => onUpdate('required', !field.required)}>{field.required ? 'Required' : 'Optional'}</button>}
-      <button type="button" className={`${button} px-3`} aria-expanded={open} aria-label={`${open ? 'Close' : 'Edit'} ${name}`} onClick={onToggle}>{open ? 'Done' : 'Edit'}</button>
+    <div className="forms-row">
+      <span className={`${button} cursor-grab px-2`} aria-label={section ? `Drag to move this section and everything in it` : `Drag to reorder ${name}`} {...(dragHandleProps || {})}><GripVertical className="h-4 w-4" aria-hidden="true" /></span>
+      {/* A section's heading folds and unfolds what is in it, the way an
+          outline does; its Edit button is what opens the heading itself. */}
+      {section
+        ? <button type="button" className="forms-section-toggle min-w-0 text-left" aria-expanded={!section.folded} aria-label={`${wording || 'Untitled section'}: ${section.folded ? 'show' : 'hide'} the ${section.childCount} ${section.childCount === 1 ? 'field' : 'fields'} in it`} onClick={section.onFold}>
+          <span className="flex flex-wrap items-center gap-x-1 text-xs font-bold uppercase tracking-widest text-accent-default"><span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap">{section.folded ? <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" /> : <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />}{kind}</span><span className="min-w-0 font-normal normal-case tracking-normal text-text-secondary">· {section.summary}</span></span>
+          <span className="line-clamp-2 font-display text-lg uppercase tracking-wide text-text-primary">{wording || <span className="text-text-secondary">Untitled</span>}</span>
+        </button>
+        : <><span className="forms-type-icon" title={TYPE_LABELS[field.type] || field.type}><TypeIcon className="h-4 w-4" aria-hidden="true" /></span>
+      <div className="min-w-0">
+        <span className="block text-xs font-bold uppercase tracking-widest text-accent-default">{kind}</span>
+        <button type="button" aria-expanded={open} onClick={onToggle} className="line-clamp-2 w-full text-left text-sm text-text-primary">{wording || <span className="text-text-secondary">{layout ? 'Untitled' : 'Untitled question'}</span>}</button>
+      </div></>}
+      <div className="forms-row-actions">
+        {!section && <span className="forms-type-label text-xs text-text-secondary">{TYPE_LABELS[field.type] || field.type}</span>}
+        {field.hidden && <AdminBadge status="inactive">Hidden</AdminBadge>}
+        {hasSkipRules && !hasInvalidSkipRules && <AdminBadge status="new">Skip logic</AdminBadge>}
+        {hasInvalidSkipRules && <span className="inline-flex items-center gap-1 self-start rounded-full border border-status-warning-300/40 bg-status-warning-300/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-status-warning-100"><GitBranch className="h-3 w-3" /> Skip logic</span>}
+        {unseenExample && <AdminBadge status="pending">Unseen text</AdminBadge>}
+        {/* Required lives on the heading so it can be read and changed without
+            opening the field. It used to sit at the bottom of the expanded
+            editor, so a collapsed field never said whether it was required. */}
+        {!layout && <button type="button" role="switch" aria-checked={Boolean(field.required)} aria-label={`Question ${index + 1} is required`} className={`${button} px-3`} onClick={() => onUpdate('required', !field.required)}>{field.required ? 'Required' : 'Optional'}</button>}
+        <button type="button" className={`${button} px-3`} aria-expanded={open} aria-label={`${open ? 'Close' : 'Edit'} ${name}`} onClick={onToggle}>{open ? 'Done' : 'Edit'}</button>
+      </div>
     </div>
     {open && <div className="border-t border-border-hairline p-4"><div className="forms-grid forms-grid-two gap-5">
       <div className="space-y-5">
@@ -154,13 +216,13 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
           {layout && <WritingBox label="Supporting text" value={field.description} placeholder={field.type === 'section_break' ? 'Shown under the section heading' : 'Shown under the statement'} onChange={value => onUpdate('description', value)} />}
           {unseenExample && <div role="note" className="rounded-lg border border-status-warning-300/30 bg-status-warning-300/10 p-3"><p className="text-xs font-bold uppercase tracking-wider text-status-warning-100">Nobody sees this text</p><p className="mt-1 text-xs text-status-warning-100">&ldquo;{field.placeholder}&rdquo;</p><p className="mt-2 text-xs text-text-secondary">It is saved as example text for the answer box, but a {String(TYPE_LABELS[field.type] || 'question').toLowerCase()} question has no answer box to show it in. Move it into the hint to show it under the question, or clear it.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" className={button} onClick={moveExampleIntoHint}>Move into hint</button><button type="button" className={button} onClick={() => onUpdate('placeholder', '')}>Clear it</button></div></div>}
         </section>
-        {['single_choice', 'multiple_choice', 'dropdown'].includes(field.type) && <section className="space-y-2"><p className={sectionTitle}>Answers they can pick</p>{(field.options || []).map((option, optionIndex) => <div className="flex gap-2" key={`${field.id}-${optionIndex}`}><input aria-label={`Option ${optionIndex + 1} for question ${index + 1}`} className={control} value={option} onChange={event => onUpdate('options', field.options.map((item, i) => i === optionIndex ? event.target.value : item))} /><button type="button" aria-label={`Remove option ${optionIndex + 1} for question ${index + 1}`} className={`${button} px-3`} onClick={() => onUpdate('options', field.options.filter((_, i) => i !== optionIndex))}><X className="h-4 w-4" /></button></div>)}<button type="button" className={button} onClick={() => onUpdate('options', [...(field.options || []), `Option ${(field.options || []).length + 1}`])}><Plus className="h-4 w-4" /> Add option</button><Toggle checked={Boolean(field.allow_other)} onChange={value => onUpdate('allow_other', value)} label="Allow an Other answer" description="Adds an Other choice with a box to type in." /></section>}
+        {['single_choice', 'multiple_choice', 'dropdown'].includes(field.type) && <section className="space-y-2"><p className={sectionTitle}>Answers they can pick</p>{(field.options || []).map((option, optionIndex) => <div className="flex gap-2" key={`${field.id}-${optionIndex}`}><input aria-label={`Option ${optionIndex + 1} for question ${index + 1}`} className={control} value={option} onChange={event => onUpdate('options', field.options.map((item, i) => i === optionIndex ? event.target.value : item))} onKeyDown={event => { if (event.key === 'Enter' && optionIndex === field.options.length - 1) { event.preventDefault(); onUpdate('options', [...field.options, `Option ${field.options.length + 1}`]); } }} /><button type="button" aria-label={`Remove option ${optionIndex + 1} for question ${index + 1}`} className={`${button} px-3`} onClick={() => onUpdate('options', field.options.filter((_, i) => i !== optionIndex))}><X className="h-4 w-4" /></button></div>)}<button type="button" className={button} onClick={() => onUpdate('options', [...(field.options || []), `Option ${(field.options || []).length + 1}`])}><Plus className="h-4 w-4" /> Add option</button><Toggle checked={Boolean(field.allow_other)} onChange={value => onUpdate('allow_other', value)} label="Allow an Other answer" description="Adds an Other choice with a box to type in." /></section>}
         {['linear_scale', 'star_rating'].includes(field.type) && <section className="space-y-2"><p className={sectionTitle}>Scale</p><div className="forms-grid forms-stats"><label className="text-xs text-text-secondary">Lowest<input type="number" className={`${control} mt-1`} value={field.scale_min ?? 1} onChange={event => onUpdate('scale_min', Number(event.target.value))} /></label><label className="text-xs text-text-secondary">Highest<input type="number" className={`${control} mt-1`} value={field.scale_max ?? 10} onChange={event => onUpdate('scale_max', Number(event.target.value))} /></label><label className="text-xs text-text-secondary">Word for the lowest<input className={`${control} mt-1`} value={field.scale_min_label || ''} onChange={event => onUpdate('scale_min_label', event.target.value)} /></label><label className="text-xs text-text-secondary">Word for the highest<input className={`${control} mt-1`} value={field.scale_max_label || ''} onChange={event => onUpdate('scale_max_label', event.target.value)} /></label></div></section>}
-        {CHOICE_TYPES.has(field.type) && choices.length > 0 && (index < count - 1 || hasInvalidSkipRules) && <div className="border-t border-border-hairline pt-4"><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-text-secondary"><GitBranch className="h-4 w-4" /> Skip logic</p>{showSkip || hasSkipRules ? <div className="grid gap-2">{choices.map(option => { const rule = (field.skip_rules || []).find(item => item.option === option); const selectedTarget = validSkipTargets.has(Number(rule?.skip_to)) ? Number(rule.skip_to) : 0; return <label key={option} className="forms-branch-row"><span>If “{option}”</span><ChevronRight className="hidden" /><select aria-label={`Skip destination for ${option}`} className={control} value={selectedTarget} onChange={event => { const others = (field.skip_rules || []).filter(item => item.option !== option); const target = Number(event.target.value); onUpdate('skip_rules', validSkipTargets.has(target) ? [...others, { option, skip_to: target }] : others); }}><option value={0}>Continue to next field</option>{forwardDestinations.map(({ destination, destinationIndex }) => <option key={destination.id} value={destinationIndex + 1}>Jump to Q{destinationIndex + 1}: {destination.question || destination.content || 'Untitled field'}</option>)}{index < count - 1 && <option value={count + 1}>End form</option>}</select></label>; })}</div> : <button type="button" className={button} onClick={() => setShowSkip(true)}><GitBranch className="h-4 w-4" /> Set up skip logic</button>}{hasInvalidSkipRules && <div className="mt-3 rounded-lg border border-status-warning-300/30 bg-status-warning-300/[0.06] p-3">{skipProblems.map(problem => <p key={`${problem.option}-${problem.target}`} className="text-xs text-status-warning-100">{problem.message} {problem.fix}</p>)}<button type="button" className={`${button} mt-2 border-status-warning-300/30 text-status-warning-100`} onClick={clearInvalidSkipRules}>Clear obsolete skip rules</button></div>}<p className="mt-2 text-xs text-text-secondary">Send people further ahead depending on their answer. Jumps only go forward, so the form can never loop.</p></div>}
+        {CHOICE_TYPES.has(field.type) && choices.length > 0 && (index < count - 1 || hasInvalidSkipRules) && <div className="border-t border-border-hairline pt-4"><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-text-secondary"><GitBranch className="h-4 w-4" /> Skip logic</p>{showSkip || hasSkipRules ? <div className="grid gap-2">{choices.map(option => { const rule = (field.skip_rules || []).find(item => item.option === option); const selectedTarget = validSkipTargets.has(Number(rule?.skip_to)) ? Number(rule.skip_to) : 0; return <label key={option} className="forms-branch-row"><span>If “{option}”</span><ChevronRight className="hidden" /><select aria-label={`Skip destination for ${option}`} className={control} value={selectedTarget} onChange={event => { const others = (field.skip_rules || []).filter(item => item.option !== option); const target = Number(event.target.value); onUpdate('skip_rules', validSkipTargets.has(target) ? [...others, { option, skip_to: target }] : others); }}><option value={0}>Continue to next field</option>{forwardDestinations.map(({ destination, destinationIndex }) => <option key={destination.id} value={destinationIndex + 1}>Jump to Q{destinationIndex + 1}: {destination.question || destination.content || 'Untitled field'}</option>)}{index < count - 1 && <option value={count + 1}>End form</option>}</select></label>; })}</div> : <button type="button" className={button} onClick={() => setShowSkip(true)}><GitBranch className="h-4 w-4" /> Set up skip logic</button>}{hasInvalidSkipRules && <div className="mt-3 rounded-lg border border-status-warning-300/30 bg-status-warning-300/[0.06] p-3">{skipProblems.map(problem => <p key={`${problem.option}-${problem.target}`} className="text-xs text-status-warning-100">{problem.message} {problem.fix}</p>)}<button type="button" className={`${button} mt-2 border-status-warning-300/30 text-status-warning-100`} onClick={clearInvalidSkipRules}>Clear obsolete skip rules</button></div>}<p className="mt-2 text-xs text-text-secondary">Send people further ahead depending on their answer. Jumps only go forward, so the form can never loop. Try it in Preview.</p></div>}
         {hasInvalidSkipRules && !(CHOICE_TYPES.has(field.type) && choices.length > 0) && <div className="rounded-lg border border-status-warning-300/30 bg-status-warning-300/[0.06] p-3"><p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-status-warning-100"><GitBranch className="h-4 w-4" /> Skip logic left over</p>{skipProblems.map(problem => <p key={`${problem.option}-${problem.target}`} className="text-xs text-status-warning-100">{problem.message} {problem.fix}</p>)}<p className="mt-2 text-xs text-text-secondary">This field has no options to branch on any more, so the rules do nothing — but they still block saving.</p><button type="button" className={`${button} mt-2 border-status-warning-300/30 text-status-warning-100`} onClick={() => onUpdate('skip_rules', [])}>Clear skip rules</button></div>}
         {!layout && <section className="space-y-2"><p className={sectionTitle}>Picture, video or link above the question</p><div className="forms-grid forms-grid-three"><label className="text-xs text-text-secondary">Show<select className={`${control} mt-1`} value={field.media_type || ''} onChange={event => onUpdate('media_type', event.target.value || null)}><option value="">Nothing</option><option value="image">A picture</option><option value="video">A video</option><option value="link">A link</option></select></label>{field.media_type && <label className="text-xs text-text-secondary forms-span-two">Web address<input type="url" className={`${control} mt-1`} placeholder="https://" value={field.media_url || ''} onChange={event => onUpdate('media_url', event.target.value)} /></label>}</div></section>}
         <section className="space-y-2 border-t border-border-hairline pt-4"><p className={sectionTitle}>More settings</p><Toggle checked={Boolean(field.hidden)} onChange={value => onUpdate('hidden', value)} label={layout ? 'Hide this block' : 'Hide this question'} description="Nobody sees it. Answers already given are kept." />{canOfferAlreadyProvided(field) && <Toggle checked={field.allow_already_provided === true} onChange={value => onUpdate('allow_already_provided', value)} label="'Already provided' tick" description="Lets them tick instead of typing an answer they already gave." />}</section>
-        <div className="flex flex-wrap items-center gap-2 border-t border-border-hairline pt-3"><span className="flex-1" /><button type="button" className={`${button} px-3`} disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move field up"><ArrowUp className="h-4 w-4" /></button><button type="button" className={`${button} px-3`} disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Move field down"><ArrowDown className="h-4 w-4" /></button><button type="button" className={button} aria-label={`Duplicate question ${index + 1}`} onClick={onDuplicate}><Copy className="h-4 w-4" /> Duplicate</button><button type="button" className={`${button} text-status-danger-300`} aria-label={`Remove question ${index + 1}`} onClick={onRemove}><Trash2 className="h-4 w-4" /> Remove</button></div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border-hairline pt-3"><button type="button" className={button} onClick={onAddBelow}><Plus className="h-4 w-4" /> Add below</button><span className="flex-1" /><button type="button" className={`${button} px-3`} disabled={index === 0} onClick={() => onMove(-1)} aria-label="Move field up"><ArrowUp className="h-4 w-4" /></button><button type="button" className={`${button} px-3`} disabled={index === count - 1} onClick={() => onMove(1)} aria-label="Move field down"><ArrowDown className="h-4 w-4" /></button><button type="button" className={button} aria-label={`Duplicate question ${index + 1}`} onClick={onDuplicate}><Copy className="h-4 w-4" /> Duplicate</button><button type="button" className={`${button} text-status-danger-300`} aria-label={`Remove question ${index + 1}`} onClick={onRemove}><Trash2 className="h-4 w-4" /> Remove</button></div>
       </div>
       <aside aria-label={`Preview of ${name}`} className="space-y-2">
         <p className={sectionTitle}>What they will see</p>
@@ -170,8 +232,25 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
     </div></div>}
   </article>;
 }
-function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = [], onReloadStale = null }) {
-  const [tab, setTab] = useState('fields');
+
+// The builder's Preview: the draft, unsaved, run through the public form's own
+// steps, skip logic and checks. Nothing typed here is sent anywhere.
+function FormPreview({ draft }) {
+  const [run, setRun] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const restart = () => { setFinished(false); setRun(value => value + 1); };
+  return <div className="space-y-3">
+    <div className={`${panel} forms-toggle p-4`}><span><span className="admin-kit-label">This is the form as it stands, including unsaved changes</span><span className="forms-secondary">Answer it the way they would: skip logic, required questions and answer checks all apply. Nothing you enter is saved or sent.</span></span><button type="button" className={button} onClick={restart}><RotateCcw className="h-4 w-4" /> Start again</button></div>
+    <div className="forms-preview-stage rounded-2xl bg-xert-navy p-3 text-xert-offwhite sm:p-6">
+      {finished
+        ? <section className="xert-card mx-auto w-full max-w-xl p-8 text-center"><span className="mx-auto mb-5 grid h-14 w-14 place-items-center rounded-full bg-status-success-400/10 text-status-success-300"><Check /></span><h2 className="font-display text-4xl uppercase tracking-wide text-white">Response received</h2><p className="mt-4 text-xert-pale/70">{draft.thank_you_message}</p><p className="mt-6 text-xs text-xert-pale/45">Preview only. Nothing was sent.</p></section>
+        : <FormRunner key={run} form={draft} preview onSubmit={async () => setFinished(true)} />}
+    </div>
+  </div>;
+}
+
+function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = [], onReloadStale = null, dirty = false }) {
+  const [tab, setTab] = useState('build');
   const update = (key, value) => setDraft(current => ({ ...current, [key]: value }));
   // Functional so two changes in one handler both land; reading draft from the
   // closure made the second silently overwrite the first.
@@ -181,15 +260,56 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
   // pointing at the question they were written for rather than a position.
   const setQuestions = change => setDraft(current => ({ ...current, questions: remapSkipTargets(current.questions, change(current.questions)) }));
   const moveField = (from, to) => setQuestions(list => { const next = [...list]; const [field] = next.splice(from, 1); next.splice(to, 0, field); return next; });
-  // One field open at a time: the first on arrival, a new one as soon as it is
-  // added. Everything else stays a single scannable line.
-  const [openId, setOpenId] = useState(() => draft.questions[0]?.id ?? null);
+  // A long form opens as an outline, every section folded to a line that says
+  // how much is in it; a short one opens on its first question.
+  const outline = draft.questions.length > OUTLINE_FROM;
+  const [folded, setFoldedState] = useState(() => new Set(outline ? draft.questions.filter(field => field.type === 'section_break').map(field => field.id) : []));
+  const foldedRef = useRef(folded);
+  const setFolded = change => setFoldedState(current => { const next = change(current); foldedRef.current = next; return next; });
+  const fold = (id, value) => setFolded(current => { const next = new Set(current); if (value) next.add(id); else next.delete(id); return next; });
+  const [openId, setOpenId] = useState(() => (outline ? null : draft.questions[0]?.id ?? null));
   const [newId, setNewId] = useState(null);
-  const [adding, setAdding] = useState(false);
-  const addField = type => { const field = createField(type); setQuestions(list => [...list, field]); setOpenId(field.id); setNewId(field.id); setAdding(false); };
-  const duplicateField = index => { const source = draft.questions[index]; const layout = ['section_break', 'statement'].includes(source.type); const copy = { ...source, id: crypto.randomUUID(), ...(layout ? { content: `${source.content || ''} (copy)` } : { question: `${source.question || ''} (copy)` }) }; setQuestions(list => [...list.slice(0, index + 1), copy, ...list.slice(index + 1)]); setOpenId(copy.id); };
-  const removeField = index => setQuestions(list => list.filter((_, i) => i !== index));
-  const onDragEnd = ({ source, destination }) => { if (destination && destination.index !== source.index) moveField(source.index, destination.index); };
+  // Where the list of types is open: at the end, under a section, or below a field.
+  const [adding, setAdding] = useState(null);
+  const rows = builderRows(draft.questions, folded);
+  const sectionIds = draft.questions.filter(field => field.type === 'section_break').map(field => field.id);
+  // Open a field wherever it is: unfold its section, then bring it into view.
+  const reveal = id => {
+    const index = draft.questions.findIndex(field => field.id === id);
+    const parent = sectionOf(draft.questions, index);
+    if (parent && parent.id !== id) fold(parent.id, false);
+    setOpenId(id);
+    window.requestAnimationFrame?.(() => document.getElementById(`form-field-${id}`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }));
+  };
+  const addField = (type, at = null) => { const field = createField(type); const position = at ?? draft.questions.length; const parent = sectionOf(draft.questions, position - 1); if (parent) fold(parent.id, false); setQuestions(list => [...list.slice(0, position), field, ...list.slice(position)]); setOpenId(field.id); setNewId(field.id); setAdding(null); };
+  const duplicateField = index => { const source = draft.questions[index]; const layout = isLayout(source); const copy = { ...source, id: crypto.randomUUID(), ...(layout ? { content: `${source.content || ''} (copy)` } : { question: `${source.question || ''} (copy)` }) }; setQuestions(list => [...list.slice(0, index + 1), copy, ...list.slice(index + 1)]); setOpenId(copy.id); };
+  // Removing is one tap, so it can be taken back until the next change: the
+  // snapshot is the whole list from before, skip rules and all, and it is only
+  // offered while nothing else has moved since.
+  const [undo, setUndo] = useState(null);
+  const removeField = index => { const field = draft.questions[index]; setUndo({ before: draft.questions, label: String((isLayout(field) ? field.content : field.question) || '').trim() || (isLayout(field) ? 'Untitled block' : 'Untitled question') }); setQuestions(list => list.filter((_, i) => i !== index)); };
+  useEffect(() => {
+    setUndo(current => {
+      if (!current) return current;
+      if (!current.after) return { ...current, after: draft.questions };
+      return current.after === draft.questions ? current : null;
+    });
+  }, [draft.questions]);
+  const undoRemove = () => { if (!undo?.after) return; setDraft(current => (current.questions === undo.after ? { ...current, questions: undo.before } : current)); setUndo(null); };
+  // Dragging a section takes everything in it along: it folds for the drag, so
+  // what moves is what is seen moving, and opens again where it lands.
+  const draggingFold = useRef(null);
+  const onBeforeCapture = ({ draggableId }) => {
+    const field = draft.questions.find(item => String(item.id) === draggableId);
+    if (field?.type !== 'section_break' || foldedRef.current.has(field.id)) return;
+    draggingFold.current = field.id;
+    flushSync(() => fold(field.id, true));
+  };
+  const moveRows = (from, to, foldedNow) => setQuestions(list => moveVisibleRow(list, builderRows(list, foldedNow), from, to));
+  const onDragEnd = ({ source, destination }) => {
+    if (destination && destination.index !== source.index) moveRows(source.index, destination.index, new Set(foldedRef.current));
+    if (draggingFold.current) { fold(draggingFold.current, false); draggingFold.current = null; }
+  };
   // Headings and statements have no answer, so "required" means nothing on
   // them. Hidden questions are counted and changed too: the database already
   // skips them when checking a submission, so this cannot block anyone.
@@ -197,23 +317,66 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
   const answerableCount = draft.questions.filter(answerable).length;
   const requiredCount = draft.questions.filter(field => answerable(field) && field.required).length;
   const setAllRequired = value => update('questions', draft.questions.map(field => answerable(field) ? { ...field, required: value } : field));
-  return <fieldset disabled={saving} aria-busy={saving} className={`${shell} forms-editor space-y-5`}>
-    <AdminPageHeader eyebrow="Form builder" title="Edit form" description={null}><button type="button" className={button} onClick={onCancel}><ArrowLeft className="h-4 w-4" /> Back</button><button type="button" className={primary} disabled={saving} onClick={onSave}>{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save form</button></AdminPageHeader>
-    <AdminFormField label="Form title"><input aria-label="Form title" value={draft.title} onChange={event => update('title', event.target.value)} /></AdminFormField>
+  // Everything that needs the owner's eye, in form order, so one button can
+  // walk them to each in turn instead of leaving them to find it on save.
+  const needsLook = useMemo(() => {
+    const ids = new Set(skipRuleProblems(draft.questions).map(problem => draft.questions[problem.index]?.id));
+    draft.questions.forEach(field => { if (hasUnseenExample(field)) ids.add(field.id); });
+    return draft.questions.filter(field => ids.has(field.id)).map(field => field.id);
+  }, [draft.questions]);
+  // Cmd/Ctrl+S saves, wherever the cursor is, rather than saving the web page.
+  const saveRef = useRef(onSave);
+  saveRef.current = saving ? () => {} : onSave;
+  useEffect(() => {
+    const onKey = event => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveRef.current(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const typeLabel = FORM_TYPES.find(type => type.value === draft.form_type)?.label || 'Form';
+  const picker = (anchor, at, label) => adding === anchor && <TypePicker label={label} onPick={type => addField(type, at)} onClose={() => setAdding(null)} />;
+  return <fieldset disabled={saving} aria-busy={saving} className={`${shell} forms-editor`}>
+    {/* The toolbar stays put while a long form scrolls under it: the name, the
+        state, the three views and Save are always one reach away. */}
+    <div className="forms-toolbar">
+      <button type="button" className={`${button} px-3`} aria-label="Back to forms" onClick={onCancel}><ArrowLeft className="h-4 w-4" /></button>
+      <div className="forms-toolbar-title">
+        <input aria-label="Form title" className="forms-title-input" value={draft.title} placeholder="Name this form" onChange={event => update('title', event.target.value)} />
+        <p className="forms-secondary">{typeLabel} · {answerableCount} {answerableCount === 1 ? 'question' : 'questions'} · {draft.is_active ? 'Live' : 'Not live'}{dirty ? ' · Unsaved changes' : ''}</p>
+      </div>
+      <div className="forms-toolbar-views"><AdminSegmented label="Form editor view" options={[{value:'build',label:'Build'},{value:'preview',label:'Preview'},{value:'settings',label:'Settings'}]} value={tab} onValueChange={setTab} /></div>
+      <button type="button" className={`${primary} forms-save`} disabled={saving} onClick={onSave} title="Save (Ctrl or Cmd + S)">{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Save<span className="forms-save-more"> form</span></button>
+    </div>
     {error && <div role="alert" className="border border-status-warning-300/30 bg-status-warning-300/10 p-3 text-sm text-status-warning-100"><p>{error}</p>{onReloadStale && <button type="button" className={`${button} mt-3`} disabled={saving} onClick={onReloadStale}>Reload the latest version</button>}</div>}
-    <AdminSegmented label="Form editor view" options={[{value:'fields',label:'Fields'},{value:'settings',label:'Settings'}]} value={tab} onValueChange={setTab} />
-    {tab === 'fields' ? <div className="space-y-3">{answerableCount > 0 && <div className={`${panel} forms-toggle p-4`}><span><span className="admin-kit-label">Required questions</span><span className="forms-secondary">{requiredCount} of {answerableCount} {answerableCount === 1 ? 'question is' : 'questions are'} marked required</span></span><span className="flex flex-wrap gap-2"><button type="button" className={button} disabled={requiredCount === answerableCount} onClick={() => setAllRequired(true)}>Make all required</button><button type="button" className={button} disabled={requiredCount === 0} onClick={() => setAllRequired(false)}>Make all optional</button></span></div>}
+    {tab === 'build' ? <div className="space-y-3">
+      <div className={`${panel} forms-summary p-4`}>
+        {answerableCount > 0 && <span><span className="admin-kit-label">Required questions</span><span className="forms-secondary">{requiredCount} of {answerableCount} {answerableCount === 1 ? 'question is' : 'questions are'} marked required</span></span>}
+        <span className="flex flex-wrap gap-2">
+          {answerableCount > 0 && <><button type="button" className={button} disabled={requiredCount === answerableCount} onClick={() => setAllRequired(true)}>Make all required</button><button type="button" className={button} disabled={requiredCount === 0} onClick={() => setAllRequired(false)}>Make all optional</button></>}
+          {sectionIds.length > 0 && (folded.size < sectionIds.length
+            ? <button type="button" className={button} onClick={() => { setFolded(() => new Set(sectionIds)); setOpenId(null); }}><ChevronsDownUp className="h-4 w-4" /> Collapse all</button>
+            : <button type="button" className={button} onClick={() => setFolded(() => new Set())}><ChevronsUpDown className="h-4 w-4" /> Expand all</button>)}
+          {needsLook.length > 0 && <button type="button" className={`${button} border-status-warning-300/40 text-status-warning-100`} onClick={() => reveal(needsLook.find(id => id !== openId) || needsLook[0])}><TriangleAlert className="h-4 w-4" /> {needsLook.length} {needsLook.length === 1 ? 'field needs' : 'fields need'} a look</button>}
+        </span>
+      </div>
       {/* Drag by the handle with a mouse or finger, or with the keyboard: focus
           the handle, Space to lift, arrows to move, Space to drop. */}
-      <DragDropContext onDragEnd={onDragEnd}><Droppable droppableId="form-questions">{list => <div ref={list.innerRef} {...list.droppableProps}>{draft.questions.map((field, index) => <Draggable key={field.id} draggableId={String(field.id)} index={index} isDragDisabled={saving}>{item => <div ref={item.innerRef} {...item.draggableProps} className="pb-3"><FieldEditor field={field} fields={draft.questions} index={index} count={draft.questions.length} open={openId === field.id} onToggle={() => setOpenId(current => current === field.id ? null : field.id)} autoFocus={newId === field.id} dragHandleProps={item.dragHandleProps} onUpdate={(key, value) => updateField(index, key, value)} onPatch={patch => patchField(index, patch)} onMove={offset => moveField(index, index + offset)} onDuplicate={() => duplicateField(index)} onRemove={() => removeField(index)} /></div>}</Draggable>)}{list.placeholder}</div>}</Droppable></DragDropContext>
+      <DragDropContext onBeforeCapture={onBeforeCapture} onDragEnd={onDragEnd}><Droppable droppableId="form-questions">{list => <div ref={list.innerRef} {...list.droppableProps}>{rows.map((row, position) => { const { field, index } = row; return <Draggable key={field.id} draggableId={String(field.id)} index={position} isDragDisabled={saving}>{item => <div ref={item.innerRef} {...item.draggableProps} className={`pb-3 ${row.depth ? 'forms-nested' : ''}`}>
+        <FieldEditor field={field} fields={draft.questions} index={index} count={draft.questions.length} open={openId === field.id} onToggle={() => setOpenId(current => current === field.id ? null : field.id)} autoFocus={newId === field.id} dragHandleProps={item.dragHandleProps} section={row.section ? { childCount: row.childCount, summary: sectionSummary(draft.questions.slice(index + 1, index + 1 + row.childCount)), folded: row.folded, onFold: () => fold(field.id, !row.folded) } : null} onUpdate={(key, value) => updateField(index, key, value)} onPatch={patch => patchField(index, patch)} onMove={offset => moveField(index, index + offset)} onDuplicate={() => duplicateField(index)} onAddBelow={() => setAdding(`below:${field.id}`)} onRemove={() => removeField(index)} />
+        {adding === `below:${field.id}` && <div className="pt-3">{picker(`below:${field.id}`, index + 1, `Add below ${row.section ? 'this heading' : `Q${index + 1}`}`)}</div>}
+        {row.lastInGroup && !row.folded && (adding === `section:${field.id}`
+          ? <div className="pt-3">{picker(`section:${field.id}`, sectionEnd(draft.questions, index), 'Add to this section')}</div>
+          : <button type="button" className="forms-add-inline" onClick={() => setAdding(`section:${field.id}`)}><Plus className="h-4 w-4" /> Add to this section</button>)}
+      </div>}</Draggable>; })}{list.placeholder}</div>}</Droppable></DragDropContext>
       {/* Choosing the type first means a new question arrives already shaped
           for what it asks, rather than as short text to be converted. */}
-      <button type="button" className={`${button} w-full border-dashed`} aria-expanded={adding} onClick={() => setAdding(current => !current)}><Plus className="h-4 w-4" /> Add a question</button>
-      {adding && <div role="group" aria-label="Choose what to add" className={`${panel} space-y-4 p-4`}>{TYPE_GROUPS.map(group => <div key={group}><p className={`${sectionTitle} mb-2`}>{GROUP_LABELS[group] || group}</p><div className="flex flex-wrap gap-2">{FIELD_TYPES.filter(type => type.group === group).map(type => <button key={type.value} type="button" className={button} onClick={() => addField(type.value)}>{type.label}</button>)}</div></div>)}</div>}
-    </div> : <div className="forms-grid forms-grid-two">
-      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Respondent details</h2>{[['collect_name','collect_name_required','Name'],['collect_email','collect_email_required','Email'],['collect_phone','collect_phone_required','Phone']].map(([visible, required, label]) => <div key={visible} className="border-b border-border-hairline pb-3"><Toggle checked={Boolean(draft[visible])} onChange={value => update(visible, value)} label={`Collect ${label.toLowerCase()}`} />{draft[visible] && <Toggle checked={Boolean(draft[required])} onChange={value => update(required, value)} label={`Require ${label.toLowerCase()}`} />}</div>)}<Toggle checked={draft.one_response_per_email} onChange={value => { update('one_response_per_email', value); if (value) { update('collect_email', true); update('collect_email_required', true); } }} label="One response per email" description="Email collection becomes required to prevent duplicate submissions" /></section>
-      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Publishing</h2><Toggle checked={draft.is_active} onChange={value => update('is_active', value)} label="Form is live" description="Public link accepts responses" /><Toggle checked={draft.show_progress_bar} onChange={value => update('show_progress_bar', value)} label="Show progress bar" /><Toggle checked={draft.notify_admin} onChange={value => update('notify_admin', value)} label="Flag new responses for owner review" /><Toggle checked={draft.email_copy_to_respondent} onChange={value => update('email_copy_to_respondent', value)} label="Email the person a copy" description="For anything somebody signs and should keep. Sends their answers as soon as they submit, to the email on the form." /><label className="block text-xs text-text-secondary">Public link slug<input className={`${control} mt-1`} value={draft.slug} onChange={event => update('slug', event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} /></label><label className="block text-xs text-text-secondary">Complete this form first<select className={`${control} mt-1`} value={draft.prerequisite_form_id || ''} onChange={event => update('prerequisite_form_id', event.target.value || null)}><option value="">No form comes first</option>{forms.filter(item => item.id !== draft.id && item.is_active).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select><span className="mt-1 block text-text-secondary">Anyone opening this link is sent to that form first, and comes back here the moment it is submitted.</span></label></section>
-      <section className={`${panel} space-y-4 p-5 forms-span-all`}><h2 className="font-display text-2xl uppercase text-text-primary">Introduction and completion</h2><WritingBox label="Description" note="Shown under the form's title." minRows={4} value={draft.description} onChange={value => update('description', value)} /><div className="forms-grid forms-grid-three"><label className="text-xs text-text-secondary">Header media<select className={`${control} mt-1`} value={draft.header_media_type || ''} onChange={event => update('header_media_type', event.target.value || null)}><option value="">None</option><option value="image">Image</option><option value="video">Video</option><option value="link">Link</option></select></label><label className="text-xs text-text-secondary forms-span-two">Media URL<input className={`${control} mt-1`} type="url" value={draft.header_media_url || ''} onChange={event => update('header_media_url', event.target.value)} /></label></div><label className="block text-xs text-text-secondary">Thank-you message<textarea rows={3} className={`${control} mt-1 py-3`} value={draft.thank_you_message || ''} onChange={event => update('thank_you_message', event.target.value)} /></label><label className="block text-xs text-text-secondary">Optional redirect URL<input className={`${control} mt-1`} type="url" value={draft.redirect_url || ''} onChange={event => update('redirect_url', event.target.value)} placeholder="https://" /></label></section>
+      <button type="button" className={`${button} w-full border-dashed`} aria-expanded={adding === 'end'} onClick={() => setAdding(current => current === 'end' ? null : 'end')}><Plus className="h-4 w-4" /> Add a question</button>
+      {picker('end', null, 'Add to the end of the form')}
+      {undo?.after && <div role="status" className="forms-undo"><span className="min-w-0 truncate">Removed &ldquo;{undo.label}&rdquo;</span><button type="button" className={`${button} px-3`} onClick={undoRemove}><Undo2 className="h-4 w-4" /> Undo</button><button type="button" className={`${button} px-3`} aria-label="Dismiss" onClick={() => setUndo(null)}><X className="h-4 w-4" /></button></div>}
+    </div> : tab === 'preview' ? <FormPreview draft={draft} /> : <div className="forms-grid forms-grid-two">
+      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Publishing</h2><Toggle checked={draft.is_active} onChange={value => update('is_active', value)} label="Form is live" description="Public link accepts responses" /><label className="block text-xs text-text-secondary">Public link<span className="forms-link-field"><span className="forms-secondary">{typeof window === 'undefined' ? '' : window.location.origin}/forms/</span><input className={`${control}`} aria-label="Public link slug" value={draft.slug} onChange={event => update('slug', event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} /></span><span className="mt-1 block text-text-secondary">Changing it breaks links and QR codes already handed out.</span></label><label className="block text-xs text-text-secondary">Complete this form first<select className={`${control} mt-1`} value={draft.prerequisite_form_id || ''} onChange={event => update('prerequisite_form_id', event.target.value || null)}><option value="">No form comes first</option>{forms.filter(item => item.id !== draft.id && item.is_active).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select><span className="mt-1 block text-text-secondary">Anyone opening this link is sent to that form first, and comes back here the moment it is submitted.</span></label></section>
+      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Asked before the questions</h2><p className="text-xs text-text-secondary">On the first page, before question one.</p>{[['collect_name','collect_name_required','Name'],['collect_email','collect_email_required','Email'],['collect_phone','collect_phone_required','Phone']].map(([visible, required, label]) => <DetailAsk key={visible} label={label} collect={Boolean(draft[visible])} required={Boolean(draft[required])} locked={visible === 'collect_email' && draft.one_response_per_email} onChange={value => setDraft(current => ({ ...current, [visible]: value.collect, [required]: value.required }))} />)}<Toggle checked={draft.one_response_per_email} onChange={value => { update('one_response_per_email', value); if (value) { update('collect_email', true); update('collect_email_required', true); } }} label="One response per email" description="Email becomes required, so nobody can answer twice" /></section>
+      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">First page</h2><WritingBox label="Description" note="Shown under the form's title." minRows={4} value={draft.description} onChange={value => update('description', value)} /><div className="forms-grid forms-grid-three"><label className="text-xs text-text-secondary">Header media<select className={`${control} mt-1`} value={draft.header_media_type || ''} onChange={event => update('header_media_type', event.target.value || null)}><option value="">None</option><option value="image">Image</option><option value="video">Video</option><option value="link">Link</option></select></label>{draft.header_media_type && <label className="text-xs text-text-secondary forms-span-two">Media URL<input className={`${control} mt-1`} type="url" placeholder="https://" value={draft.header_media_url || ''} onChange={event => update('header_media_url', event.target.value)} /></label>}</div><Toggle checked={draft.show_progress_bar} onChange={value => update('show_progress_bar', value)} label="Show progress bar" description="A bar across the top that fills as they go." /></section>
+      <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">After they submit</h2><label className="block text-xs text-text-secondary">Thank-you message<textarea rows={3} className={`${control} mt-1 py-3`} value={draft.thank_you_message || ''} onChange={event => update('thank_you_message', event.target.value)} /></label><label className="block text-xs text-text-secondary">Then send them to<input className={`${control} mt-1`} type="url" value={draft.redirect_url || ''} onChange={event => update('redirect_url', event.target.value)} placeholder="https:// (optional)" /></label><Toggle checked={draft.email_copy_to_respondent} onChange={value => update('email_copy_to_respondent', value)} label="Email the person a copy" description="For anything somebody signs and should keep. Sends their answers as soon as they submit, to the email on the form." /><Toggle checked={draft.notify_admin} onChange={value => update('notify_admin', value)} label="Flag new responses for owner review" /></section>
     </div>}
   </fieldset>;
 }
@@ -502,7 +665,7 @@ export default function FormsSurveysManager({ initialAction = null, onIntentHand
   }, [initialAction, onDirtyChange, onIntentHandled]); // Consume the URL intent once per mounted Forms workspace.
   const toggleLive = async form => { if (pendingMutation.current) return; pendingMutation.current=true; setSaving(true); setError(''); try { const saved=await saveOwnerForm({ ...form, is_active: !form.is_active }); setActive(saved); await load(); } catch(err){ setError(err.message); } finally { pendingMutation.current=false; setSaving(false); } };
   const filtered = forms.filter(form => (filter === 'all' || form.form_type === filter) && (!query || `${form.title} ${form.description}`.toLowerCase().includes(query.toLowerCase())));
-  if (view === 'edit' && draft) return <><FormEditor draft={draft} setDraft={setDraft} forms={forms} onSave={save} saving={saving} error={error} onReloadStale={staleFormID ? reloadStale : null} onCancel={() => { if (!pendingMutation.current) { if (dirty) setConfirmDiscard(true); else leaveEditor(); } }} /><AdminConfirmDialog open={confirmDiscard} onOpenChange={setConfirmDiscard} title="Discard unsaved form changes?" description="Your edits have not been saved and cannot be recovered." warning={undefined} cancelLabel="Keep editing" confirmLabel="Discard changes" busy={saving} onConfirm={leaveEditor} /></>;
+  if (view === 'edit' && draft) return <><FormEditor draft={draft} setDraft={setDraft} forms={forms} onSave={save} saving={saving} error={error} dirty={dirty} onReloadStale={staleFormID ? reloadStale : null} onCancel={() => { if (!pendingMutation.current) { if (dirty) setConfirmDiscard(true); else leaveEditor(); } }} /><AdminConfirmDialog open={confirmDiscard} onOpenChange={setConfirmDiscard} title="Discard unsaved form changes?" description="Your edits have not been saved and cannot be recovered." warning={undefined} cancelLabel="Keep editing" confirmLabel="Discard changes" busy={saving} onConfirm={leaveEditor} /></>;
   if (view === 'analytics' && active) return <Analytics form={active} onBack={() => setView('manage')} />;
   if (view === 'manage' && active) {
     const url=publicFormURL(active); return <fieldset disabled={saving} aria-busy={saving} className={`${shell} space-y-5`}><AdminPageHeader eyebrow={active.is_active ? 'Live form' : 'Paused form'} title={active.title} description={null}><button className={button} onClick={() => setView('list')}><ArrowLeft className="h-4 w-4" /> Forms</button><button className={button} onClick={() => edit(active)}><Pencil className="h-4 w-4" /> Edit</button><button className={primary} onClick={() => setView('analytics')}><BarChart3 className="h-4 w-4" /> Analytics</button></AdminPageHeader>

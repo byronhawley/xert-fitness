@@ -81,11 +81,16 @@ test('every change to the shape of the list goes through the remap', async () =>
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../src/components/admin/FormsSurveysManager.jsx', import.meta.url), 'utf8');
   assert.match(source, /const setQuestions = change => setDraft\(current => \(\{ \.\.\.current, questions: remapSkipTargets\(current\.questions, change\(current\.questions\)\) \}\)\);/);
-  for (const operation of ['moveField', 'addField', 'duplicateField', 'removeField']) {
+  for (const operation of ['moveField', 'moveRows', 'addField', 'duplicateField', 'removeField']) {
     assert.match(source, new RegExp(`const ${operation} = [^\\n]*setQuestions\\(`), `${operation} must remap skip rules`);
   }
   // Only a change that keeps every question in place may bypass it.
   const direct = [...source.matchAll(/update\('questions'/g)];
   assert.equal(direct.length, 1, 'the one direct write is Make all required, which moves nothing');
   assert.match(source, /const setAllRequired = value => update\('questions'/);
+  // Undo puts back the whole list from before a removal — positions and rules
+  // together, so nothing needs remapping — and only while nothing has changed
+  // since; otherwise it would quietly throw later edits away.
+  assert.match(source, /const undoRemove = [^\n]*current\.questions === undo\.after \? \{ \.\.\.current, questions: undo\.before \} : current/);
+  assert.match(source, /return current\.after === draft\.questions \? current : null;/);
 });
