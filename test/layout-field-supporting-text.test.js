@@ -11,16 +11,15 @@ const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('the public form shows supporting text under a section break and a statement', async () => {
   const page = await read('../src/pages/PublicForm.jsx');
-  const rendered = [...page.matchAll(/\{item\.description && <p /g)];
+  const rendered = [...page.matchAll(/\{item\.description && <FormText text=\{item\.description\}/g)];
   assert.equal(rendered.length, 2, 'both layout kinds render their description');
 });
 
 test('the builder can edit the supporting text it renders', async () => {
   const manager = await read('../src/components/admin/FormsSurveysManager.jsx');
-  // The non-layout row: the hint, plus example text where the answer box shows it.
-  assert.match(manager, /\{!layout && <div className="forms-grid forms-grid-two">.*Hint<span className="forms-secondary">/);
-  // Layout fields get their own control, because a placeholder is meaningless
-  // on a heading and the text is long enough to want more than one line.
-  assert.match(manager, /\{layout && <label[^>]*>Supporting text<textarea/);
-  assert.match(manager, /onUpdate\('description', event\.target\.value\)/);
+  // A question has a hint; a heading or statement has supporting text. Both
+  // are writing boxes, long enough for a few lines and dot points.
+  assert.match(manager, /\{!layout && <WritingBox label="Hint"/);
+  assert.match(manager, /\{layout && <WritingBox label="Supporting text"/);
+  assert.equal([...manager.matchAll(/onChange=\{value => onUpdate\('description', value\)\}/g)].length, 2);
 });

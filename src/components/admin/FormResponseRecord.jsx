@@ -6,6 +6,7 @@ import {
   respondentLabel,
 } from '@/lib/formResponseRecord';
 import { waitForPrintableImages } from '@/lib/printReady';
+import FormText from '@/components/public/FormText';
 import { ADMIN_BUTTON, AdminSkeleton } from './ui';
 
 const secondaryButton = 'admin-kit-button';
@@ -104,14 +105,14 @@ function FieldAnswer({ question }) {
 }
 
 function ResponseField({ field, number }) {
-  if (field.type === 'section_break') return <div className="xert-response-section mt-8 border-b-2 border-document-neutral-900 pb-2 first:mt-0"><h2 className="text-xl font-bold uppercase tracking-wide text-document-neutral-950">{field.content || 'Untitled section'}</h2>{field.description && <p className="mt-1 whitespace-pre-wrap text-sm normal-case leading-6 tracking-normal text-document-neutral-600">{field.description}</p>}</div>;
-  if (field.type === 'statement') return <div className="xert-response-statement border-l-4 border-document-neutral-300 bg-document-neutral-50 px-4 py-3 text-sm leading-6 text-document-neutral-700"><p className="whitespace-pre-wrap">{field.content || 'Information statement'}</p>{field.description && <p className="mt-2 whitespace-pre-wrap text-xs text-document-neutral-500">{field.description}</p>}</div>;
+  if (field.type === 'section_break') return <div className="xert-response-section mt-8 border-b-2 border-document-neutral-900 pb-2 first:mt-0"><h2 className="text-xl font-bold uppercase tracking-wide text-document-neutral-950">{field.content || 'Untitled section'}</h2>{field.description && <FormText text={field.description} className="mt-1 text-sm normal-case leading-6 tracking-normal text-document-neutral-600" />}</div>;
+  if (field.type === 'statement') return <div className="xert-response-statement border-l-4 border-document-neutral-300 bg-document-neutral-50 px-4 py-3 text-sm leading-6 text-document-neutral-700"><FormText text={field.content || 'Information statement'} />{field.description && <FormText text={field.description} className="mt-2 text-xs text-document-neutral-500" />}</div>;
   const mediaURL = safeResponseMediaURL(field.media_url);
   return (
     <section className="xert-response-field border border-document-neutral-200 forms-record-padding p-4 sm:p-5">
       <div className="mb-3 flex items-start gap-3">
         <span className="mt-0.5 min-w-7 text-xs font-bold uppercase tracking-wider text-document-neutral-400">{number}</span>
-        <div className="min-w-0 flex-1"><h2 className="font-semibold leading-6 text-document-neutral-950">{field.question || 'Untitled field'}{field.required && <span className="ml-1 text-status-danger-700" aria-label="Required">*</span>}</h2>{field.description && <p className="mt-1 text-xs leading-5 text-document-neutral-500">{field.description}</p>}{field.hidden && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-document-neutral-400">Historical hidden field with stored answer</p>}</div>
+        <div className="min-w-0 flex-1"><h2 className="font-semibold leading-6 text-document-neutral-950">{field.question || 'Untitled field'}{field.required && <span className="ml-1 text-status-danger-700" aria-label="Required">*</span>}</h2>{field.description && <FormText text={field.description} className="mt-1 text-xs leading-5 text-document-neutral-500" />}{field.hidden && <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-document-neutral-400">Historical hidden field with stored answer</p>}</div>
       </div>
       <div className="min-w-0"><FieldAnswer question={field} /></div>
       {(mediaURL || field.media_caption) && <div className="mt-4 border-t border-document-neutral-200 pt-3 text-xs leading-5 text-document-neutral-500"><p className="font-bold uppercase tracking-wider">Configured {field.media_type || 'media'} reference</p>{field.media_caption && <p className="mt-1 whitespace-pre-wrap text-document-neutral-600">{field.media_caption}</p>}{mediaURL && <p className="mt-1 break-all">{mediaURL}</p>}<p className="mt-1 italic">The reference was preserved at submission; content served by this external URL may change.</p></div>}

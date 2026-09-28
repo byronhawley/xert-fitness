@@ -10,6 +10,7 @@ import {
 } from '@/lib/formPrerequisites';
 import { answerValidationMessage, firstInvalidAnswer } from '@/lib/formAnswerValidation';
 import { ALREADY_PROVIDED_ANSWER, offersAlreadyProvided } from '@/lib/formAlreadyProvided';
+import FormText from '@/components/public/FormText';
 
 const inputClass = 'xert-input';
 const errorStyle = { color: 'var(--state-danger-text)', borderColor: 'var(--state-danger-text-35)', backgroundColor: 'var(--state-danger-text-8)' };
@@ -97,14 +98,14 @@ function InformationalBlocks({ items }) {
           return (
             <section key={item.id} className="border-b border-xert-steel/25 pb-3">
               <h2 className="font-display text-2xl uppercase tracking-wide text-white break-words">{title || 'Section'}</h2>
-              {item.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-xert-pale/65">{item.description}</p>}
+              {item.description && <FormText text={item.description} className="mt-2 text-sm text-xert-pale/65" />}
             </section>
           );
         }
         return (
           <section key={item.id} className="xert-card-flat p-4">
-            {title && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-xert-offwhite">{title}</p>}
-            {item.description && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-xert-pale/60">{item.description}</p>}
+            {title && <FormText text={title} className="text-sm leading-relaxed text-xert-offwhite" />}
+            {item.description && <FormText text={item.description} className="mt-2 text-sm text-xert-pale/60" />}
           </section>
         );
       })}
@@ -235,7 +236,7 @@ export function QuestionBody({ question, value, onChange, audience = null, Headi
         The date of birth on the questionnaire makes this member under 18, so a parent or legal guardian must complete this.
       </p>
     )}
-    {question.description && <p className="mt-3 text-xert-pale/60">{question.description}</p>}
+    {question.description && <FormText text={question.description} className="mt-3 text-xert-pale/60" />}
     <div className="mt-7"><AnswerInput question={question} value={value} onChange={onChange} /></div>
   </>;
 }
@@ -394,7 +395,7 @@ export default function PublicForm() {
             <Media type={form.header_media_type} url={form.header_media_url} caption={form.header_media_caption} />
             <p className="mb-2 text-xs font-bold uppercase tracking-[0.22em] text-xert-steel">{FORM_LABELS[form.form_type] || 'XERT Form'}</p>
             <h1 className="font-display text-4xl uppercase tracking-wide text-white sm:text-5xl">{form.title}</h1>
-            {form.description && <p className="mt-4 whitespace-pre-wrap text-xert-pale/70">{form.description}</p>}
+            {form.description && <FormText text={form.description} className="mt-4 text-xert-pale/70" />}
             {(form.collect_name || form.collect_email || form.collect_phone) && <div className="mt-8 grid gap-4">
               {form.collect_name && <label><span className="xert-label">Name {form.collect_name_required && '*'}</span><input id="form-name" className={inputClass} autoComplete="name" autoCapitalize="words" value={name} onChange={event => setName(event.target.value)} /></label>}
               {form.collect_email && <label><span className="xert-label">Email {form.collect_email_required && '*'}</span><input id="form-email" type="email" className={inputClass} autoComplete="email" autoCapitalize="none" autoCorrect="off" value={email} onChange={event => setEmail(event.target.value)} /></label>}

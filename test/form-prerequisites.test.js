@@ -215,7 +215,12 @@ test('the published agreement and the signed agreement come from one module', as
   assert.doesNotMatch(agreement, /_{10,}/, 'no ruled lines from the paper form');
   const form = await read('../src/pages/PublicForm.jsx');
   assert.match(form, /overflow-y-auto overflow-x-hidden/);
-  assert.match(form, /whitespace-pre-wrap break-words text-sm leading-relaxed/);
+  // The agreement keeps its line breaks and wraps long words, through the one
+  // renderer all owner-written form text uses.
+  assert.match(form, /<FormText text=\{title\} className="text-sm leading-relaxed/);
+  const formText = await read('../src/components/public/FormText.jsx');
+  assert.match(formText, /break-words/);
+  assert.match(formText, /whitespace-pre-wrap/);
 });
 
 test('the public form page hands over and carries details across', async () => {

@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive, ArrowDown, ArrowLeft, ArrowUp, BarChart3, Check, ChevronRight,
   Copy, Download, ExternalLink, Eye, GitBranch, GripVertical, Link2,
-  LoaderCircle, Pause, Pencil, Play, Plus, Search, Trash2, X,
+  List, LoaderCircle, Pause, Pencil, Play, Plus, Search, Trash2, X,
 } from 'lucide-react';
 import { DragDropContext, Draggable, Droppable } from '@hello-pangea/dnd';
 import { canOfferAlreadyProvided } from '@/lib/formAlreadyProvided';
 import { activeQuestions, archiveFormResponse, archiveOwnerForm, CHARTABLE_TYPES, FORM_CHANGED_ELSEWHERE, CHOICE_TYPES, createField, createFormDraft, FIELD_TYPES, FORM_TYPES, getFormResponse, listFormResponses, listOwnerForms, publicFormURL, remapSkipTargets, responseCSV, saveOwnerForm, slugifyFormTitle, skipRuleProblems, updateFormResponseStatus, validateFormDraft } from '@/lib/xertForms';
 import { answerImage, answerTable } from '@/lib/formAnswers';
+import { continueDotPoints, toggleDotPoints } from '@/lib/formText';
 import AdminConfirmDialog from './AdminConfirmDialog';
 import FormQRCode from './FormQRCode';
 import FormResponseRecord, { FormRecordLoading } from './FormResponseRecord';
@@ -43,6 +44,52 @@ const TYPE_GROUPS = [...new Set(FIELD_TYPES.map(type => type.group))];
 const GROUP_LABELS = { Layout: 'Headings and text' };
 const sectionTitle = 'text-xs font-bold uppercase tracking-wider text-text-secondary';
 
+// Anything people read on the form: a hint, supporting text, a statement, the
+// introduction. Dot points work the way they do in a document. The button
+// turns the lines the cursor is on into points (or back), and Enter carries
+// the list on, so nobody has to know that "•" at the start of a line is what
+// makes one. The box grows with the text, up to a point, then scrolls.
+function WritingBox({ label, note = '', value, onChange, ariaLabel = undefined, placeholder = '', minRows = 2, autoFocus = false }) {
+  const id = useId();
+  const box = useRef(null);
+  const pendingSelection = useRef(null);
+  useLayoutEffect(() => {
+    if (!pendingSelection.current || !box.current) return;
+    box.current.setSelectionRange(pendingSelection.current.selectionStart, pendingSelection.current.selectionEnd);
+    pendingSelection.current = null;
+  });
+  const text = String(value || '');
+  // Counting line breaks misses a long line that wraps, which is exactly what
+  // a hint written along one line is; the rendered height does not.
+  useLayoutEffect(() => {
+    const current = box.current;
+    if (!current) return;
+    current.style.height = 'auto';
+    current.style.height = `${current.scrollHeight + current.offsetHeight - current.clientHeight}px`;
+  }, [text]);
+  const apply = next => { pendingSelection.current = next; onChange(next.text); box.current?.focus(); };
+  const dotPoints = () => {
+    const current = box.current;
+    apply(toggleDotPoints(text, current?.selectionStart ?? text.length, current?.selectionEnd ?? text.length));
+  };
+  const onKeyDown = event => {
+    const current = event.currentTarget;
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || current.selectionStart !== current.selectionEnd) return;
+    const next = continueDotPoints(current.value, current.selectionStart);
+    if (!next) return;
+    event.preventDefault();
+    apply(next);
+  };
+  return <div className="text-xs text-text-secondary">
+    <div className="flex flex-wrap items-end justify-between gap-2">
+      <label htmlFor={id}>{label}{note && <span className="forms-secondary">{note}</span>}</label>
+      {/* Keeps the cursor in the box, so the button acts on the line it is on. */}
+      <button type="button" className={`${button} px-3`} onMouseDown={event => event.preventDefault()} onClick={dotPoints}><List className="h-4 w-4" aria-hidden="true" /> Dot points</button>
+    </div>
+    <textarea ref={box} id={id} aria-label={ariaLabel} rows={minRows} autoFocus={autoFocus} className={`${control} mt-1`} value={text} placeholder={placeholder} onChange={event => onChange(event.target.value)} onKeyDown={onKeyDown} />
+  </div>;
+}
+
 function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = false, dragHandleProps = null, onUpdate, onPatch, onMove, onDuplicate, onRemove }) {
   const choices = field.type === 'yes_no' ? ['Yes', 'No'] : field.options || [];
   const layout = ['section_break', 'statement'].includes(field.type);
@@ -70,7 +117,7 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
   // stranded where the owner can no longer see them either.
   const unseenExample = !layout && !EXAMPLE_ANSWER_TYPES.has(field.type) && Boolean(String(field.placeholder || '').trim());
   const moveExampleIntoHint = () => onPatch({
-    description: [field.description, field.placeholder].map(text => String(text || '').trim()).filter(Boolean).join(' '),
+    description: [field.description, field.placeholder].map(text => String(text || '').trim()).filter(Boolean).join('\n\n'),
     placeholder: '',
   });
   return <article id={`form-field-${field.id}`} className={`${panel} ${field.hidden ? 'opacity-60' : ''}`}>
@@ -95,13 +142,16 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
       <div className="space-y-5">
         <section className="space-y-3">
           <p className={sectionTitle}>{layout ? kind : 'Question'}</p>
-          <label className="block text-xs text-text-secondary">{field.type === 'section_break' ? 'Heading' : field.type === 'statement' ? 'Statement' : 'What are you asking?'}<input aria-label={`Question ${index + 1}`} autoFocus={autoFocus} className={`${control} mt-1`} value={layout ? field.content || '' : field.question || ''} onChange={event => onUpdate(layout ? 'content' : 'question', event.target.value)} placeholder={layout ? 'e.g. Qualifications and certificates' : 'e.g. Do you have any injuries?'} /></label>
+          {/* A statement is often a whole agreement. A one-line input cannot hold a
+              line break: the browser strips them, so typing a single character
+              into one used to flatten every paragraph and point into one line. */}
+          {field.type === 'statement' ? <WritingBox label="What it says" ariaLabel={`Question ${index + 1}`} autoFocus={autoFocus} minRows={4} value={field.content} placeholder="e.g. Please bring a copy of each certificate to your first session." onChange={value => onUpdate('content', value)} /> : <label className="block text-xs text-text-secondary">{field.type === 'section_break' ? 'Heading' : 'What are you asking?'}<input aria-label={`Question ${index + 1}`} autoFocus={autoFocus} className={`${control} mt-1`} value={layout ? field.content || '' : field.question || ''} onChange={event => onUpdate(layout ? 'content' : 'question', event.target.value)} placeholder={layout ? 'e.g. Qualifications and certificates' : 'e.g. Do you have any injuries?'} /></label>}
           <label className="block text-xs text-text-secondary">Type<select aria-label={`Field type for question ${index + 1}`} className={`${control} mt-1`} value={field.type} onChange={event => onUpdate('type', event.target.value)}>{TYPE_GROUPS.map(group => <optgroup key={group} label={GROUP_LABELS[group] || group}>{FIELD_TYPES.filter(type => type.group === group).map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</optgroup>)}</select></label>
-          {!layout && <div className="forms-grid forms-grid-two"><label className="text-xs text-text-secondary">Hint<span className="forms-secondary">Shown under the question, in smaller text.</span><input aria-label={`Hint for question ${index + 1}`} className={`${control} mt-1`} value={field.description || ''} onChange={event => onUpdate('description', event.target.value)} /></label>{EXAMPLE_ANSWER_TYPES.has(field.type) && <label className="text-xs text-text-secondary">Example answer<span className="forms-secondary">Faint text inside the answer box. It disappears as they type.</span><input aria-label={`Example answer for question ${index + 1}`} className={`${control} mt-1`} value={field.placeholder || ''} onChange={event => onUpdate('placeholder', event.target.value)} /></label>}</div>}
+          {!layout && <WritingBox label="Hint" note="Shown under the question, in smaller text." ariaLabel={`Hint for question ${index + 1}`} value={field.description} onChange={value => onUpdate('description', value)} />}
+          {!layout && EXAMPLE_ANSWER_TYPES.has(field.type) && <label className="block text-xs text-text-secondary">Example answer<span className="forms-secondary">Faint text inside the answer box. It disappears as they type.</span><input aria-label={`Example answer for question ${index + 1}`} className={`${control} mt-1`} value={field.placeholder || ''} onChange={event => onUpdate('placeholder', event.target.value)} /></label>}
           {/* A section break and a statement both render supporting text under their
-              title on the public form. It is usually a sentence or two, hence a
-              textarea rather than a single line. */}
-          {layout && <label className="block text-xs text-text-secondary">Supporting text<textarea rows={3} className={`${control} mt-1`} value={field.description || ''} placeholder={field.type === 'section_break' ? 'Shown under the section heading' : 'Shown under the statement'} onChange={event => onUpdate('description', event.target.value)} /></label>}
+              title on the public form. */}
+          {layout && <WritingBox label="Supporting text" value={field.description} placeholder={field.type === 'section_break' ? 'Shown under the section heading' : 'Shown under the statement'} onChange={value => onUpdate('description', value)} />}
           {unseenExample && <div role="note" className="rounded-lg border border-status-warning-300/30 bg-status-warning-300/10 p-3"><p className="text-xs font-bold uppercase tracking-wider text-status-warning-100">Nobody sees this text</p><p className="mt-1 text-xs text-status-warning-100">&ldquo;{field.placeholder}&rdquo;</p><p className="mt-2 text-xs text-text-secondary">It is saved as example text for the answer box, but a {String(TYPE_LABELS[field.type] || 'question').toLowerCase()} question has no answer box to show it in. Move it into the hint to show it under the question, or clear it.</p><div className="mt-2 flex flex-wrap gap-2"><button type="button" className={button} onClick={moveExampleIntoHint}>Move into hint</button><button type="button" className={button} onClick={() => onUpdate('placeholder', '')}>Clear it</button></div></div>}
         </section>
         {['single_choice', 'multiple_choice', 'dropdown'].includes(field.type) && <section className="space-y-2"><p className={sectionTitle}>Answers they can pick</p>{(field.options || []).map((option, optionIndex) => <div className="flex gap-2" key={`${field.id}-${optionIndex}`}><input aria-label={`Option ${optionIndex + 1} for question ${index + 1}`} className={control} value={option} onChange={event => onUpdate('options', field.options.map((item, i) => i === optionIndex ? event.target.value : item))} /><button type="button" aria-label={`Remove option ${optionIndex + 1} for question ${index + 1}`} className={`${button} px-3`} onClick={() => onUpdate('options', field.options.filter((_, i) => i !== optionIndex))}><X className="h-4 w-4" /></button></div>)}<button type="button" className={button} onClick={() => onUpdate('options', [...(field.options || []), `Option ${(field.options || []).length + 1}`])}><Plus className="h-4 w-4" /> Add option</button><Toggle checked={Boolean(field.allow_other)} onChange={value => onUpdate('allow_other', value)} label="Allow an Other answer" description="Adds an Other choice with a box to type in." /></section>}
@@ -163,7 +213,7 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
     </div> : <div className="forms-grid forms-grid-two">
       <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Respondent details</h2>{[['collect_name','collect_name_required','Name'],['collect_email','collect_email_required','Email'],['collect_phone','collect_phone_required','Phone']].map(([visible, required, label]) => <div key={visible} className="border-b border-border-hairline pb-3"><Toggle checked={Boolean(draft[visible])} onChange={value => update(visible, value)} label={`Collect ${label.toLowerCase()}`} />{draft[visible] && <Toggle checked={Boolean(draft[required])} onChange={value => update(required, value)} label={`Require ${label.toLowerCase()}`} />}</div>)}<Toggle checked={draft.one_response_per_email} onChange={value => { update('one_response_per_email', value); if (value) { update('collect_email', true); update('collect_email_required', true); } }} label="One response per email" description="Email collection becomes required to prevent duplicate submissions" /></section>
       <section className={`${panel} space-y-4 p-5`}><h2 className="font-display text-2xl uppercase text-text-primary">Publishing</h2><Toggle checked={draft.is_active} onChange={value => update('is_active', value)} label="Form is live" description="Public link accepts responses" /><Toggle checked={draft.show_progress_bar} onChange={value => update('show_progress_bar', value)} label="Show progress bar" /><Toggle checked={draft.notify_admin} onChange={value => update('notify_admin', value)} label="Flag new responses for owner review" /><Toggle checked={draft.email_copy_to_respondent} onChange={value => update('email_copy_to_respondent', value)} label="Email the person a copy" description="For anything somebody signs and should keep. Sends their answers as soon as they submit, to the email on the form." /><label className="block text-xs text-text-secondary">Public link slug<input className={`${control} mt-1`} value={draft.slug} onChange={event => update('slug', event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} /></label><label className="block text-xs text-text-secondary">Complete this form first<select className={`${control} mt-1`} value={draft.prerequisite_form_id || ''} onChange={event => update('prerequisite_form_id', event.target.value || null)}><option value="">No form comes first</option>{forms.filter(item => item.id !== draft.id && item.is_active).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select><span className="mt-1 block text-text-secondary">Anyone opening this link is sent to that form first, and comes back here the moment it is submitted.</span></label></section>
-      <section className={`${panel} space-y-4 p-5 forms-span-all`}><h2 className="font-display text-2xl uppercase text-text-primary">Introduction and completion</h2><label className="block text-xs text-text-secondary">Description<textarea rows={4} className={`${control} mt-1 py-3`} value={draft.description || ''} onChange={event => update('description', event.target.value)} /></label><div className="forms-grid forms-grid-three"><label className="text-xs text-text-secondary">Header media<select className={`${control} mt-1`} value={draft.header_media_type || ''} onChange={event => update('header_media_type', event.target.value || null)}><option value="">None</option><option value="image">Image</option><option value="video">Video</option><option value="link">Link</option></select></label><label className="text-xs text-text-secondary forms-span-two">Media URL<input className={`${control} mt-1`} type="url" value={draft.header_media_url || ''} onChange={event => update('header_media_url', event.target.value)} /></label></div><label className="block text-xs text-text-secondary">Thank-you message<textarea rows={3} className={`${control} mt-1 py-3`} value={draft.thank_you_message || ''} onChange={event => update('thank_you_message', event.target.value)} /></label><label className="block text-xs text-text-secondary">Optional redirect URL<input className={`${control} mt-1`} type="url" value={draft.redirect_url || ''} onChange={event => update('redirect_url', event.target.value)} placeholder="https://" /></label></section>
+      <section className={`${panel} space-y-4 p-5 forms-span-all`}><h2 className="font-display text-2xl uppercase text-text-primary">Introduction and completion</h2><WritingBox label="Description" note="Shown under the form's title." minRows={4} value={draft.description} onChange={value => update('description', value)} /><div className="forms-grid forms-grid-three"><label className="text-xs text-text-secondary">Header media<select className={`${control} mt-1`} value={draft.header_media_type || ''} onChange={event => update('header_media_type', event.target.value || null)}><option value="">None</option><option value="image">Image</option><option value="video">Video</option><option value="link">Link</option></select></label><label className="text-xs text-text-secondary forms-span-two">Media URL<input className={`${control} mt-1`} type="url" value={draft.header_media_url || ''} onChange={event => update('header_media_url', event.target.value)} /></label></div><label className="block text-xs text-text-secondary">Thank-you message<textarea rows={3} className={`${control} mt-1 py-3`} value={draft.thank_you_message || ''} onChange={event => update('thank_you_message', event.target.value)} /></label><label className="block text-xs text-text-secondary">Optional redirect URL<input className={`${control} mt-1`} type="url" value={draft.redirect_url || ''} onChange={event => update('redirect_url', event.target.value)} placeholder="https://" /></label></section>
     </div>}
   </fieldset>;
 }
