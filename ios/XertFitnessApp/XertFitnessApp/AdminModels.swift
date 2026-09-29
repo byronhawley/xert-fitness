@@ -3627,11 +3627,13 @@ struct AdminFormQuestion: Identifiable, Codable, Hashable {
     var skip_rules: [AdminFormSkipRule]?
     // Settings the web builder writes. Decoded and re-encoded untouched, so
     // saving a form from the phone never quietly drops them: signed_by is
-    // what puts Byron Hawley's signature on every copy of an agreement.
+    // what puts Byron Hawley's signature on every copy of an agreement, and
+    // default_today is what starts a date signed on the day it is filled in.
     var signed_by: String?
     var allow_already_provided: Bool?
     var prefill: String?
     var minor_only: Bool?
+    var default_today: Bool?
 
     static func blank(type: String = "short_text") -> Self {
         Self(

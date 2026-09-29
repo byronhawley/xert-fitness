@@ -12,6 +12,7 @@ import { answerValidationMessage, firstInvalidAnswer } from '@/lib/formAnswerVal
 import { ALREADY_PROVIDED_ANSWER, offersAlreadyProvided } from '@/lib/formAlreadyProvided';
 import FormText from '@/components/public/FormText';
 import { formSignatory } from '@/lib/formSignatories';
+import { localDateISO, todayAnswers } from '@/lib/formDateToday';
 
 const inputClass = 'xert-input';
 const errorStyle = { color: 'var(--state-danger-text)', borderColor: 'var(--state-danger-text-35)', backgroundColor: 'var(--state-danger-text-8)' };
@@ -174,7 +175,7 @@ function SignatureInput({ value, onChange }) {
       {/* A signature is always dated. Recording it here saves asking for a
           date nobody should have to type, and it is the moment of signing. */}
       <p className="mt-2 text-xs text-xert-pale/55">
-        Dated <time dateTime={new Date().toISOString().slice(0, 10)}>{new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</time>, recorded with your signature.
+        Dated <time dateTime={localDateISO()}>{new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })}</time>, recorded with your signature.
       </p>
       {value && <p className="text-xs text-status-success-300">Signature captured</p>}
     </div>
@@ -263,8 +264,8 @@ export function QuestionBody({ question, value, onChange, audience = null, Headi
 // own answer so trying a question out saves nothing; the builder remounts it
 // when the question type changes, since an answer of one type is meaningless
 // to another.
-export function QuestionPreview({ question }) {
-  const [value, setValue] = useState(undefined);
+export function QuestionPreview({ question, startsToday = false }) {
+  const [value, setValue] = useState(() => (startsToday ? localDateISO() : undefined));
   const layout = question.type === 'section_break' || question.type === 'statement' || Boolean(formSignatory(question));
   return (
     <div className="rounded-2xl bg-xert-navy p-3 text-xert-offwhite">
@@ -282,7 +283,8 @@ export function QuestionPreview({ question }) {
 // page sends them, the preview does not.
 /** @param {{ form: any, carried?: any, initialAnswers?: any, onSubmit: (payload: any) => Promise<any>, preview?: boolean }} props */
 export function FormRunner({ form, carried = null, initialAnswers = null, onSubmit, preview = false }) {
-  const [error, setError] = useState(''); const [step, setStep] = useState(0); const [answers, setAnswers] = useState(() => initialAnswers || {});
+  // A date signed opens on today; anything carried from an earlier form wins.
+  const [error, setError] = useState(''); const [step, setStep] = useState(0); const [answers, setAnswers] = useState(() => ({ ...todayAnswers(form?.questions), ...(initialAnswers || {}) }));
   const [name, setName] = useState(carried?.name || ''); const [email, setEmail] = useState(carried?.email || ''); const [phone, setPhone] = useState(carried?.phone || '');
   const [submitting, setSubmitting] = useState(false);
   const startedAt = useRef(Date.now());

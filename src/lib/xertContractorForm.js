@@ -102,6 +102,7 @@ function signingQuestions(total) {
       description: 'Sign with your finger, mouse or Apple Pencil.',
     }),
     required('ic-94-commencement', 'date', 'Date signed', {
+      default_today: true,
       description: 'This agreement commences on this date and continues until terminated in accordance with it.',
     }),
     required('ic-95-marketing', 'single_choice', 'Do you consent to being featured in XERT Fitness marketing material?', {
@@ -118,7 +119,7 @@ function signingQuestions(total) {
       'Byron Hawley, Owner. Phone 0431 676 053. Email info@xertfitness.com.au.',
     ),
     field('ic-98-owner-signature', 'signature', 'Signed for XERT Fitness', {
-      description: 'Byron Hawley, Owner. His signature is on every copy of this agreement.',
+      description: 'Byron Hawley, Owner.',
       signed_by: 'byron-hawley',
     }),
   ];

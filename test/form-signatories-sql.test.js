@@ -123,6 +123,26 @@ test('an owner’s own wording is kept; only the signing changes', async () => {
   assert.equal(rows[0].q.signed_by, 'byron-hawley');
 });
 
+test('the owner line reads “Byron Hawley, Owner.” and nothing more', async () => {
+  const wording = await read('../supabase/migrations/20260929020000_byron_signoff_wording.sql');
+  const ownerLine = async db => (await db.query(`select q from public.xert_forms, jsonb_array_elements(questions) q where q ->> 'id' = 'ic-98-owner-signature'`)).rows[0].q;
+  const db = await migrated();
+  await db.exec(wording);
+  const line = await ownerLine(db);
+  assert.equal(line.description, 'Byron Hawley, Owner.');
+  assert.equal(line.signed_by, 'byron-hawley', 'still signed by Byron');
+  assert.equal(line.description, XERT_CONTRACTOR_FORM_DEFINITION.questions.find(question => question.id === 'ic-98-owner-signature').description, 'the live form and the definition agree');
+  await db.exec(wording);
+  assert.equal((await ownerLine(db)).description, 'Byron Hawley, Owner.', 'running it twice changes nothing');
+
+  const edited = await database();
+  await addForm(edited, FORM, 'contractor-agreement', contractorAsItWas());
+  await edited.exec(migration);
+  await edited.exec(`update public.xert_forms set questions = (select jsonb_agg(case when q ->> 'id' = 'ic-98-owner-signature' then q || '{"description": "Owner, on behalf of the club."}'::jsonb else q end) from jsonb_array_elements(questions) q)`);
+  await edited.exec(wording);
+  assert.equal((await ownerLine(edited)).description, 'Owner, on behalf of the club.', 'wording edited in the builder is left alone');
+});
+
 test('every accepted agreement stores Byron’s signature, from the database’s own record', async () => {
   const db = await migrated();
   const { rows: [form] } = await db.query('select questions from public.xert_forms where id = $1', [FORM]);
