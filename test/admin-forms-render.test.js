@@ -262,9 +262,47 @@ test('the list of types says what each one collects', () => {
   assert.match(html, /aria-label="Add to this section"/);
   assert.match(html, /Yes \/ No<\/span><span class="forms-secondary">A yes or a no<\/span>/);
   assert.match(html, /Statement<\/span><span class="forms-secondary">Something to read, nothing to answer<\/span>/);
-  // Every type, plus the ready-made sign-off by Byron Hawley.
-  assert.equal([...html.matchAll(/forms-type-card/g)].length, 23);
+  // Every type, plus a ready-made date signed and the sign-off by Byron Hawley.
+  assert.equal([...html.matchAll(/forms-type-card/g)].length, 24);
+  assert.match(html, /Date signed<\/span><span class="forms-secondary">Starts on today’s date, and can be changed<\/span>/);
   assert.match(html, /Byron Hawley signs<\/span><span class="forms-secondary">Already signed, on every copy<\/span>/);
+});
+
+test('the Date signed card adds a date that starts on today', () => {
+  let picked = null;
+  const element = TypePicker({label:'Add a question', onPick:(type, preset) => { picked = {type, preset}; }, onClose:()=>{}});
+  const find = node => {
+    if (!node || typeof node !== 'object') return null;
+    if (Array.isArray(node)) { for (const child of node) { const hit = find(child); if (hit) return hit; } return null; }
+    const children = node.props?.children;
+    const text = [children].flat(Infinity).filter(child => typeof child === 'string' || typeof child?.props?.children === 'string').map(child => typeof child === 'string' ? child : child.props.children).join('|');
+    if (node.type === 'button' && text.includes('Date signed')) return node;
+    return find(children);
+  };
+  find(element).props.onClick();
+  assert.deepEqual(picked, {type:'date', preset:{question:'Date signed', default_today:true}});
+});
+
+// ─── Dates that start on today ──────────────────────────────────────────────
+
+const todayInBuilder = html => html.match(/<input[^>]*type="date"[^>]*value="([^"]*)"/)?.[1];
+
+test('a date signed shows its switch on, and its preview already holds today', async () => {
+  const {localDateISO} = await server.ssrLoadModule('/src/lib/formDateToday.js');
+  const html = renderForm({title:'Agreement',questions:[{id:'d',type:'date',question:'Date signed'}]});
+  assert.match(html, /role="switch" aria-label="Start on today’s date" aria-checked="true"/);
+  assert.match(html, /Filled in with the day they open the form\. They can change it\./);
+  assert.equal(todayInBuilder(html), localDateISO());
+});
+
+test('a date of birth starts empty, and the switch can turn today on for any date', () => {
+  const birthday = renderForm({title:'Form',questions:[{id:'d',type:'date',question:'Date of birth'}]});
+  assert.match(birthday, /role="switch" aria-label="Start on today’s date" aria-checked="false"/);
+  assert.equal(todayInBuilder(birthday), '');
+  const chosen = renderForm({title:'Form',questions:[{id:'d',type:'date',question:'Start date',default_today:true}]});
+  assert.match(chosen, /role="switch" aria-label="Start on today’s date" aria-checked="true"/);
+  const text = renderForm({title:'Form',questions:[{id:'t',type:'short_text',question:'Date signed'}]});
+  assert.ok(!text.includes('Start on today’s date'), 'only a date field has the switch');
 });
 
 test('name, email and phone are each asked for, optional, or not asked, in one control', () => {
