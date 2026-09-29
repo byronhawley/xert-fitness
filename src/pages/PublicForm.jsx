@@ -11,6 +11,7 @@ import {
 import { answerValidationMessage, firstInvalidAnswer } from '@/lib/formAnswerValidation';
 import { ALREADY_PROVIDED_ANSWER, offersAlreadyProvided } from '@/lib/formAlreadyProvided';
 import FormText from '@/components/public/FormText';
+import { formSignatory } from '@/lib/formSignatories';
 
 const inputClass = 'xert-input';
 const errorStyle = { color: 'var(--state-danger-text)', borderColor: 'var(--state-danger-text-35)', backgroundColor: 'var(--state-danger-text-8)' };
@@ -86,6 +87,21 @@ function Media({ type, url, caption }) {
 // inside its own scrollable panel.
 const LONG_READ_CHARACTERS = 4000;
 
+// A signature somebody gave in advance, for XERT Fitness. The person filling
+// the form in reads it and does nothing with it; the database writes the same
+// signature into their response, so their copy carries it too.
+/** @param {{ item: any, signatory: { name: string, role: string, image: string } }} props */
+export function SignedInAdvance({ item, signatory }) {
+  return (
+    <section className="xert-card-flat p-4">
+      <p className="text-sm font-semibold text-xert-offwhite">{String(item.question || '').trim() || 'Signed for XERT Fitness'}</p>
+      {item.description && <FormText text={item.description} className="mt-1 text-sm text-xert-pale/60" />}
+      <div className="mt-3 inline-block rounded-xl bg-white px-4 py-2"><img src={signatory.image} alt={`Signature of ${signatory.name}`} className="h-16 w-auto" /></div>
+      <p className="mt-2 text-sm text-xert-offwhite">{signatory.name}<span className="text-xert-pale/55"> · {signatory.role}</span></p>
+    </section>
+  );
+}
+
 function InformationalBlocks({ items }) {
   if (!items.length) return null;
   const length = items.reduce((total, item) => total
@@ -94,6 +110,8 @@ function InformationalBlocks({ items }) {
     <>
       {items.map(item => {
         const title = String(item.content || item.question || '').trim();
+        const signatory = formSignatory(item);
+        if (signatory) return <SignedInAdvance key={item.id} item={item} signatory={signatory} />;
         if (item.type === 'section_break') {
           return (
             <section key={item.id} className="border-b border-xert-steel/25 pb-3">
@@ -247,7 +265,7 @@ export function QuestionBody({ question, value, onChange, audience = null, Headi
 // to another.
 export function QuestionPreview({ question }) {
   const [value, setValue] = useState(undefined);
-  const layout = question.type === 'section_break' || question.type === 'statement';
+  const layout = question.type === 'section_break' || question.type === 'statement' || Boolean(formSignatory(question));
   return (
     <div className="rounded-2xl bg-xert-navy p-3 text-xert-offwhite">
       <div className="xert-card p-5">

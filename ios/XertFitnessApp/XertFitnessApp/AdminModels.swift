@@ -3625,6 +3625,13 @@ struct AdminFormQuestion: Identifiable, Codable, Hashable {
     var points: Int?
     var content: String?
     var skip_rules: [AdminFormSkipRule]?
+    // Settings the web builder writes. Decoded and re-encoded untouched, so
+    // saving a form from the phone never quietly drops them: signed_by is
+    // what puts Byron Hawley's signature on every copy of an agreement.
+    var signed_by: String?
+    var allow_already_provided: Bool?
+    var prefill: String?
+    var minor_only: Bool?
 
     static func blank(type: String = "short_text") -> Self {
         Self(

@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { protectCSVFormula } from '@/lib/csvSafety';
 import { skipRuleProblems } from '@/lib/formBranching';
+import { signOffProblem } from '@/lib/formSignatories';
 export { computeSkippedQuestionIDs, fieldPositionLabel, remapSkipTargets, skipRuleProblems } from '@/lib/formBranching';
 
 export const FORM_TYPES = Object.freeze([
@@ -91,6 +92,8 @@ export function validateFormDraft(form) {
   if (form.one_response_per_email && !form.collect_email_required) return 'Require email before limiting responses by email.';
   const incomplete = questions.find(question => question.type !== 'statement' && question.type !== 'section_break' && !question.question?.trim());
   if (incomplete) return 'Every response field needs a question or label.';
+  const signOff = questions.map(signOffProblem).find(Boolean);
+  if (signOff) return signOff;
   return null;
 }
 

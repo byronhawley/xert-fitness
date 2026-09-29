@@ -108,15 +108,18 @@ function signingQuestions(total) {
       description: 'We sometimes film or photograph in the Club. Consenting allows us to use your image in promotional and other business related marketing material. You can tell us in writing at any time if you change your mind.',
       options: [CONTRACTOR_MARKETING_YES, CONTRACTOR_MARKETING_NO],
     }),
-    // The paper agreement is countersigned at the desk. Keeping both signatures
-    // on the one record is what makes the exported PDF the whole document.
-    section('ic-96-owner', 'For XERT Fitness', 'Completed by the owner or witness at the club.'),
+    // Byron signs every copy of this agreement for XERT Fitness. His signature
+    // is signed in advance: the contractor sees it already on the form, and the
+    // database writes it into every accepted response, so the record, the PDF
+    // and the emailed copy all carry both signatures.
+    section('ic-96-owner', 'For XERT Fitness', 'Signed by the owner for XERT Fitness.'),
     statement(
       'ic-97-owner-details',
-      'Owner / Witness: Byron Hawley. Phone 0431 676 053. Email info@xertfitness.com.au.',
+      'Byron Hawley, Owner. Phone 0431 676 053. Email info@xertfitness.com.au.',
     ),
-    field('ic-98-owner-signature', 'signature', 'Owner / witness signature', {
-      description: 'Signed by Byron Hawley, or a XERT Fitness representative witnessing this agreement.',
+    field('ic-98-owner-signature', 'signature', 'Signed for XERT Fitness', {
+      description: 'Byron Hawley, Owner. His signature is on every copy of this agreement.',
+      signed_by: 'byron-hawley',
     }),
   ];
 }

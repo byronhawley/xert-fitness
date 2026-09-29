@@ -1,4 +1,5 @@
 import { skipRuleProblems } from './formBranching.js';
+import { signOffProblem } from './formSignatories.js';
 // ─── Shared building blocks for repo-owned form definitions ──────────────────
 // The PEQ and the terms agreement are legal documents, so their field IDs must
 // stay stable across deploys: a response snapshot references them forever.
@@ -61,5 +62,6 @@ export function validateXertFormDefinition(definition) {
   // checked in a test, and "a skip destination is invalid" across a 40-field
   // waiver was the least useful thing that check could have said.
   const [problem] = skipRuleProblems(questions);
-  return problem ? `${problem.message} ${problem.fix}` : null;
+  if (problem) return `${problem.message} ${problem.fix}`;
+  return questions.map(signOffProblem).find(Boolean) || null;
 }

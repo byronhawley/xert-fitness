@@ -7,6 +7,7 @@ import {
 } from '@/lib/formResponseRecord';
 import { waitForPrintableImages } from '@/lib/printReady';
 import FormText from '@/components/public/FormText';
+import { formSignatory } from '@/lib/formSignatories';
 import { ADMIN_BUTTON, AdminSkeleton } from './ui';
 
 const secondaryButton = 'admin-kit-button';
@@ -65,12 +66,15 @@ function FileAnswer({ value }) {
   return <div className="flex items-start gap-3"><FileText aria-hidden="true" className="mt-0.5 h-5 w-5 shrink-0 text-document-neutral-500" /><div><p className="break-all font-semibold text-document-neutral-950">{file.name}</p><p className="mt-0.5 text-xs text-document-neutral-500">{[file.type, file.sizeLabel].filter(Boolean).join(' · ') || 'File details recorded'}</p><p className="mt-1 text-xs italic text-document-neutral-500">File metadata only — no file was uploaded.</p></div></div>;
 }
 
-function SignatureAnswer({ value }) {
-  if (!responseAnswerIsPresent(value)) return <p className="text-sm italic text-document-neutral-500">Not answered</p>;
+/** @param {{ value: any, signatory?: { name: string, role: string } | null }} props */
+function SignatureAnswer({ value, signatory = null }) {
+  // A signature given in advance is written into the response by the database;
+  // one missing here was on a response taken before that was switched on.
+  if (!responseAnswerIsPresent(value)) return <p className="text-sm italic text-document-neutral-500">{signatory ? `Signed in advance by ${signatory.name}, but the signature was not stored with this response.` : 'Not answered'}</p>;
   const source = safeResponseSignatureURL(value);
   if (!source) return <p className="text-sm italic text-document-neutral-500">Signature captured, but its preview is unavailable.</p>;
   const inkClass = source.startsWith('data:image/png;base64,') ? 'xert-response-signature-image' : '';
-  return <div className="xert-response-signature border-b border-document-neutral-400 pb-2"><img alt="Respondent signature" className={`${inkClass} max-h-36 max-w-full object-contain object-left`} src={source} /></div>;
+  return <div className="xert-response-signature border-b border-document-neutral-400 pb-2"><img alt={signatory ? `Signature of ${signatory.name}` : 'Respondent signature'} className={`${inkClass} max-h-36 max-w-full object-contain object-left`} src={source} />{signatory && <p className="mt-1 text-xs text-document-neutral-600">{signatory.name} · {signatory.role} · signed in advance</p>}</div>;
 }
 
 function AnswerText({ value }) {
@@ -99,7 +103,7 @@ function RatingAnswer({ question, value }) {
 function FieldAnswer({ question }) {
   if (['single_choice', 'multiple_choice', 'dropdown', 'yes_no'].includes(question.type)) return <ChoiceAnswer question={question} value={question.answer} />;
   if (['star_rating', 'linear_scale', 'nps'].includes(question.type)) return <RatingAnswer question={question} value={question.answer} />;
-  if (question.type === 'signature') return <SignatureAnswer value={question.answer} />;
+  if (question.type === 'signature') return <SignatureAnswer value={question.answer} signatory={formSignatory(question)} />;
   if (question.type === 'file_upload') return <FileAnswer value={question.answer} />;
   return <AnswerText value={question.answer} />;
 }

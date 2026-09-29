@@ -52,7 +52,7 @@ const SIGN_OFF_FIELDS = Object.freeze([
 
 const SIGNATURE_SLOTS = Object.freeze([
   { id: 'ic-93-contractor-signature', label: 'Independent contractor signature' },
-  { id: 'ic-98-owner-signature', label: 'Owner / witness signature (Byron Hawley)' },
+  { id: 'ic-98-owner-signature', label: 'Signed for XERT Fitness: Byron Hawley, Owner' },
 ]);
 
 // Helvetica is drawn with WinAnsi, which covers the agreement's curly quotes,
@@ -265,7 +265,7 @@ function drawTickList(sheet, { title, note, options, name, selected, form, radio
   }
 }
 
-async function drawSignatures(sheet, { form, signatures, doc }) {
+async function drawSignatures(sheet, { form, signatures, presigned, doc }) {
   const boxHeight = 46;
   for (const slot of SIGNATURE_SLOTS) {
     const needed = boxHeight + LEADING.body * 2 + 10;
@@ -280,7 +280,9 @@ async function drawSignatures(sheet, { form, signatures, doc }) {
     const boxY = sheet.claim(boxHeight);
     const width = 260;
 
-    const drawn = signatures?.[slot.id];
+    // A signature given in advance fills its line on every copy, blank or
+    // signed; one recorded on the response takes its place when there is one.
+    const drawn = signatures?.[slot.id] || presigned?.[slot.id];
     if (drawn) {
       const png = await doc.embedPng(drawn);
       // Fit inside the box without distorting: the signature keeps its shape.
@@ -334,11 +336,12 @@ function drawFooter(sheet, { mode }) {
  * @param {string} [options.accepted]                   the acceptance answer
  * @param {string} [options.marketing]                  the marketing consent answer
  * @param {Record<string, Uint8Array>} [options.signatures] PNG bytes per signature id
+ * @param {Record<string, Uint8Array>} [options.presigned]  PNG bytes for lines signed in advance
  * @returns {Promise<Uint8Array>}
  */
 export async function renderContractorPdf({
   mode = 'interactive', values = {}, qualifications = [], service = null, businessType = null,
-  accepted = null, marketing = null, signatures = null,
+  accepted = null, marketing = null, signatures = null, presigned = null,
 } = {}) {
   const doc = await PDFDocument.create();
   doc.setTitle(mode === 'signed'
@@ -406,7 +409,7 @@ export async function renderContractorPdf({
   for (const detail of SIGN_OFF_FIELDS) {
     drawBlank(sheet, { ...detail, name: detail.id, value: values[detail.id], form, width: 300 });
   }
-  await drawSignatures(sheet, { form, signatures, doc });
+  await drawSignatures(sheet, { form, signatures, presigned, doc });
 
   if (form) {
     // Readers should render the fields from their own appearance streams, so a
