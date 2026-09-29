@@ -12,7 +12,10 @@ const manager = () => read('../src/components/admin/FormsSurveysManager.jsx');
 test('every question says on its heading whether it is required, and toggles there', async () => {
   const source = await manager();
   // A real switch on the always-visible heading, not inside the expanded body.
-  assert.match(source, /\{!layout && <button type="button" role="switch" aria-checked=\{Boolean\(field\.required\)\}/);
+  // A signature signed in advance is not asked for, so it shows who signed it
+  // instead of a switch.
+  assert.match(source, /\{!layout && !signatory && <button type="button" role="switch" aria-checked=\{Boolean\(field\.required\)\}/);
+  assert.match(source, /\{signatory && <AdminBadge status="active">Signed by \{signatory\.name\}<\/AdminBadge>\}/);
   assert.match(source, /onClick=\{\(\) => onUpdate\('required', !field\.required\)\}>\{field\.required \? 'Required' : 'Optional'\}/);
   // And there is exactly one control for it, so the two cannot disagree.
   assert.equal([...source.matchAll(/onUpdate\('required'/g)].length, 1);
@@ -23,8 +26,9 @@ test('the whole form can be made required or optional at once', async () => {
   const source = await manager();
   assert.match(source, /Make all required/);
   assert.match(source, /Make all optional/);
-  // Headings and statements have no answer, so they are never marked.
-  assert.match(source, /const answerable = field => !\['section_break', 'statement'\]\.includes\(field\.type\);/);
+  // Headings, statements and signatures signed in advance have no answer to
+  // give, so they are never marked.
+  assert.match(source, /const answerable = field => !\['section_break', 'statement'\]\.includes\(field\.type\) && !formSignatory\(field\);/);
   assert.match(source, /answerable\(field\) \? \{ \.\.\.field, required: value \} : field/);
 });
 

@@ -13,6 +13,7 @@ import { activeQuestions, archiveFormResponse, archiveOwnerForm, CHARTABLE_TYPES
 import { answerImage, answerTable } from '@/lib/formAnswers';
 import { continueDotPoints, toggleDotPoints } from '@/lib/formText';
 import { builderRows, moveVisibleRow, sectionEnd, sectionOf } from '@/lib/formBuilderLayout';
+import { FORM_SIGNATORIES, formSignatory } from '@/lib/formSignatories';
 import AdminConfirmDialog from './AdminConfirmDialog';
 import FormQRCode from './FormQRCode';
 import FormResponseRecord, { FormRecordLoading } from './FormResponseRecord';
@@ -128,6 +129,9 @@ function TypePicker({ label, onPick, onClose }) {
   return <div role="group" aria-label={label} className={`${panel} forms-type-picker space-y-4 p-4`}>
     <div className="flex items-center justify-between gap-2"><p className="text-sm font-semibold text-text-primary">{label}</p><button type="button" className={`${button} px-3`} aria-label="Close the list of question types" onClick={onClose}><X className="h-4 w-4" /></button></div>
     {TYPE_GROUPS.map(group => <div key={group}><p className={`${sectionTitle} mb-2`}>{GROUP_LABELS[group] || group}</p><div className="forms-type-grid">{FIELD_TYPES.filter(type => type.group === group).map(type => { const Icon = TYPE_ICONS[type.value] || Type; return <button key={type.value} type="button" className={`${button} forms-type-card`} onClick={() => onPick(type.value)}><Icon className="h-5 w-5 text-accent-default" aria-hidden="true" /><span className="text-sm text-text-primary">{type.label}</span><span className="forms-secondary">{TYPE_HINTS[type.value]}</span></button>; })}</div></div>)}
+    {/* A sign-off is a signature field that is already signed: the person
+        filling the form in sees it done, and every copy carries it. */}
+    <div><p className={`${sectionTitle} mb-2`}>Signed for XERT Fitness</p><div className="forms-type-grid">{Object.values(FORM_SIGNATORIES).map(person => <button key={person.key} type="button" className={`${button} forms-type-card`} onClick={() => onPick('signature', { question: 'Signed for XERT Fitness', description: `${person.name}, ${person.role}.`, signed_by: person.key, required: false })}><Signature className="h-5 w-5 text-accent-default" aria-hidden="true" /><span className="text-sm text-text-primary">{person.name} signs</span><span className="forms-secondary">Already signed, on every copy</span></button>)}</div></div>
   </div>;
 }
 
@@ -163,6 +167,8 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
   const name = layout ? kind.toLowerCase() : `question ${index + 1}`;
   const wording = String((layout ? field.content : field.question) || '').trim();
   const TypeIcon = TYPE_ICONS[field.type] || Type;
+  // A signature signed in advance is not asked for, so it is never required.
+  const signatory = formSignatory(field);
   // Say where unseen example text was typed, rather than hide the field and
   // leave the words stranded where the owner can no longer see them either.
   const unseenExample = hasUnseenExample(field);
@@ -196,7 +202,8 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
         {/* Required lives on the heading so it can be read and changed without
             opening the field. It used to sit at the bottom of the expanded
             editor, so a collapsed field never said whether it was required. */}
-        {!layout && <button type="button" role="switch" aria-checked={Boolean(field.required)} aria-label={`Question ${index + 1} is required`} className={`${button} px-3`} onClick={() => onUpdate('required', !field.required)}>{field.required ? 'Required' : 'Optional'}</button>}
+        {signatory && <AdminBadge status="active">Signed by {signatory.name}</AdminBadge>}
+        {!layout && !signatory && <button type="button" role="switch" aria-checked={Boolean(field.required)} aria-label={`Question ${index + 1} is required`} className={`${button} px-3`} onClick={() => onUpdate('required', !field.required)}>{field.required ? 'Required' : 'Optional'}</button>}
         <button type="button" className={`${button} px-3`} aria-expanded={open} aria-label={`${open ? 'Close' : 'Edit'} ${name}`} onClick={onToggle}>{open ? 'Done' : 'Edit'}</button>
       </div>
     </div>
@@ -209,6 +216,7 @@ function FieldEditor({ field, fields, index, count, open, onToggle, autoFocus = 
               into one used to flatten every paragraph and point into one line. */}
           {field.type === 'statement' ? <WritingBox label="What it says" ariaLabel={`Question ${index + 1}`} autoFocus={autoFocus} minRows={4} value={field.content} placeholder="e.g. Please bring a copy of each certificate to your first session." onChange={value => onUpdate('content', value)} /> : <label className="block text-xs text-text-secondary">{field.type === 'section_break' ? 'Heading' : 'What are you asking?'}<input aria-label={`Question ${index + 1}`} autoFocus={autoFocus} className={`${control} mt-1`} value={layout ? field.content || '' : field.question || ''} onChange={event => onUpdate(layout ? 'content' : 'question', event.target.value)} placeholder={layout ? 'e.g. Qualifications and certificates' : 'e.g. Do you have any injuries?'} /></label>}
           <label className="block text-xs text-text-secondary">Type<select aria-label={`Field type for question ${index + 1}`} className={`${control} mt-1`} value={field.type} onChange={event => onUpdate('type', event.target.value)}>{TYPE_GROUPS.map(group => <optgroup key={group} label={GROUP_LABELS[group] || group}>{FIELD_TYPES.filter(type => type.group === group).map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</optgroup>)}</select></label>
+          {field.type === 'signature' && <label className="block text-xs text-text-secondary">Who signs<span className="forms-secondary">Signed in advance, it is not asked for: they see it already signed, and every copy of every response carries it.</span><select aria-label={`Who signs question ${index + 1}`} className={`${control} mt-1`} value={signatory ? field.signed_by : ''} onChange={event => onPatch(event.target.value ? { signed_by: event.target.value, required: false } : { signed_by: undefined })}><option value="">The person filling in the form</option>{Object.values(FORM_SIGNATORIES).map(person => <option key={person.key} value={person.key}>{person.name}, signed in advance</option>)}</select></label>}
           {!layout && <WritingBox label="Hint" note="Shown under the question, in smaller text." ariaLabel={`Hint for question ${index + 1}`} value={field.description} onChange={value => onUpdate('description', value)} />}
           {!layout && EXAMPLE_ANSWER_TYPES.has(field.type) && <label className="block text-xs text-text-secondary">Example answer<span className="forms-secondary">Faint text inside the answer box. It disappears as they type.</span><input aria-label={`Example answer for question ${index + 1}`} className={`${control} mt-1`} value={field.placeholder || ''} onChange={event => onUpdate('placeholder', event.target.value)} /></label>}
           {/* A section break and a statement both render supporting text under their
@@ -281,7 +289,7 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
     setOpenId(id);
     window.requestAnimationFrame?.(() => document.getElementById(`form-field-${id}`)?.scrollIntoView?.({ block: 'center', behavior: 'smooth' }));
   };
-  const addField = (type, at = null) => { const field = createField(type); const position = at ?? draft.questions.length; const parent = sectionOf(draft.questions, position - 1); if (parent) fold(parent.id, false); setQuestions(list => [...list.slice(0, position), field, ...list.slice(position)]); setOpenId(field.id); setNewId(field.id); setAdding(null); };
+  const addField = (type, at = null, preset = null) => { const field = { ...createField(type), ...(preset || {}) }; const position = at ?? draft.questions.length; const parent = sectionOf(draft.questions, position - 1); if (parent) fold(parent.id, false); setQuestions(list => [...list.slice(0, position), field, ...list.slice(position)]); setOpenId(field.id); setNewId(field.id); setAdding(null); };
   const duplicateField = index => { const source = draft.questions[index]; const layout = isLayout(source); const copy = { ...source, id: crypto.randomUUID(), ...(layout ? { content: `${source.content || ''} (copy)` } : { question: `${source.question || ''} (copy)` }) }; setQuestions(list => [...list.slice(0, index + 1), copy, ...list.slice(index + 1)]); setOpenId(copy.id); };
   // Removing is one tap, so it can be taken back until the next change: the
   // snapshot is the whole list from before, skip rules and all, and it is only
@@ -313,7 +321,7 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
   // Headings and statements have no answer, so "required" means nothing on
   // them. Hidden questions are counted and changed too: the database already
   // skips them when checking a submission, so this cannot block anyone.
-  const answerable = field => !['section_break', 'statement'].includes(field.type);
+  const answerable = field => !['section_break', 'statement'].includes(field.type) && !formSignatory(field);
   const answerableCount = draft.questions.filter(answerable).length;
   const requiredCount = draft.questions.filter(field => answerable(field) && field.required).length;
   const setAllRequired = value => update('questions', draft.questions.map(field => answerable(field) ? { ...field, required: value } : field));
@@ -333,7 +341,7 @@ function FormEditor({ draft, setDraft, onSave, onCancel, saving, error, forms = 
     return () => window.removeEventListener('keydown', onKey);
   }, []);
   const typeLabel = FORM_TYPES.find(type => type.value === draft.form_type)?.label || 'Form';
-  const picker = (anchor, at, label) => adding === anchor && <TypePicker label={label} onPick={type => addField(type, at)} onClose={() => setAdding(null)} />;
+  const picker = (anchor, at, label) => adding === anchor && <TypePicker label={label} onPick={(type, preset) => addField(type, at, preset)} onClose={() => setAdding(null)} />;
   return <fieldset disabled={saving} aria-busy={saving} className={`${shell} forms-editor`}>
     {/* The toolbar stays put while a long form scrolls under it: the name, the
         state, the three views and Save are always one reach away. */}

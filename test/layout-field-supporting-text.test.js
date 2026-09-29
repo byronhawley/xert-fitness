@@ -12,7 +12,8 @@ const read = path => readFile(new URL(path, import.meta.url), 'utf8');
 test('the public form shows supporting text under a section break and a statement', async () => {
   const page = await read('../src/pages/PublicForm.jsx');
   const rendered = [...page.matchAll(/\{item\.description && <FormText text=\{item\.description\}/g)];
-  assert.equal(rendered.length, 2, 'both layout kinds render their description');
+  // Both layout kinds, and a signature signed in advance, which is read the same way.
+  assert.equal(rendered.length, 3, 'every block that is read rather than answered renders its description');
 });
 
 test('the builder can edit the supporting text it renders', async () => {

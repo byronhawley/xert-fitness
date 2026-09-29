@@ -262,7 +262,9 @@ test('the list of types says what each one collects', () => {
   assert.match(html, /aria-label="Add to this section"/);
   assert.match(html, /Yes \/ No<\/span><span class="forms-secondary">A yes or a no<\/span>/);
   assert.match(html, /Statement<\/span><span class="forms-secondary">Something to read, nothing to answer<\/span>/);
-  assert.equal([...html.matchAll(/forms-type-card/g)].length, 22);
+  // Every type, plus the ready-made sign-off by Byron Hawley.
+  assert.equal([...html.matchAll(/forms-type-card/g)].length, 23);
+  assert.match(html, /Byron Hawley signs<\/span><span class="forms-secondary">Already signed, on every copy<\/span>/);
 });
 
 test('name, email and phone are each asked for, optional, or not asked, in one control', () => {
@@ -283,4 +285,35 @@ test('Preview runs the unsaved draft through the public form itself', () => {
   assert.match(html, /<h1 class="font-display[^"]*">Contractor agreement<\/h1>/, 'the respondent’s first page, with the draft’s title');
   assert.match(html, /Name \*/);
   assert.match(html, />Continue/);
+});
+
+// ─── Signed in advance ──────────────────────────────────────────────────────
+// Byron Hawley signs every copy of the contractor agreement; any signature
+// field can be his, already signed.
+
+const byronSignOff = {id:'owner',type:'signature',question:'Signed for XERT Fitness',description:'Byron Hawley, Owner.',signed_by:'byron-hawley',required:false};
+
+test('a signature signed in advance says who signed it instead of asking whether it is required', () => {
+  const html = renderForm({title:'Agreement',questions:[byronSignOff]});
+  assert.match(html, /Signed by Byron Hawley<\/span>/);
+  assert.ok(!html.includes('aria-label="Question 1 is required"'), 'nothing to require of the person filling it in');
+  assert.match(html, /<select aria-label="Who signs question 1"[^>]*><option value="">The person filling in the form<\/option><option value="byron-hawley" selected="">Byron Hawley, signed in advance<\/option>/);
+  // The field's own preview is the block the person filling it in reads.
+  assert.match(html, /<img src="\/assets\/signatures\/byron-hawley\.png" alt="Signature of Byron Hawley"/);
+  assert.match(html, /Byron Hawley<span class="text-xert-pale\/55"> · Owner, XERT Fitness<\/span>/);
+  assert.match(html, /0 questions/, 'a sign-off is not counted as a question to answer');
+});
+
+test('an ordinary signature can be switched to Byron’s from the same place', () => {
+  const html = renderForm({title:'Agreement',questions:[{id:'s',type:'signature',question:'Your signature',required:true}]});
+  assert.match(html, /<select aria-label="Who signs question 1"[^>]*><option value="" selected="">The person filling in the form<\/option>/);
+  assert.match(html, /role="switch" aria-checked="true" aria-label="Question 1 is required"/);
+});
+
+test('the record names Byron under his signature', () => {
+  const byron = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const response = {id:'r',completed_at:'2026-09-29T00:00:00Z',status:'new',answers:{owner:byron},form_snapshot:{title:'Agreement',questions:[byronSignOff]}};
+  const html = renderToStaticMarkup(React.createElement(FormResponseRecord, {form:{title:'Agreement',questions:[byronSignOff]},response,responses:[response]}));
+  assert.match(html, /alt="Signature of Byron Hawley"/);
+  assert.match(html, /Byron Hawley · Owner, XERT Fitness · signed in advance/);
 });

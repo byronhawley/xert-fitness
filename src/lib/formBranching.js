@@ -1,3 +1,5 @@
+import { formSignatory } from './formSignatories.js';
+
 const CHOICE_TYPES = new Set(['single_choice', 'multiple_choice', 'dropdown', 'yes_no']);
 const LAYOUT_TYPES = new Set(['section_break', 'statement']);
 
@@ -42,7 +44,9 @@ export function buildPublicFormSteps(questions, answers, omitted = []) {
 
   items.forEach(item => {
     if (!item || item.hidden || skipped.has(item.id)) return;
-    if (LAYOUT_TYPES.has(item.type)) {
+    // A field signed in advance has nothing to answer: it is read, like a
+    // statement, and the database writes the signature in on submission.
+    if (LAYOUT_TYPES.has(item.type) || formSignatory(item)) {
       information.push(item);
       return;
     }

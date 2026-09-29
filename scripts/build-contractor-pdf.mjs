@@ -8,7 +8,7 @@
 // signed one reads a response, so it needs SUPABASE_URL and a service key, or
 // SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF to go via the Management API.
 
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { renderContractorPdf } from '../src/lib/contractorPdf.js';
 import { XERT_CONTRACTOR_QUALIFICATIONS, XERT_CONTRACTOR_SERVICES } from '../src/lib/xertContractorAgreement.js';
 
@@ -22,6 +22,12 @@ const value = name => {
 const VALUE_FLAGS = new Set(['--response']);
 const positional = args.filter((arg, index) =>
   !arg.startsWith('--') && !VALUE_FLAGS.has(args[index - 1]));
+
+// Byron signs every copy for XERT Fitness: the blank one to print, and the
+// signed one even if the response predates his signature being stored on it.
+const PRESIGNED = {
+  'ic-98-owner-signature': await readFile(new URL('../public/assets/signatures/byron-hawley.png', import.meta.url)),
+};
 
 const QUALIFICATION_ID = 'ic-08-qualifications';
 const SERVICE_ID = 'ic-09-service';
@@ -98,7 +104,7 @@ if (flag('signed')) {
     console.error('--signed needs --response <uuid>');
     process.exit(1);
   }
-  const bytes = await renderContractorPdf({ mode: 'signed', ...shapeResponse(await loadResponse(id)) });
+  const bytes = await renderContractorPdf({ mode: 'signed', presigned: PRESIGNED, ...shapeResponse(await loadResponse(id)) });
   await writeFile(out, bytes);
   console.log(`Signed agreement: ${out} (${bytes.length} bytes)`);
 } else if (flag('demo')) {
@@ -115,11 +121,12 @@ if (flag('signed')) {
       XERT_CONTRACTOR_QUALIFICATIONS[4]],
     service: XERT_CONTRACTOR_SERVICES[0], businessType: 'Pty Ltd',
     accepted: 'I accept this agreement', marketing: 'Yes, I consent',
+    presigned: PRESIGNED,
   });
   await writeFile(out, bytes);
   console.log(`Demo agreement: ${out} (${bytes.length} bytes)`);
 } else {
-  const bytes = await renderContractorPdf({ mode: 'interactive' });
+  const bytes = await renderContractorPdf({ mode: 'interactive', presigned: PRESIGNED });
   await writeFile(out, bytes);
   console.log(`Fillable agreement: ${out} (${bytes.length} bytes)`);
 }
