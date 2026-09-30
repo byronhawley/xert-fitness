@@ -60,7 +60,7 @@ export async function submitClassSignup(formData) {
   if (isHoneypotFilled(formData)) {
     return { success: true, status: 'requested', took_spot: false, spots_left: null };
   }
-  const { data, error } = await supabase.rpc('submit_class_signup', {
+  const args = {
     p_session_id: formData.class_session_id,
     p_full_name: formData.full_name,
     p_email: formData.email,
@@ -69,10 +69,23 @@ export async function submitClassSignup(formData) {
     p_training_level: formData.training_level || null,
     p_notes: formData.notes || null,
     p_join_waitlist: formData.join_waitlist === true,
-    p_guest_visit: formData.guest_visit === true,
-  });
-  if (error) throw new Error(error.message);
+  };
+  // Sent only for a guest; the database takes "not a guest" as the default.
+  // The API matches a call to a function by the names it is sent, from its own
+  // list of the database's functions. When that list fell behind the database,
+  // it knew no sign-up that took this answer, and turned every sign-up away as
+  // "not found". Leaving it out when it says nothing keeps ordinary sign-ups
+  // independent of whether the list has caught up.
+  if (formData.guest_visit === true) args.p_guest_visit = true;
+  const { data, error } = await supabase.rpc('submit_class_signup', args);
+  if (error) throw rpcFailure(error);
   return { success: true, ...(data || {}) };
+}
+
+// Keeps the database's own code with the message, so the form can show the
+// reason for a failure it has no friendly words for.
+function rpcFailure(error) {
+  return Object.assign(new Error(error.message), { code: error.code });
 }
 
 /**

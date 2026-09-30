@@ -278,3 +278,17 @@ export function friendlySignupError(error) {
   }
   return 'Sign-up failed. Please try again.';
 }
+
+/**
+ * The technical reason behind a failure the form has no words for, short
+ * enough to sit in small print under "Sign-up failed". A screenshot of the
+ * form then says what went wrong, where "Please try again" said nothing.
+ * Null for the failures that already have their own message.
+ */
+export function signupErrorDetail(error) {
+  const raw = String((error && typeof error === 'object' ? error.message : error) || '').trim();
+  if (!raw || Object.keys(SIGNUP_ERRORS).some(code => raw.includes(code))) return null;
+  const code = String(error?.code || '').trim();
+  const detail = `${code && !raw.startsWith(code) ? `${code}: ` : ''}${raw}`;
+  return detail.length > 180 ? `${detail.slice(0, 179)}…` : detail;
+}

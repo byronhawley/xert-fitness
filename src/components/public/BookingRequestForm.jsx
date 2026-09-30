@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { submitClassSignup } from '@/lib/submitForms';
 import FormCheckbox from '@/components/public/FormCheckbox';
-import { friendlySignupError } from '@/lib/classSignup';
+import { friendlySignupError, signupErrorDetail } from '@/lib/classSignup';
+import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { gymDateTimeLabel } from '@/lib/gymTime';
 
 const chipClasses = 'min-h-11 px-3 py-2 text-sm font-body rounded-full border transition-colors';
@@ -25,6 +26,16 @@ function Input({ ...props }) {
 
 const TRAINING_LEVELS = ['New / beginner', 'Some gym experience', 'Regular trainer', 'Advanced'];
 
+// What the signed-in account already knows about them, so a member types
+// their name, email and phone once, on their account, not on every class.
+function accountDetails(user, profile) {
+  return {
+    full_name: profile?.full_name || user?.user_metadata?.full_name || '',
+    email: user?.email || profile?.email || '',
+    phone: profile?.phone || '',
+  };
+}
+
 export default function BookingRequestForm({
   session,
   onSuccess,
@@ -36,11 +47,28 @@ export default function BookingRequestForm({
   joinWaitlist = false,
   onRejected,
 }) {
-  const [form, setForm] = useState({
-    full_name: '', email: '', phone: '', training_level: '',
+  const { user, profile } = useSupabaseAuth();
+  const [form, setForm] = useState(() => ({
+    ...accountDetails(user, profile), training_level: '',
     notes: '', consent_to_contact: false, company_website: '',
     class_session_id: session?.id || '',
-  });
+  }));
+  // The profile can arrive after the form opens. Fill only what is still
+  // empty, so nothing they have typed is overwritten.
+  useEffect(() => {
+    const known = accountDetails(user, profile);
+    setForm(current => ({
+      ...current,
+      full_name: current.full_name || known.full_name,
+      email: current.email || known.email,
+      phone: current.phone || known.phone,
+    }));
+  }, [profile, user]);
+  // Signed in with all three known, the details are a line to check, not
+  // three boxes to fill. "Change" opens them for this booking.
+  const [changingDetails, setChangingDetails] = useState(false);
+  const detailsKnown = Boolean(user) && !changingDetails
+    && Boolean(form.full_name.trim() && form.email.trim() && form.phone.trim());
   // Memberships are not linked to the website yet, so nothing here can tell a
   // member from a walk-in. Asking is what lets the confirmation offer a
   // non-member the ways to pay instead of leaving them booked in and stuck.
@@ -52,6 +80,7 @@ export default function BookingRequestForm({
   const [rejected, setRejected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [errorDetail, setErrorDetail] = useState('');
 
   const set = (f, v) => setForm(p => ({ ...p, [f]: v }));
 
@@ -64,6 +93,7 @@ export default function BookingRequestForm({
     if (!form.consent_to_contact) { setError('Consent to contact is required.'); return; }
     setLoading(true);
     setError('');
+    setErrorDetail('');
     try {
       const result = await submitClassSignup({
         ...form, join_waitlist: joinWaitlist, guest_visit: hasMembership === false && guestVisit,
@@ -78,6 +108,10 @@ export default function BookingRequestForm({
       });
     } catch (submitError) {
       setError(friendlySignupError(submitError));
+      setErrorDetail(signupErrorDetail(submitError) || '');
+      // A saved phone or email the database will not take has to be
+      // fixable, so the boxes open rather than staying folded away.
+      if (/NAME_REQUIRED|EMAIL_REQUIRED|PHONE_REQUIRED/.test(submitError?.message || '')) setChangingDetails(true);
       // The class filled while this form was open. Tell the page so the counts
       // behind the modal stop advertising a spot that is gone, and stop
       // offering a submit that will fail the same way again.
@@ -107,9 +141,23 @@ export default function BookingRequestForm({
         </div>
       )}
 
-      <div><FieldLabel htmlFor="booking-full-name" required>Full name</FieldLabel><Input id="booking-full-name" name="full_name" autoComplete="name" aria-required="true" placeholder="Your name" value={form.full_name} onChange={e => set('full_name', e.target.value)} /></div>
-      <div><FieldLabel htmlFor="booking-email" required>Email</FieldLabel><Input id="booking-email" name="email" autoComplete="email" aria-required="true" type="email" placeholder="you@email.com" value={form.email} onChange={e => set('email', e.target.value)} /></div>
-      <div><FieldLabel htmlFor="booking-phone" required>Phone</FieldLabel><Input id="booking-phone" name="phone" autoComplete="tel" aria-required="true" type="tel" placeholder="Mobile number" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+      {detailsKnown ? (
+        <div className="xert-card-flat flex items-start justify-between gap-3 p-4">
+          <div className="min-w-0">
+            <p className="xert-label">Booking as</p>
+            <p className="font-body text-sm text-xert-offwhite">{form.full_name}</p>
+            <p className="break-words font-body text-xs text-xert-pale/65">{form.email} · {form.phone}</p>
+          </div>
+          <button type="button" onClick={() => setChangingDetails(true)}
+            className="xert-btn-ghost inline-flex min-h-11 shrink-0 items-center px-4 font-display text-xs uppercase tracking-wide">
+            Change
+          </button>
+        </div>
+      ) : <>
+        <div><FieldLabel htmlFor="booking-full-name" required>Full name</FieldLabel><Input id="booking-full-name" name="full_name" autoComplete="name" aria-required="true" placeholder="Your name" value={form.full_name} onChange={e => set('full_name', e.target.value)} /></div>
+        <div><FieldLabel htmlFor="booking-email" required>Email</FieldLabel><Input id="booking-email" name="email" autoComplete="email" aria-required="true" type="email" placeholder="you@email.com" value={form.email} onChange={e => set('email', e.target.value)} /></div>
+        <div><FieldLabel htmlFor="booking-phone" required>Phone</FieldLabel><Input id="booking-phone" name="phone" autoComplete="tel" aria-required="true" type="tel" placeholder="Mobile number" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+      </>}
 
       <fieldset>
         <legend className="xert-label">Training level</legend>
@@ -185,6 +233,7 @@ export default function BookingRequestForm({
       {error && (
         <div role="alert" className="rounded-xl border p-3" style={errorStyle}>
           <p className="font-body text-sm">{error}</p>
+          {errorDetail && <p className="mt-1 break-words font-body text-xs opacity-80">Details: {errorDetail}</p>}
         </div>
       )}
 
