@@ -1,16 +1,20 @@
 # XERT Roster — migrate, enable, operate, roll back
 
-Nothing here has been run against the live XERT database. Each production
-step needs the owner's separate go-ahead.
+`20261001010000_staff_roster.sql` was applied in production on 2026-10-01
+(SQL editor, 20:46 UTC) and the roster is OFF. Nothing else here has been run
+against the live XERT database. Each production step needs the owner's
+separate go-ahead.
 
 ## What ships
 
 | Piece | Where |
 | --- | --- |
-| Schema, rules, permissions | `supabase/migrations/20261001010000_staff_roster.sql` (additive; one file) |
+| Schema, rules, permissions | `supabase/migrations/20261001010000_staff_roster.sql` (additive; **applied in production 2026-10-01, never edit**) |
+| Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; not yet applied) |
+| Push scheduler (not a migration) | `docs/staff-roster/push-dispatch-schedule.sql` (pg_cron + pg_net + Vault; activate only with approval) |
 | Manager screens | Command Centre → Classes → **Coach roster** (`/admin/roster`) |
 | Coach screens | `/coaching` (website and the app's web views; staff link, no membership needed) |
-| Release gate | `staff_roster` added to `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
+| Release gate | `staff_roster` and `staff_roster_push_reliability` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
 | Full removal script | `docs/staff-roster/rollback.sql` (manual, not a migration) |
 
 The migration does not change bookings, waitlists, attendance, payments,
@@ -37,9 +41,32 @@ feature is on.
 4. Run `src/supabase/release_readiness_check.sql`. `staff_roster` must show as
    installed.
 
-**Order matters for releases.** The web build and the Codemagic gate now
-require `staff_roster`. Apply the migration **before** the next web deploy or
-app build that includes this branch, or the gate will (correctly) fail.
+### 1a. Apply the push reliability migration (needs approval)
+
+`20261002010000_staff_roster_push_reliability.sql` goes on top of the applied
+first release, the same way: SQL editor only, whole file, backup first. It
+starts with `set lock_timeout = '5s'`, is idempotent (safe to re-run after a
+timeout), runs as one implicit transaction in the SQL editor (a failure part
+way leaves nothing behind), and records `staff_roster_push_reliability` as its
+**last** statement, so a partial run can never look installed. It adds columns
+and a status check to `staff_notification_push_deliveries` (empty while the
+roster is off), one after-insert trigger on `staff_notifications`, and
+service-role-only functions. It touches no class, booking, device or notice.
+Check: `select capability from public.xert_schema_capabilities where capability like 'staff_roster%';`
+returns both rows.
+
+**Order matters for releases.** The web build (Operations Health) and the
+Codemagic gate require `staff_roster` **and** `staff_roster_push_reliability`.
+Apply `20261002010000` **before** deploying the web release that contains it,
+and before any app build from it, or the gates will (correctly) report it
+missing. The release still deployed from `d4b10bc` keeps working after the
+migration: its old push calls now claim nothing (it simply stops pushing),
+and with the roster off it never got that far anyway.
+
+Rollout with the feature OFF: (1) apply `20261002010000`; (2) deploy the web
+release; (3) set `STAFF_PUSH_DISPATCH_SECRET` in Vercel; (4) with approval,
+activate the schedule (`push-dispatch-schedule.sql`); (5) only then, with
+approval, switch the roster on.
 
 Until it is switched on, the feature is invisible to coaches and sends nothing.
 
@@ -87,63 +114,163 @@ coaches who have answered.
 
 ## 3a. Phone push for roster notices
 
-Every roster notice is first an in-app notice (`staff_notifications`). When
-the iOS app has registered a device (`push_subscriptions`, the same table as
-member notices), the web roster screens also call `POST /api/push-subscription` with `{ "action": "staff_roster_push" }` (the existing push endpoint, so the Hobby plan's twelve-function limit holds)
-after publishing, cover approve/decline, absence decisions, reopening and
-**Send due reminders now**. The route:
+Every roster notice is first an in-app notice (`staff_notifications`). Writing
+the notice also writes one **pending** push work item per enabled device of the
+recipient (`staff_notification_push_deliveries`), in the same transaction,
+whatever created it: a manager or coach action on the web or in the app, a
+class retimed or cancelled in the Class calendar, or a reminder run. Nothing
+depends on anyone opening a roster screen afterwards.
 
-- checks the caller's sign-in and that they are a manager or active coach;
-- with the service role (server env only), claims due, unread notices from
-  the last day for each enabled device that has not had them, sends them over
-  the existing APNs path (`api/apns.js`), and records the outcome per notice
-  and device in `staff_notification_push_deliveries` (`sending` → `accepted`
-  by Apple, `failed` or `invalid_token`). Each notice reaches a device at most
-  once; invalid tokens are switched off as for member notices;
-- with APNs not configured (`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`,
-  `APNS_BUNDLE_ID`), claims nothing and answers `configured: false`.
+**Who sends it.** The dispatcher (`src/lib/staffRosterPush.js`, served by the
+existing `POST /api/push-subscription` with `{ "action": "staff_roster_push" }`,
+so the Hobby plan's twelve-function limit holds) runs from:
 
-Lock-screen text is generic (“XERT coaching” / “Your roster has an update.
-Open the app to see it.” and a few similar variants) and never includes names,
-reasons or notes. The payload carries `staff_notification_id` and an
-`open_path` of `/open/coaching/<roster|availability|requests>[?month=YYYY-MM]`.
-Activity → Notices shows push as “accepted by Apple” or “failed”, separately
-from “Opened in app”, which stays the only read state.
+- **the scheduler** (the dependable path): Supabase `pg_cron` + `pg_net` call
+  the endpoint every minute, but only when `staff_roster_push_due()` says
+  there is work, with `Authorization: Bearer <STAFF_PUSH_DISPATCH_SECRET>`
+  read from Vault. See `docs/staff-roster/push-dispatch-schedule.sql`
+  (not applied; activation and deactivation steps are in the file). Expected
+  delay from notice to push request: about 1–2 minutes. Dependencies: the
+  roster on, APNs env set in Vercel, the secret in Vercel and Vault, pg_cron
+  and pg_net enabled, the site reachable. Vercel Hobby crons run at most
+  daily, so they are not used; a Pro-plan Vercel Cron could call
+  `GET /api/push-subscription?action=staff_roster_push` instead (Vercel sends
+  `Authorization: Bearer <CRON_SECRET>`);
+- **a signed-in manager or coach**, fire-and-forget after a roster action on
+  the web (publish, cover, absence decisions, reopen, **Send due reminders
+  now**). This only makes the next push sooner. Without the scheduler,
+  notices created with nobody acting on the roster afterwards (a class
+  retimed in the Class calendar, a `pg_cron` reminder run) wait until the
+  next such action and are dropped as `expired` after 12 hours.
 
-Notices created without a web action (class retimed in the Class calendar, a
-scheduled `pg_cron` reminder run) are pushed by the next roster action's call,
-if still within a day.
+The scheduler's identity is its own server secret, never a person's token;
+the user path still verifies the session and requires a manager or active
+coach. Neither weakens any public or API authentication.
 
-## 4. Switch off (safe, reversible)
+**Leases and retries.** A run leases due work (lease token, expiry 3 min,
+worker name, attempt count), marks each row "send started" just before the
+request goes to Apple, and records each outcome with its lease. A result from
+a lease that no longer owns the row is ignored, so a late answer never
+overwrites a newer attempt.
 
-Settings → **Switch off** (or
-`update public.staff_roster_settings set enabled = false;`).
+| What happened | Status | Retried? | Device |
+| --- | --- | --- | --- |
+| 200 | `accepted` (by Apple; not delivered, not read) | no | kept |
+| 410 Unregistered / ExpiredToken; 400 BadDeviceToken / DeviceTokenNotForTopic | `invalid_token` | no | **switched off** (unless a whole run says so: then treated as configuration and retried) |
+| 403 provider token / certificate errors, 429, 5xx, 400 IdleTimeout | `pending` with backoff | yes, ≤ 5 attempts in all (5xx and 403 wait ≥ 15 min, 429 ≥ 1 min; doubles, ≤ 1 h) | kept |
+| other 400s, 403 Forbidden, 404, 405, 413 | `failed` | no (Apple: fix first) | kept |
+| network error before the request left | `pending` | yes | kept |
+| request left, no answer (timeout, reset), or the dispatcher died after starting the send | `uncertain` | **no** | kept |
+| dispatcher died before starting the send | `pending` again | yes | kept |
+| roster switched off after the lease, before the send | `pending`, attempt given back | when back on | kept |
+
+Uncertain outcomes are not resent: a phone shows a notice at most once from
+us, and the in-app notice is always there. Every attempt of one notice uses
+the same `apns-collapse-id` (`staff-notice-<notice id>`) so any repeat replaces
+the earlier alert instead of adding one, and `apns-id` is the work item id.
+Delivery is never claimed to be exactly once.
+
+**Staleness (separate from cadence).** Before sending, work that is no longer
+true or useful is closed, never sent: older than 12 hours (`expired:TOO_OLD`);
+a class-change notice whose class has started (`expired:CLASS_STARTED`), was
+changed again, cancelled or restored, or has a newer notice for the same class
+(`superseded`); a reminder after the coach submitted, or a newer notice of the
+same kind and month (`superseded`); already read in the app, a recipient who
+is no longer a manager / active coach, or a device switched off (`skipped`).
+`apns-expiration` is set to the same limit (the class start for class
+changes), so Apple stops trying too.
+
+**Not configured / off.** With APNs not configured (`APNS_KEY_ID`,
+`APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`) nothing is leased and the
+answer says `configured: false`; with the roster off nothing is leased either.
+Work stays pending and is judged by the staleness policy when it can run.
+
+**Payload.** Lock-screen text is generic (“XERT coaching” / “Your roster has
+an update. Open the app to see it.” and similar) and never includes names,
+reasons or notes. The payload carries `staff_notification_id`, `audience`
+(`coach` | `manager`) and `open_path`:
+
+- coach notices: `/open/coaching/<roster|availability|requests>[?month=YYYY-MM]` (My Coaching);
+- manager notices (stored link under `/admin/`): `/admin/roster?rosterTab=<roster|availability|requests|coaches|settings|activity>[&rosterMonth=YYYY-MM]`,
+  opened in the web manager console (My Coaching is coach-only). Record ids
+  (`rosterFocus`) are dropped. Signed out, the console shows its sign-in form
+  at that same URL, so the destination survives sign-in; the console and
+  every manager RPC check the manager role again.
+
+Activity → Notices shows push as accepted by Apple, waiting, sending, failed,
+unconfirmed or not sent, separately from “Opened in app”, which stays the only
+read state.
+
+## 4. Turning things off: four different actions
+
+They do different things. Pick the smallest that solves the problem.
+
+### 4.1 Public coach names OFF (reversible, no data loss)
+
+Settings → untick **Show the lead coach on the public timetable**.
+
+- Removes every name the roster wrote on an **upcoming** class and puts back
+  what was there before (`staff_roster_withdraw_public_names`).
+- A name typed or edited by hand on a class is **kept** and becomes ordinary
+  class text. Past, cancelled and completed classes are not changed.
+- Works whether the roster is on or off. Turning it back on derives names from
+  the roster published at that time.
+
+### 4.2 Whole roster OFF (reversible, no data loss)
+
+**First do 4.1** if public names are on. Settings enforces this: **Switch off**
+is disabled while public names are on, and explains why. Switching the roster
+off on its own does **not** withdraw any public name: names already written
+stay on the timetable. If the roster was switched off another way (for
+example `update public.staff_roster_settings set enabled = false;` in an
+emergency), Settings shows a warning while names are still showing; untick
+public names then (4.1 still works with the roster off).
+
+Then Settings → **Switch off**.
 
 - Coach screens show "Coach roster isn't switched on yet". Drafts, private
   notes and stale data are never shown.
-- Class changes stop queueing roster notices.
+- Class changes stop queueing roster notices. No push is sent: the dispatcher
+  leases nothing, and work already leased is put back unsent. Pending work
+  stays and is judged by the staleness policy if the roster comes back on.
 - All data stays. Switching back on resumes where it was.
-- Public coach names already written to classes stay as ordinary class text.
-  Edit them in the Class calendar if needed. (To remove the names the roster
-  wrote, switch off **Show the lead coach on the public timetable** first.)
+- To also stop the scheduler calling the endpoint at all:
+  `select cron.unschedule('staff-roster-push-dispatch');` (see
+  `push-dispatch-schedule.sql`). It is harmless to leave: it makes no call
+  while the roster is off.
 
-## 5. Roll back
+### 4.3 Application rollback (reversible)
 
-| Situation | Do this |
-| --- | --- |
-| Roster misbehaving | Switch off (section 4). Nothing else changes. |
-| Web/app release must be reverted | Revert the release. The schema is additive, so older app code ignores it. |
-| Remove the schema entirely | Back up, then run `docs/staff-roster/rollback.sql`. **Deletes all roster data and its audit trail.** Classes, bookings and payments are untouched. Then ship a release without the `staff_roster` gate. |
+Vercel → Deployments → the previous production deployment → **Instant
+Rollback** (or promote it). The database objects stay and are harmless to
+older code: the first release (`d4b10bc`) still works on the new schema, and
+its old push functions now claim nothing. Do not run any SQL for an app
+rollback. If the push schedule is active, unschedule it if the rolled-back
+code has no dispatcher (calls would get an error answer, nothing else).
+Native builds are rolled back separately in App Store Connect.
+
+### 4.4 Destructive schema removal (NOT authorised; last resort)
+
+`docs/staff-roster/rollback.sql` is **not** a rollback in the usual sense: it
+permanently deletes every roster table, coach record, availability, roster,
+cover request, notice, push work item and the roster audit trail (both
+migrations). It needs a backup and the owner's explicit approval; it is never
+part of a normal rollback. Unschedule the push job first. Classes, bookings,
+payments, device registrations and `class_sessions.coach_name` are untouched
+(do 4.1 first if roster-written names should not remain as class text). Then
+ship a release without the `staff_roster` / `staff_roster_push_reliability`
+gates.
 
 `test/staff-roster-rollback.test.js` runs migrate → publish → full removal →
-re-migrate and checks that classes are byte-for-byte unchanged and that no
-roster object is left behind.
+re-migrate and checks that classes and device registrations are unchanged and
+that no roster object is left behind. `test/staff-roster-disable-order.test.js`
+proves the 4.1-then-4.2 order and that hand-typed names survive.
 
-## 6. Local checks
+## 5. Local checks
 
 ```bash
 npm run lint
-npm test                      # includes PGlite tests over the real migration
+npm test                      # includes PGlite tests over both real migrations
 npm run build
 npm run sql:check
 node test/staff-roster-performance.mjs        # synthetic timing, not in npm test

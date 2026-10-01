@@ -88,10 +88,38 @@ export function sendNotification(
  * auditable failed result, never a throw. Status 'delivered' means APNs
  * accepted the request (HTTP 200); it is not proof the device showed it.
  */
-export function sendAPNsAlert(
+export async function sendAPNsAlert(
   client,
   subscription,
-  { collapseId, expiresAt = null, payload },
+  options,
+  config,
+  providerToken,
+  timeoutMs = APNS_REQUEST_TIMEOUT_MS,
+) {
+  const result = await postAPNsAlert(client, subscription.device_token, options, config, providerToken, timeoutMs);
+  return { subscription, status: result.status, reason: result.reason };
+}
+
+// Errors that mean the request never reached Apple (no connection was made),
+// so sending it again cannot duplicate anything.
+const NOT_SENT_ERROR_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ERR_HTTP2_INVALID_SESSION',
+  'ERR_SSL_WRONG_VERSION_NUMBER', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'DEPTH_ZERO_SELF_SIGNED_CERT',
+]);
+
+/**
+ * The same request as sendAPNsAlert, with what a retry policy needs to know:
+ *   transport 'response'     APNs answered; httpStatus and reason say what
+ *   transport 'not_sent'     the request never left (no connection, or the
+ *                            client refused it), so a retry cannot duplicate
+ *   transport 'no_response'  the request may have reached Apple but no answer
+ *                            came back (timeout, reset): the outcome is unknown
+ * `apnsId` (a canonical UUID) is sent as the apns-id header when given.
+ */
+export function postAPNsAlert(
+  client,
+  deviceToken,
+  { collapseId, expiresAt = null, apnsId = null, payload },
   config,
   providerToken,
   timeoutMs = APNS_REQUEST_TIMEOUT_MS,
@@ -99,16 +127,17 @@ export function sendAPNsAlert(
   return new Promise(resolve => {
     const headers = {
       ':method': 'POST',
-      ':path': `/3/device/${subscription.device_token}`,
+      ':path': `/3/device/${deviceToken}`,
       authorization: `bearer ${providerToken}`,
       'apns-topic': config.bundleId,
       'apns-push-type': 'alert',
       'apns-priority': '10',
       'apns-collapse-id': collapseId,
     };
+    if (apnsId) headers['apns-id'] = String(apnsId).toLowerCase();
     if (expiresAt) {
       const expiresAtSeconds = Math.floor(new Date(expiresAt).getTime() / 1000);
-      if (Number.isFinite(expiresAtSeconds)) headers['apns-expiration'] = String(expiresAtSeconds);
+      if (Number.isFinite(expiresAtSeconds)) headers['apns-expiration'] = String(Math.max(0, expiresAtSeconds));
     }
     let statusCode = 0;
     let responseBody = '';
@@ -120,34 +149,47 @@ export function sendAPNsAlert(
       clearTimeout(timeoutId);
       resolve(result);
     };
+    const failure = (error, transport) => ({
+      status: 'failed',
+      reason: clean(error?.message) || 'APNS_NETWORK_ERROR',
+      httpStatus: 0,
+      transport,
+      errorCode: clean(error?.code) || null,
+    });
     let request;
     try {
       request = client.request(headers);
     } catch (error) {
-      finish({ subscription, status: 'failed', reason: clean(error.message) || 'APNS_NETWORK_ERROR' });
+      finish(failure(error, 'not_sent'));
       return;
     }
     request.setEncoding('utf8');
     request.on('response', responseHeaders => { statusCode = Number(responseHeaders[':status'] || 0); });
     request.on('data', chunk => { responseBody += chunk; });
-    request.on('error', error => finish({ subscription, status: 'failed', reason: clean(error.message) || 'APNS_NETWORK_ERROR' }));
+    request.on('error', error => {
+      const neverConnected = client.connecting === true || NOT_SENT_ERROR_CODES.has(clean(error?.code));
+      finish(failure(error, statusCode === 0 && neverConnected ? 'not_sent' : 'no_response'));
+    });
     request.on('end', () => {
       let reason = '';
       try { reason = JSON.parse(responseBody || '{}').reason || ''; } catch { reason = ''; }
       finish({
-        subscription,
         status: statusCode === 200 ? 'delivered' : INVALID_TOKEN_REASONS.has(reason) ? 'invalid_token' : 'failed',
         reason: reason || (statusCode === 200 ? null : `APNS_HTTP_${statusCode || 'UNKNOWN'}`),
+        httpStatus: statusCode,
+        transport: statusCode ? 'response' : 'no_response',
+        errorCode: null,
       });
     });
     timeoutId = setTimeout(() => {
-      finish({ subscription, status: 'failed', reason: 'APNS_REQUEST_TIMEOUT' });
+      finish({ status: 'failed', reason: 'APNS_REQUEST_TIMEOUT', httpStatus: 0, transport: 'no_response', errorCode: null });
       try { request.close(http2.constants.NGHTTP2_CANCEL); } catch { /* stream already closed */ }
     }, Math.max(1, Number(timeoutMs) || APNS_REQUEST_TIMEOUT_MS));
     try {
       request.end(JSON.stringify(typeof payload === 'function' ? payload() : payload));
     } catch (error) {
-      finish({ subscription, status: 'failed', reason: clean(error.message) || 'APNS_NETWORK_ERROR' });
+      // Building the payload or writing the stream failed before anything was sent.
+      finish(failure(error, 'not_sent'));
       try { request.close(http2.constants.NGHTTP2_CANCEL); } catch { /* stream already closed */ }
     }
   });

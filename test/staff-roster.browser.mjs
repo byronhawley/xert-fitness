@@ -1,7 +1,7 @@
 // End-to-end browser check of the staff roster against the REAL migration.
 // The app runs unmodified in Chromium; its Supabase RPC calls are answered by
-// PGlite running supabase/migrations/20261001010000_staff_roster.sql over a
-// synthetic month. Everything else uses the shared local design fixtures.
+// PGlite running the roster migrations (20261001010000_staff_roster.sql, then
+// 20261002010000_staff_roster_push_reliability.sql) over a synthetic month. Everything else uses the shared local design fixtures.
 // SYNTHETIC DATA ONLY; email notices are off and no request leaves the machine.
 //
 // Run: PLAYWRIGHT_MODULE=/path/to/playwright-core node test/staff-roster.browser.mjs [--screenshots=DIR]
@@ -10,7 +10,7 @@ import { mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { createServer } from 'vite';
-import { installDesignFixtures } from './fixtures/design-data.mjs';
+import { fixtureSession, fixtureUser, installDesignFixtures } from './fixtures/design-data.mjs';
 import { DEMO_COACHES, DEMO_OWNER, demoMonth, rpcAs } from './fixtures/staff-roster-demo.mjs';
 import { addDays, addMonths, datesOfMonth, gymInstantIso, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
 import { gymDateKey } from '../src/lib/gymTime.js';
@@ -35,9 +35,9 @@ const { db } = await demoMonth({ month: MONTH, today });
 const rpcLog = [];
 const pushRequests = [];
 
-async function rosterContext(browser, origin, uid, viewport) {
+async function rosterContext(browser, origin, uid, viewport, { signedIn = true } = {}) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', deviceScaleFactor: viewport.width < 600 ? 2 : 1, timezoneId: 'Australia/Brisbane' });
-  await installDesignFixtures(context, { origin, signedIn: true });
+  await installDesignFixtures(context, { origin, signedIn });
   await context.route('**/rest/v1/rpc/staff_roster_*', async route => {
     const request = route.request();
     const name = new URL(request.url()).pathname.split('/').at(-1);
@@ -321,8 +321,61 @@ try {
     if (shots) await page.screenshot({ path: `${shots}/10-manager-needs-attention.png`, fullPage: true });
   });
 
+  // Manager push destinations open /admin/roster?rosterTab=…&rosterMonth=… in
+  // the web console. Signed out, the console shows its sign-in form at that
+  // same URL, so the destination survives sign-in.
+  const signedOut = await rosterContext(browser, origin, DEMO_OWNER, { width: 1280, height: 900 }, { signedIn: false });
+  await step('a signed-out manager opening a manager push link signs in and lands on the same view', async () => {
+    const tokenCalls = [];
+    await signedOut.context.route('**/auth/v1/token**', async route => {
+      tokenCalls.push(route.request().url());
+      await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(fixtureSession()) });
+    });
+    const target = `/admin/roster?rosterTab=requests&rosterMonth=${MONTH}`;
+    await signedOut.page.goto(`${origin}${target}`, { waitUntil: 'networkidle' });
+    await signedOut.page.getByText('Admin sign in').waitFor();
+    assert.equal(new URL(signedOut.page.url()).pathname + new URL(signedOut.page.url()).search, target, 'the sign-in form is shown at the destination URL');
+    await signedOut.page.locator('input[type="email"]').fill(fixtureUser.email);
+    await signedOut.page.locator('input[type="password"]').fill('synthetic-password');
+    await signedOut.page.getByRole('button', { name: 'Sign in' }).click();
+    await signedOut.page.getByRole('heading', { name: 'Coach roster', exact: true }).waitFor();
+    await signedOut.page.getByRole('radio', { name: 'Requests', checked: true }).waitFor();
+    const landed = new URL(signedOut.page.url());
+    assert.equal(landed.pathname, '/admin/roster');
+    assert.equal(landed.searchParams.get('rosterTab'), 'requests');
+    assert.equal(landed.searchParams.get('rosterMonth'), MONTH);
+    assert.equal(tokenCalls.length, 1);
+    if (shots) await signedOut.page.screenshot({ path: `${shots}/11-manager-link-after-sign-in.png` });
+  });
+
+  await step('a signed-out coach opening a coach link is sent to sign in with the link kept', async () => {
+    await signedOut.page.goto(`${origin}/coaching?tab=requests&month=${MONTH}`, { waitUntil: 'networkidle' });
+    // The fixture session from the previous step is still signed in; sign out first.
+    await signedOut.page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.includes('auth-token')) localStorage.removeItem(key); });
+    await signedOut.page.goto(`${origin}/coaching?tab=requests&month=${MONTH}`, { waitUntil: 'networkidle' });
+    const login = signedOut.page.getByRole('link', { name: 'Log in', exact: true });
+    await login.waitFor();
+    const href = new URL(await login.getAttribute('href'), origin);
+    assert.equal(href.pathname, '/login');
+    assert.equal(href.searchParams.get('next'), `/coaching?tab=requests&month=${MONTH}`);
+  });
+
+  await step('a recipient whose manager access was revoked sees "Admin access only", not the roster', async () => {
+    const revoked = await rosterContext(browser, origin, coach('quinn').profileId, { width: 1280, height: 900 });
+    await revoked.context.route('**/rest/v1/profiles**', route => route.fulfill({ status: 200, contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(route.request().headers().accept?.includes('vnd.pgrst.object')
+        ? { ...fixtureUser, full_name: 'Alex Morgan', role: 'member' } : [{ ...fixtureUser, full_name: 'Alex Morgan', role: 'member' }]) }));
+    const before = rpcLog.length;
+    await revoked.page.goto(`${origin}/admin/roster?rosterTab=requests&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    await revoked.page.getByText('Admin access only').waitFor();
+    assert.equal(rpcLog.slice(before).length, 0, 'no roster data is requested for a non-manager');
+    // And the server refuses the manager RPC even if called directly.
+    await assert.rejects(() => rpcAs(db, coach('quinn').profileId, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` }), /MANAGER_ONLY/);
+    await revoked.context.close();
+  });
+
   await step('no page errors in any session', async () => {
-    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems];
+    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems, ...signedOut.problems];
     assert.deepEqual(all, []);
   });
   const names = new Set(rpcLog.map(item => item.name));
