@@ -72,6 +72,9 @@ enum XertMemberRoute: Hashable {
     case explore
     case account
     case upcomingBookings(UUID?)
+    /// My Coaching for staff on the coach roster. Lives in the Account
+    /// workspace; the server decides on every call whether it shows anything.
+    case coaching(XertCoachingLink)
 
     var destination: XertPrimaryDestination {
         switch self {
@@ -79,7 +82,7 @@ enum XertMemberRoute: Hashable {
         case .booking, .classSession(_), .sessionPacks, .purchaseConfirmation: return .booking
         case .events, .eventGoals: return .events
         case .explore: return .explore
-        case .account, .upcomingBookings(_): return .account
+        case .account, .upcomingBookings(_), .coaching(_): return .account
         }
     }
 
@@ -96,12 +99,13 @@ enum XertMemberRoute: Hashable {
         case .explore: return "Explore"
         case .account: return "Account"
         case .upcomingBookings(_): return "Upcoming Bookings"
+        case .coaching(_): return "My Coaching"
         }
     }
 
     var isContextualTask: Bool {
         switch self {
-        case .notices(_), .classSession(_), .sessionPacks, .purchaseConfirmation, .eventGoals, .upcomingBookings(_):
+        case .notices(_), .classSession(_), .sessionPacks, .purchaseConfirmation, .eventGoals, .upcomingBookings(_), .coaching(_):
             return true
         case .home, .booking, .events, .explore, .account:
             return false
@@ -112,6 +116,9 @@ enum XertMemberRoute: Hashable {
         switch self {
         case .notices(_), .purchaseConfirmation, .eventGoals, .upcomingBookings(_):
             return true
+        case .coaching(_):
+            // Staff roster data is private to the signed-in coach.
+            return true
         case .home, .booking, .classSession(_), .sessionPacks, .events, .explore, .account:
             return false
         }
@@ -121,6 +128,7 @@ enum XertMemberRoute: Hashable {
         switch self {
         case .notices(_): return .notices(nil)
         case .upcomingBookings(_): return .upcomingBookings(nil)
+        case .coaching(let link): return .coaching(XertCoachingLink(tab: link.tab))
         case .classSession(_), .purchaseConfirmation: return nil
         case .home, .booking, .sessionPacks, .events, .eventGoals, .explore, .account:
             return self
@@ -150,6 +158,7 @@ enum XertMemberRoute: Hashable {
         case .explore: return "explore"
         case .account: return "account"
         case .upcomingBookings(let id): return ["account", "bookings", id?.uuidString.lowercased()].compactMap { $0 }.joined(separator: "/")
+        case .coaching(let link): return link.restorationValue
         }
     }
 
@@ -172,16 +181,25 @@ enum XertMemberRoute: Hashable {
             return XertRouteShareDestination(route: .events, isExactTask: false)
         case .upcomingBookings(_):
             return XertRouteShareDestination(route: .booking, isExactTask: false)
-        case .account:
+        case .account, .coaching(_):
+            // Account and staff roster tasks are private; never share them.
             return nil
         }
     }
 
     static func restore(_ value: String) -> Self? {
-        route(forPath: "/\(value.trimmingCharacters(in: CharacterSet(charactersIn: "/")))")
+        if let link = XertCoachingLink.link(restorationValue: value) {
+            return .coaching(link)
+        }
+        return route(forPath: "/\(value.trimmingCharacters(in: CharacterSet(charactersIn: "/")))")
     }
 
     static func route(for url: URL) -> Self? {
+        // My Coaching links may carry `?month=YYYY-MM`; that parser accepts
+        // only its own strict contract. Everything else stays query-free.
+        if let link = XertCoachingLink.link(for: url) {
+            return .coaching(link)
+        }
         guard url.user == nil, url.password == nil, url.query == nil else { return nil }
         if url.scheme?.lowercased() == "https" {
             return webRoute(for: url)

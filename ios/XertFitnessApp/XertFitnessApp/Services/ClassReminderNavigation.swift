@@ -5,6 +5,7 @@ import UserNotifications
 enum XertNotificationCategories {
     static let classReminder = "xert.class-reminder"
     static let memberNotice = "xert.member-notice"
+    static let staffRoster = StaffRosterPush.category
     static let viewBookingAction = "xert.class-reminder.view-booking"
     static let browseClassesAction = "xert.class-reminder.browse-classes"
     static let viewNoticeAction = "xert.member-notice.view"
@@ -35,6 +36,12 @@ enum XertNotificationCategories {
             UNNotificationCategory(
                 identifier: memberNotice,
                 actions: [viewNotice],
+                intentIdentifiers: [],
+                options: []
+            ),
+            UNNotificationCategory(
+                identifier: staffRoster,
+                actions: [],
                 intentIdentifiers: [],
                 options: []
             ),
@@ -173,6 +180,12 @@ final class XertAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
                 NotificationCenter.default.post(name: .xertRefreshAnnouncements, object: nil)
             }
         }
+        if StaffRosterPush.isStaffRosterPayload(notification.request.content.userInfo) {
+            // Refresh what My Coaching shows; receiving a notice never marks it read.
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .xertRefreshStaffRoster, object: nil)
+            }
+        }
         // Keep foreground notices in Notification Centre as well as showing a
         // banner so a member can return after the transient banner disappears.
         completionHandler([.banner, .list, .sound])
@@ -189,6 +202,14 @@ final class XertAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
             AnnouncementPushNavigation.markPending(announcementID: announcementID)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .xertOpenAnnouncements, object: announcementID)
+            }
+            completionHandler()
+            return
+        }
+        if let target = StaffRosterPush.target(from: response.notification.request.content.userInfo) {
+            StaffRosterPushNavigation.markPending(target)
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .xertOpenStaffRoster, object: nil)
             }
             completionHandler()
             return
