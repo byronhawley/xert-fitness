@@ -109,6 +109,9 @@ Internal only (not executable by signed-in users): the checker
 publish, cover approval and switching the option on) and
 `staff_roster_withdraw_public_names` (called when it is switched off).
 
+Service role only (called by `api/staff-roster-push.js`):
+`staff_roster_claim_push_deliveries`, `staff_roster_record_push_results`.
+
 Every mutation takes a client `request_id` (idempotency) and, where it edits a
 versioned record, an expected version. A stale version raises
 `STALE_VERSION` (mapped to "Someone else changed this. Refresh and retry.").

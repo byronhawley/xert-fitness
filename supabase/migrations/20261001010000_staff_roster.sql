@@ -417,6 +417,27 @@ create table if not exists public.staff_notifications (
 );
 create index if not exists staff_notifications_inbox on public.staff_notifications (recipient_profile_id, created_at desc);
 
+-- Phone push for a staff notice, one row per notice × device. Push only
+-- complements the in-app notice above; it never replaces it, and `read_at`
+-- stays the only read state. A row is claimed ('sending') before the send so
+-- a notice reaches each device at most once even when two sends race;
+-- 'accepted' means Apple's push service accepted it, not that the phone
+-- showed it. Written only by the service role (api/staff-roster-push.js).
+create table if not exists public.staff_notification_push_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  notification_id uuid not null references public.staff_notifications(id) on delete cascade,
+  subscription_id uuid not null,
+  recipient_profile_id uuid not null,
+  environment text not null,
+  status text not null default 'sending',
+  reason text,
+  claimed_at timestamptz not null default now(),
+  attempted_at timestamptz,
+  constraint staff_notification_push_once unique (notification_id, subscription_id),
+  constraint staff_notification_push_environment check (environment in ('sandbox', 'production')),
+  constraint staff_notification_push_status check (status in ('sending', 'accepted', 'failed', 'invalid_token'))
+);
+
 create table if not exists public.staff_roster_requests (
   request_id uuid primary key,
   actor uuid,
@@ -451,7 +472,8 @@ begin
     'staff_class_type_staffing', 'staff_session_staffing', 'class_schedule_series',
     'staff_roster_revisions', 'staff_assignments', 'staff_absences', 'staff_cover_requests',
     'staff_cover_offers', 'staff_roster_acknowledgements', 'staff_roster_audit_events',
-    'staff_notifications', 'staff_roster_requests', 'staff_roster_public_names'
+    'staff_notifications', 'staff_roster_requests', 'staff_roster_public_names',
+    'staff_notification_push_deliveries'
   ] loop
     execute format('alter table public.%I enable row level security', v_table);
     execute format('revoke all on table public.%I from public, anon, authenticated', v_table);
@@ -2125,7 +2147,10 @@ begin
   return coalesce((
     select jsonb_agg(jsonb_build_object('id', n.id, 'kind', n.kind, 'title', n.title, 'recipient', coalesce(p.full_name, p.email),
       'created_at', n.created_at, 'deliver_after', n.deliver_after, 'read_at', n.read_at,
-      'email_status', case when n.email_log_id is not null then coalesce((select l.status from public.email_log l where l.id = n.email_log_id), n.email_status) else n.email_status end
+      'email_status', case when n.email_log_id is not null then coalesce((select l.status from public.email_log l where l.id = n.email_log_id), n.email_status) else n.email_status end,
+      'push', (select jsonb_build_object('accepted', count(*) filter (where d.status = 'accepted'),
+          'failed', count(*) filter (where d.status in ('failed', 'invalid_token')), 'sending', count(*) filter (where d.status = 'sending'))
+        from public.staff_notification_push_deliveries d where d.notification_id = n.id)
     ) order by n.created_at desc)
     from (select * from public.staff_notifications where p_month is null or month = p_month order by created_at desc limit least(greatest(coalesce(p_limit, 100), 1), 500)) n
     left join public.profiles p on p.id = n.recipient_profile_id
@@ -2685,6 +2710,81 @@ end;
 $$;
 
 -- ============================================================================
+-- Phone push for staff notices (service role only)
+-- ============================================================================
+
+-- Claims due, unread staff notices for each of the recipient's enabled
+-- devices that have not had them yet, and returns what to send. `p_caller` is
+-- the signed-in user the API verified; only managers and active coaches may
+-- trigger a send (NOT_STAFF otherwise). Notices older than a day are left to the in-app inbox so a
+-- newly registered phone is not flooded with history.
+create or replace function public.staff_roster_claim_push_deliveries(p_caller uuid, p_limit integer default 200)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_enabled boolean;
+  v_rows jsonb;
+begin
+  if p_caller is null or not (
+    exists (select 1 from public.profiles where id = p_caller and role = 'admin')
+    or exists (select 1 from public.staff_members where profile_id = p_caller and status = 'active')
+  ) then
+    raise exception 'NOT_STAFF';
+  end if;
+  select enabled into v_enabled from public.staff_roster_settings where id = 1;
+  if not coalesce(v_enabled, false) then raise exception 'ROSTER_DISABLED'; end if;
+  -- A limit of 0 only checks the caller (used while APNs is not configured).
+  if p_limit = 0 or to_regclass('public.push_subscriptions') is null then return '[]'::jsonb; end if;
+  with candidates as (
+    select n.id as notification_id, s.id as subscription_id, n.recipient_profile_id, s.environment, s.device_token,
+      n.kind, n.link, n.created_at
+    from public.staff_notifications n
+    join public.push_subscriptions s on s.user_id = n.recipient_profile_id and s.enabled
+    where n.deliver_after <= now() and n.read_at is null
+      and greatest(n.created_at, n.deliver_after) > now() - interval '1 day'
+      and not exists (select 1 from public.staff_notification_push_deliveries d where d.notification_id = n.id and d.subscription_id = s.id)
+    order by n.created_at, n.id, s.id
+    limit least(greatest(coalesce(p_limit, 200), 1), 500)
+  ),
+  claimed as (
+    insert into public.staff_notification_push_deliveries (notification_id, subscription_id, recipient_profile_id, environment)
+    select notification_id, subscription_id, recipient_profile_id, environment from candidates
+    on conflict (notification_id, subscription_id) do nothing
+    returning id, notification_id, subscription_id
+  )
+  select coalesce(jsonb_agg(jsonb_build_object('delivery_id', c.id, 'notification_id', c.notification_id, 'subscription_id', c.subscription_id,
+      'environment', k.environment, 'device_token', k.device_token, 'kind', k.kind, 'link', k.link) order by k.created_at, c.notification_id, c.subscription_id), '[]'::jsonb)
+    into v_rows
+  from claimed c join candidates k on k.notification_id = c.notification_id and k.subscription_id = c.subscription_id;
+  return v_rows;
+end;
+$$;
+
+-- Records what Apple's push service said for each claimed send. Only a
+-- 'sending' row changes, so a result is never overwritten. Tokens Apple
+-- reports as invalid are switched off, as for member notices.
+create or replace function public.staff_roster_record_push_results(p_results jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_updated integer;
+  v_invalid uuid[];
+begin
+  if p_results is null or jsonb_typeof(p_results) <> 'array' then raise exception 'RESULTS_INVALID'; end if;
+  with updated as (
+    update public.staff_notification_push_deliveries d
+    set status = r.status, reason = left(r.reason, 200), attempted_at = now()
+    from jsonb_to_recordset(p_results) as r(delivery_id uuid, status text, reason text)
+    where d.id = r.delivery_id and d.status = 'sending' and r.status in ('accepted', 'failed', 'invalid_token')
+    returning d.subscription_id, d.status
+  )
+  select count(*), coalesce(array_agg(subscription_id) filter (where status = 'invalid_token'), '{}') into v_updated, v_invalid from updated;
+  if cardinality(v_invalid) > 0 and to_regclass('public.push_subscriptions') is not null then
+    update public.push_subscriptions set enabled = false where id = any(v_invalid);
+  end if;
+  return jsonb_build_object('recorded', v_updated, 'disabled_tokens', cardinality(v_invalid));
+end;
+$$;
+
+-- ============================================================================
 -- Session changes made in the Class calendar
 -- ============================================================================
 
@@ -2776,5 +2876,9 @@ begin
   end loop;
 end;
 $grants$;
+
+-- Push delivery bookkeeping is for the server (service role) only.
+grant execute on function public.staff_roster_claim_push_deliveries(uuid, integer) to service_role;
+grant execute on function public.staff_roster_record_push_results(jsonb) to service_role;
 
 insert into public.xert_schema_capabilities (capability) values ('staff_roster') on conflict (capability) do nothing;

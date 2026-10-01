@@ -99,14 +99,26 @@ export function monthParam(monthKey) {
 /**
  * @param rpc `(name, params) => Promise<{ data, error }>` — supabase.rpc in
  * the app; a local database in tests and browser checks.
+ * @param [options.notifyPush] called, fire-and-forget, after an action that
+ * creates roster notices, so the server can also push them to phones. The
+ * in-app notice is already saved; a push failure never fails the action.
  */
-export function createStaffRosterClient(rpc) {
+export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
   const call = async (name, params = {}) => {
     const { data, error } = await rpc(`staff_roster_${name}`, params);
     if (error) throw rosterError(error);
     return data;
   };
   const rid = () => newRequestId();
+  const nudge = () => {
+    if (!notifyPush) return;
+    try { Promise.resolve(notifyPush()).catch(() => {}); } catch { /* best effort */ }
+  };
+  // Pushes after a successful call; a publish blocked by rules created nothing.
+  const pushing = promise => promise.then(result => {
+    if (result?.ok !== false) nudge();
+    return result;
+  });
 
   return {
     // ── Manager ──
@@ -118,9 +130,9 @@ export function createStaffRosterClient(rpc) {
       p_month: monthParam(month), p_expected_version: version, p_changes: changes, p_request_id: requestId, p_correction_reason: correctionReason,
     }),
     discardDraft: (month, version) => call('discard_draft', { p_month: monthParam(month), p_expected_version: version, p_request_id: rid() }),
-    publish: (month, version, gapReason, requestId = rid()) => call('publish', {
+    publish: (month, version, gapReason, requestId = rid()) => pushing(call('publish', {
       p_month: monthParam(month), p_expected_version: version, p_gap_reason: gapReason || null, p_request_id: requestId,
-    }),
+    })),
     upsertStaff: (staff, version) => call('upsert_staff', { p_staff: staff, p_expected_version: version ?? null, p_request_id: rid() }),
     setStaffStatus: (staffId, status, version, reason) => call('set_staff_status', { p_staff_id: staffId, p_status: status, p_expected_version: version, p_reason: reason || null, p_request_id: rid() }),
     setCapabilities: (staffId, capabilities) => call('set_capabilities', { p_staff_id: staffId, p_capabilities: capabilities, p_request_id: rid() }),
@@ -129,7 +141,7 @@ export function createStaffRosterClient(rpc) {
       p_month: monthParam(month), p_opens_on: opensOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_shortened: Boolean(shortened), p_request_id: rid(),
     }),
     updatePeriod: (month, { dueOn, publishTargetOn }, version) => call('update_period', { p_month: monthParam(month), p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_expected_version: version }),
-    reopenSubmission: (month, staffId, reason) => call('reopen_submission', { p_month: monthParam(month), p_staff_id: staffId, p_reason: reason, p_request_id: rid() }),
+    reopenSubmission: (month, staffId, reason) => pushing(call('reopen_submission', { p_month: monthParam(month), p_staff_id: staffId, p_reason: reason, p_request_id: rid() })),
     setStaffing: (scope, key, staffing, version) => call('set_staffing', { p_scope: scope, p_key: key, p_staffing: staffing, p_expected_version: version ?? null, p_request_id: rid() }),
     saveSeries: (series, version) => call('save_series', { p_series: series, p_expected_version: version ?? null, p_request_id: rid() }),
     previewSeries: (seriesId, from, until) => call('preview_series', { p_series_id: seriesId, p_from: from, p_until: until }),
@@ -137,13 +149,13 @@ export function createStaffRosterClient(rpc) {
     changeSeriesFrom: (seriesId, from, changes, apply, version) => call('change_series_from', {
       p_series_id: seriesId, p_from: from, p_changes: changes, p_apply: Boolean(apply), p_expected_version: version, p_request_id: rid(),
     }),
-    decideAbsence: (absenceId, decision, version) => call('decide_absence', { p_absence_id: absenceId, p_decision: decision, p_expected_version: version, p_request_id: rid() }),
+    decideAbsence: (absenceId, decision, version) => pushing(call('decide_absence', { p_absence_id: absenceId, p_decision: decision, p_expected_version: version, p_request_id: rid() })),
     recordAbsence: (staffId, startsAt, endsAt, reason) => call('record_absence', { p_staff_id: staffId, p_starts: startsAt, p_ends: endsAt, p_reason: reason || null, p_request_id: rid() }),
-    approveCover: (coverId, offerId, version) => call('approve_cover', { p_cover_id: coverId, p_offer_id: offerId, p_expected_version: version, p_request_id: rid() }),
-    rejectCover: (coverId, version) => call('reject_cover', { p_cover_id: coverId, p_expected_version: version, p_request_id: rid() }),
+    approveCover: (coverId, offerId, version) => pushing(call('approve_cover', { p_cover_id: coverId, p_offer_id: offerId, p_expected_version: version, p_request_id: rid() })),
+    rejectCover: (coverId, version) => pushing(call('reject_cover', { p_cover_id: coverId, p_expected_version: version, p_request_id: rid() })),
     notificationLog: (month, limit = 100) => call('notification_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
     auditLog: (month, limit = 100) => call('audit_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
-    runReminders: () => call('run_reminders', {}),
+    runReminders: () => pushing(call('run_reminders', {})),
 
     // ── Coach ──
     me: () => call('me'),
@@ -172,7 +184,31 @@ let defaultClient = null;
 export async function staffRoster() {
   if (!defaultClient) {
     const { supabase } = await import('./supabase.js');
-    defaultClient = createStaffRosterClient((name, params) => supabase.rpc(name, params));
+    defaultClient = createStaffRosterClient((name, params) => supabase.rpc(name, params), {
+      notifyPush: () => requestRosterPush(() => supabase.auth.getSession()),
+    });
   }
   return defaultClient;
+}
+
+/**
+ * Asks the server to push due roster notices to phones. Best effort: it
+ * reports what happened and never throws. The server checks the session and
+ * holds every credential; nothing private is sent from here.
+ */
+export async function requestRosterPush(getSession, fetcher = globalThis.fetch) {
+  try {
+    const { data } = await getSession();
+    const token = data?.session?.access_token;
+    if (!token || typeof fetcher !== 'function') return { requested: false };
+    const response = await fetcher('/api/staff-roster-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: '{}',
+      keepalive: true,
+    });
+    return { requested: true, ok: Boolean(response?.ok), status: response?.status ?? null };
+  } catch {
+    return { requested: false };
+  }
 }

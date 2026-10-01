@@ -78,6 +78,35 @@ coaches who have answered.
   It runs as the database owner, does nothing while the feature is off, and is
   removed with `select cron.unschedule('staff-roster-reminders');`.
 
+## 3a. Phone push for roster notices
+
+Every roster notice is first an in-app notice (`staff_notifications`). When
+the iOS app has registered a device (`push_subscriptions`, the same table as
+member notices), the web roster screens also call `POST /api/staff-roster-push`
+after publishing, cover approve/decline, absence decisions, reopening and
+**Send due reminders now**. The route:
+
+- checks the caller's sign-in and that they are a manager or active coach;
+- with the service role (server env only), claims due, unread notices from
+  the last day for each enabled device that has not had them, sends them over
+  the existing APNs path (`api/apns.js`), and records the outcome per notice
+  and device in `staff_notification_push_deliveries` (`sending` → `accepted`
+  by Apple, `failed` or `invalid_token`). Each notice reaches a device at most
+  once; invalid tokens are switched off as for member notices;
+- with APNs not configured (`APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`,
+  `APNS_BUNDLE_ID`), claims nothing and answers `configured: false`.
+
+Lock-screen text is generic (“XERT coaching” / “Your roster has an update.
+Open the app to see it.” and a few similar variants) and never includes names,
+reasons or notes. The payload carries `staff_notification_id` and an
+`open_path` of `/open/coaching/<roster|availability|requests>[?month=YYYY-MM]`.
+Activity → Notices shows push as “accepted by Apple” or “failed”, separately
+from “Opened in app”, which stays the only read state.
+
+Notices created without a web action (class retimed in the Class calendar, a
+scheduled `pg_cron` reminder run) are pushed by the next roster action's call,
+if still within a day.
+
 ## 4. Switch off (safe, reversible)
 
 Settings → **Switch off** (or

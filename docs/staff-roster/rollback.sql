@@ -33,7 +33,7 @@ alter table public.class_sessions drop column if exists series_occurrence_date;
 alter table public.class_sessions drop column if exists series_id;
 
 drop table if exists
-  public.staff_roster_public_names, public.staff_roster_change_requests, public.staff_roster_requests,
+  public.staff_notification_push_deliveries, public.staff_roster_public_names, public.staff_roster_change_requests, public.staff_roster_requests,
   public.staff_notifications, public.staff_roster_audit_events, public.staff_roster_acknowledgements,
   public.staff_cover_offers, public.staff_cover_requests, public.staff_absences, public.staff_assignments,
   public.staff_roster_revisions, public.class_schedule_series, public.staff_session_staffing,

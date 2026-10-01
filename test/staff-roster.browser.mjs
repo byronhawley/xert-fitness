@@ -33,6 +33,7 @@ const step = async (name, fn) => {
 
 const { db } = await demoMonth({ month: MONTH, today });
 const rpcLog = [];
+const pushRequests = [];
 
 async function rosterContext(browser, origin, uid, viewport) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', deviceScaleFactor: viewport.width < 600 ? 2 : 1, timezoneId: 'Australia/Brisbane' });
@@ -49,6 +50,11 @@ async function rosterContext(browser, origin, uid, viewport) {
       await route.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
         body: JSON.stringify({ code: error.code || 'P0001', message: error.message, details: error.detail || null, hint: null }) });
     }
+  });
+  // The phone-push nudge is answered locally; nothing is sent anywhere.
+  await context.route('**/api/staff-roster-push', async route => {
+    pushRequests.push({ uid, authorization: route.request().headers().authorization || '', body: route.request().postData() });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: false, claimed: 0, attempted: 0 }) });
   });
   const page = await context.newPage();
   const problems = [];
@@ -220,6 +226,11 @@ try {
     const notices = await db.query(`select count(*)::int as n, count(*) filter (where email_status <> 'not_requested')::int as emailed from public.staff_notifications where kind = 'roster_published'`);
     assert.ok(notices.rows[0].n >= 3, 'affected coaches get an inbox notice');
     assert.equal(notices.rows[0].emailed, 0, 'email is off, so nothing is queued to send');
+    for (let tries = 0; tries < 50 && !pushRequests.some(item => item.uid === DEMO_OWNER); tries++) await new Promise(done => setTimeout(done, 100));
+    const nudge = pushRequests.find(item => item.uid === DEMO_OWNER);
+    assert.ok(nudge, 'publishing asks the server to push the new notices');
+    assert.match(nudge.authorization, /^Bearer \S+/);
+    assert.equal(nudge.body, '{}', 'no roster detail goes with the push request');
   });
 
   const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 390, height: 844 });

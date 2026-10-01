@@ -19,7 +19,17 @@ const ACTION_LABELS = {
   staff_active: 'Coach reactivated', staff_inactive: 'Coach deactivated', capabilities_set: 'Capabilities changed', staffing_set: 'Staffing changed',
   period_opened: 'Availability opened', period_updated: 'Due date changed', series_saved: 'Repeating class saved', series_generated: 'Classes generated',
   series_changed_from: 'Repeating class changed from a date', session_withdrawn: 'Request withdrawn',
+  public_names_projected: 'Coach names shown on the timetable', public_names_withdrawn: 'Coach names removed from the timetable',
 };
+
+// Phone push: Apple accepting a push is not proof the phone showed it, and
+// never means the coach read it (only "Opened in app" means that).
+function pushStatus(push) {
+  if (!push || !(push.accepted || push.failed || push.sending)) return null;
+  if (push.failed && !push.accepted) return ['Push failed', 'danger'];
+  if (push.accepted) return [`Push accepted by Apple${push.failed ? `, ${push.failed} failed` : ''}`, push.failed ? 'warning' : 'neutral'];
+  return ['Push sending', 'warning'];
+}
 
 function when(value) {
   return new Intl.DateTimeFormat('en-AU', { timeZone: 'Australia/Brisbane', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
@@ -53,6 +63,7 @@ export default function ActivityPanel({ month, data, onMutate }) {
         ))}
         {tab === 'notices' && rows?.map(row => {
           const [label, tone] = EMAIL_STATUS[row.email_status] || [row.email_status, 'neutral'];
+          const push = pushStatus(row.push);
           return (
             <li key={row.id} className="staff-roster-row">
               <div className="min-w-0">
@@ -62,6 +73,7 @@ export default function ActivityPanel({ month, data, onMutate }) {
               <div className="flex flex-wrap gap-2">
                 <Tone tone={row.read_at ? 'success' : 'neutral'}>{row.read_at ? 'Opened in app' : 'In app inbox, not opened'}</Tone>
                 <Tone tone={tone}>{label}</Tone>
+                {push && <Tone tone={push[1]}>{push[0]}</Tone>}
               </div>
             </li>
           );
