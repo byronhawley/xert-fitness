@@ -87,8 +87,9 @@ function maximumMatching(left, edges) {
 
 /**
  * Coverage for the sessions in view.
- * Returns per-session status, gaps, single-person dependencies and joint
- * shortages for simultaneous classes.
+ * Returns per-session status, gaps (including positions whose assignment no
+ * longer passes the rules, also listed in `invalid`), single-person
+ * dependencies and joint shortages for simultaneous classes.
  */
 export function coverageReport(ctx, sessionIds) {
   const indexed = ctx.byStaff ? ctx : withIndexes(ctx);
@@ -98,6 +99,7 @@ export function coverageReport(ctx, sessionIds) {
   const bySession = {};
   const gaps = [];
   const dependencies = [];
+  const invalid = [];
   const eligibleCache = new Map();
 
   for (const session of sessions) {
@@ -115,7 +117,17 @@ export function coverageReport(ctx, sessionIds) {
       const pool = candidatesFor(indexed, session.id, position.slot.key, { ignoreAssignmentIds: ignore });
       const options = [...pool.eligible, ...pool.ifNeeded].map(item => item.staffId);
       eligibleCache.set(`${session.id}:${position.slot.key}`, options);
-      if (position.assignment) {
+      // An assignment counts as cover only while it still passes the rules
+      // today: a class extended past the coach's submitted window, a new
+      // absence or an expired capability turns it back into a gap.
+      const stale = position.assignment && session.start > (indexed.now ?? -Infinity)
+        ? checkAssignment(indexed, position.assignment, { ignoreAssignmentIds: [position.assignment.id] }).hard.map(problem => problem.code)
+        : [];
+      if (position.assignment && stale.length) {
+        invalid.push({ sessionId: session.id, slotKey: position.slot.key, staffId: position.assignment.staffId, problems: stale });
+        gaps.push({ sessionId: session.id, slotKey: position.slot.key, candidates: options.length, invalidAssignment: true });
+        if (options.length === 1) dependencies.push({ sessionId: session.id, slotKey: position.slot.key, staffId: options[0], kind: 'only_option' });
+      } else if (position.assignment) {
         filled++;
         if (!options.some(id => id !== position.assignment.staffId)) {
           dependencies.push({ sessionId: session.id, slotKey: position.slot.key, staffId: position.assignment.staffId, kind: 'no_backup' });
@@ -128,6 +140,7 @@ export function coverageReport(ctx, sessionIds) {
     bySession[session.id] = { status: filled >= required ? 'covered' : 'gap', required, filled };
   }
 
+  const invalidKeys = new Set(invalid.map(item => `${item.sessionId}:${item.slotKey}`));
   const shortages = [];
   for (const group of simultaneousGroups(live)) {
     const nodes = [];
@@ -138,7 +151,7 @@ export function coverageReport(ctx, sessionIds) {
         const node = `${session.id}:${position.slot.key}`;
         nodes.push(node);
         const options = new Set(eligibleCache.get(node) || []);
-        if (position.assignment) options.add(position.assignment.staffId);
+        if (position.assignment && !invalidKeys.has(node)) options.add(position.assignment.staffId);
         edges.set(node, [...options].sort());
       }
     }
@@ -151,6 +164,7 @@ export function coverageReport(ctx, sessionIds) {
   return {
     bySession,
     gaps,
+    invalid,
     dependencies,
     shortages,
     totals: {
