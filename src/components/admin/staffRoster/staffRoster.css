@@ -1,0 +1,56 @@
+/* Staff roster workspace. Colours and spacing come from the shared tokens. */
+.staff-roster-notice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-control); padding: var(--space-control) var(--space-group); border: var(--nav-line-width) solid var(--notice-color, var(--border-strong)); border-radius: var(--nav-radius-card); background: var(--surface-raised); }
+.staff-roster-notice[data-tone="success"] { --notice-color: var(--state-success); }
+.staff-roster-notice[data-tone="warning"] { --notice-color: var(--state-warning); }
+.staff-roster-notice[data-tone="danger"] { --notice-color: var(--state-danger-text); }
+.staff-roster-notice[data-tone="info"] { --notice-color: var(--state-info); }
+
+.staff-roster-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-control); }
+.staff-roster-layout { display: grid; gap: var(--space-group); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1200px) { .staff-roster-layout { grid-template-columns: minmax(0, 1fr) 20rem; } }
+
+.staff-roster-week { display: grid; gap: var(--space-control); grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 900px) { .staff-roster-week { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+.staff-roster-day { display: grid; align-content: start; gap: var(--space-inline); min-width: 0; }
+.staff-roster-day[data-other-month="true"] { opacity: 0.7; }
+.staff-roster-day-heading { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-inline); padding-block: var(--space-label); border-bottom: var(--nav-line-width) solid var(--border-hairline); }
+.staff-roster-day-heading[data-today="true"] { border-bottom-color: var(--accent-default); }
+
+.staff-roster-session { display: grid; gap: var(--space-inline); padding: var(--space-control); border: var(--nav-line-width) solid var(--border-hairline); border-inline-start-width: 4px; border-radius: var(--nav-radius-card); background: var(--surface-raised); min-width: 0; }
+.staff-roster-session[data-coverage="covered"] { border-inline-start-color: var(--state-success); }
+.staff-roster-session[data-coverage="gap"] { border-inline-start-color: var(--state-danger-text); }
+.staff-roster-session[data-coverage="cancelled"], .staff-roster-session[data-coverage="closed"] { border-inline-start-color: var(--border-strong); opacity: 0.6; }
+.staff-roster-session[data-shortage="true"] { box-shadow: 0 0 0 2px var(--state-warning); }
+.staff-roster-session[data-focused="true"] { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+.staff-roster-session[data-past="true"] { opacity: 0.65; }
+
+.staff-roster-slot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-label); min-height: var(--control-height); padding: var(--space-label) var(--space-inline); border-radius: var(--radius-control); background: var(--surface-overlay); }
+.staff-roster-slot[data-open="true"][data-required="true"] { border: var(--nav-line-width) dashed var(--state-danger-text); }
+.staff-roster-slot[data-open="true"][data-required="false"] { border: var(--nav-line-width) dashed var(--border-strong); }
+.staff-roster-slot[data-drop-target="true"] { outline: 2px solid var(--accent-default); }
+.staff-roster-slot[data-problem="true"] { border: var(--nav-line-width) solid var(--state-danger-text); }
+.staff-roster-slot button { min-height: var(--control-height); }
+.staff-roster-chip { display: inline-flex; align-items: center; gap: var(--space-label); min-width: 0; text-align: start; color: var(--text-primary); cursor: grab; }
+.staff-roster-chip[data-moving="true"] { outline: 2px dashed var(--accent-default); outline-offset: 2px; }
+
+.staff-roster-month { display: grid; gap: var(--space-label); grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.staff-roster-month-cell { min-height: 4.5rem; padding: var(--space-label); border: var(--nav-line-width) solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-raised); text-align: start; color: var(--text-primary); display: grid; align-content: start; gap: 2px; min-width: 0; }
+.staff-roster-month-cell[data-gaps="true"] { border-color: var(--state-danger-text); }
+.staff-roster-month-cell[data-empty="true"] { background: transparent; border-style: dashed; }
+.staff-roster-month-cell:disabled { cursor: default; }
+
+.staff-roster-list { display: grid; gap: var(--space-inline); }
+.staff-roster-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--space-control); padding: var(--space-control); border: var(--nav-line-width) solid var(--border-hairline); border-radius: var(--nav-radius-card); background: var(--surface-raised); min-width: 0; }
+.staff-roster-row > .min-w-0 { flex: 1 1 14rem; }
+.staff-roster-attention-item { display: block; width: 100%; text-align: start; padding: var(--space-inline) var(--space-control); border-radius: var(--radius-control); border: var(--nav-line-width) solid var(--border-hairline); background: var(--surface-raised); color: var(--text-primary); }
+.staff-roster-attention-item:hover { background: var(--surface-secondary); }
+.staff-roster-attention-item[data-severity="high"] { border-color: var(--state-danger-text); }
+
+.staff-roster-matrix { overflow: auto; border: var(--nav-line-width) solid var(--border-hairline); border-radius: var(--nav-radius-card); }
+.staff-roster-matrix table { border-collapse: collapse; min-width: 100%; font-size: var(--font-size-label); }
+.staff-roster-matrix th, .staff-roster-matrix td { padding: var(--space-label) var(--space-inline); border-bottom: var(--nav-line-width) solid var(--border-hairline); text-align: start; white-space: nowrap; }
+.staff-roster-matrix th { position: sticky; top: 0; background: var(--surface-base); color: var(--text-secondary); }
+
+.staff-roster-diff-added { color: var(--state-success); }
+.staff-roster-diff-removed { color: var(--state-danger-text); text-decoration: line-through; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

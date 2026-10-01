@@ -1,5 +1,5 @@
 import {
-  BarChart3, BellRing, Briefcase, CalendarDays, Mail, CalendarRange, ClipboardCheck, ClipboardList, DollarSign,
+  BarChart3, BellRing, Briefcase, CalendarCheck2, CalendarDays, Mail, CalendarRange, ClipboardCheck, ClipboardList, DollarSign,
   Dumbbell, Handshake, Inbox, ListChecks, MessageSquareText, PenSquare, ScrollText,
   Settings, ShieldCheck, Sun, Ticket, Trophy, Tv, UserCog, Users, UserSquare2,
 } from 'lucide-react';
@@ -33,6 +33,7 @@ export const ADMIN_HUBS = Object.freeze([
     detail: 'Timetable, requests and roll call',
     items: [
       { key: 'calendar', label: 'Class calendar', detail: 'Add, publish and run classes', icon: CalendarDays },
+      { key: 'roster', label: 'Coach roster', detail: 'Who coaches each class, availability and cover', icon: CalendarCheck2 },
       { key: 'bookings', label: 'Class requests', detail: 'People asking for a spot', icon: Inbox },
       { key: 'pt-requests', label: 'Personal training', detail: 'PT enquiries to approve', icon: Dumbbell },
       { key: 'availability', label: 'Opening hours', detail: 'Bookable times and closures', icon: CalendarRange },

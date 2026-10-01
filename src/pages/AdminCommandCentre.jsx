@@ -12,6 +12,7 @@ import { AdminWorkspaceBoundary, WorkspaceSkeleton, retryableLazy as lazy } from
 const AdminToday = lazy(() => import('@/components/admin/AdminToday'));
 const LeadTable = lazy(() => import('@/components/admin/LeadTable'));
 const ClassCalendarAdmin = lazy(() => import('@/components/admin/ClassCalendarAdmin'));
+const StaffRosterWorkspace = lazy(() => import('@/components/admin/staffRoster/StaffRosterWorkspace'));
 const WorkoutManager = lazy(() => import('@/components/admin/WorkoutManager'));
 const BookingRequestsTable = lazy(() => import('@/components/admin/BookingRequestsTable'));
 const PTRequestsTable = lazy(() => import('@/components/admin/PTRequestsTable'));
@@ -132,6 +133,7 @@ export default function AdminCommandCentre() {
       case 'trainers': return <LeadTable key={section} type="trainer" onDirtyChange={setHasUnsavedChanges} />;
       case 'partners': return <LeadTable key={section} type="partner" onDirtyChange={setHasUnsavedChanges} />;
       case 'calendar': return <ClassCalendarAdmin initialAction={intent.get('action')} initialSessionId={intent.get('session')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
+      case 'roster': return <StaffRosterWorkspace />;
       case 'workouts': return <WorkoutManager onDirtyChange={setHasUnsavedChanges} />;
       case 'coaches': return <CoachesManager initialAction={intent.get('action')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
       case 'events': return <EventsManager initialAction={intent.get('action')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
