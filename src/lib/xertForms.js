@@ -97,12 +97,15 @@ export function validateFormDraft(form) {
   return null;
 }
 
+/** @typedef {Error & { code?: string, details?: string }} FormServiceError */
+
 function throwIfError(error) {
   if (!error) return;
   // Keep the provider's code and details on the way out. Dropping them meant
   // callers had to guess at the cause from the message text, and a save
   // conflict reached the editor as "Cannot coerce the result to a single JSON
   // object" instead of anything a person could act on.
+  /** @type {FormServiceError} */
   const wrapped = new Error(error.message || 'The forms service could not complete the request.');
   wrapped.code = error.code;
   wrapped.details = error.details;
@@ -146,6 +149,7 @@ export async function saveOwnerForm(form) {
     const { data: current, error: lookupError } = await supabase.from('xert_forms')
       .select('id, updated_at').eq('id', form.id).maybeSingle();
     throwIfError(lookupError);
+    /** @type {FormServiceError} */
     const conflict = new Error(current
       ? 'This form was changed somewhere else after you opened it. Reload it to get the latest version, then make your changes again.'
       : 'This form has been deleted, so there is nothing left to save to.');

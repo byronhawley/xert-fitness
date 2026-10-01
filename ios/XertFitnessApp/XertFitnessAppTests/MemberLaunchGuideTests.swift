@@ -3,30 +3,35 @@ import XCTest
 
 final class MemberLaunchGuideTests: XCTestCase {
     private let bookingID = UUID()
+    private let confirmedBookingID = UUID()
 
-    func testSignedOutMemberStartsWithAccess() {
+    func testSignedOutMemberStartsWithSignIn() {
         XCTAssertEqual(resolve(isSignedIn: false), .signIn)
     }
 
-    func testIncompleteReadinessPrecedesCreditsAndBooking() {
+    func testIncompleteReadinessPrecedesBooking() {
         XCTAssertEqual(
-            resolve(onboardingLoaded: true, readinessComplete: false, creditBalanceLoaded: true),
+            resolve(
+                readinessComplete: false,
+                bookingsLoaded: true,
+                nextActiveBookingID: bookingID,
+                classRemindersEnabled: true
+            ),
             .completeReadiness
         )
     }
 
-    func testReadyMemberWithoutCreditsChoosesAccess() {
-        XCTAssertEqual(resolve(creditBalanceLoaded: true, bookingsLoaded: true), .chooseAccess)
+    func testReadyMemberWithoutBookingBooksFirstClass() {
+        XCTAssertEqual(resolve(bookingsLoaded: true), .bookFirstClass)
     }
 
-    func testMemberWithCreditsBooksFirstClass() {
-        XCTAssertEqual(resolve(creditBalanceLoaded: true, creditTotal: 4, bookingsLoaded: true), .bookFirstClass)
+    func testReadyMemberWaitsForBookingsBeforeChoosingNextStep() {
+        XCTAssertEqual(resolve(bookingsLoaded: false), .checking)
     }
 
-    func testExistingBookingWinsWhenItsCreditHasAlreadyBeenConsumed() {
+    func testExistingBookingActivatesWhenRemindersAreEnabled() {
         XCTAssertEqual(
             resolve(
-                creditBalanceLoaded: true,
                 bookingsLoaded: true,
                 nextActiveBookingID: bookingID,
                 classRemindersEnabled: true
@@ -35,39 +40,43 @@ final class MemberLaunchGuideTests: XCTestCase {
         )
     }
 
-    func testExistingBookingRemainsActionableWhenOnlyCreditsAreUnavailable() {
+    func testUnavailableBookingsOfferRetryEvenWithAnExistingBooking() {
         XCTAssertEqual(
             resolve(
                 bookingsLoaded: true,
                 nextActiveBookingID: bookingID,
                 classRemindersEnabled: true,
-                creditsUnavailable: true
+                bookingsUnavailable: true
             ),
-            .activated(bookingID: bookingID)
+            .retry
         )
     }
 
-    func testUnavailableLaunchDataOffersRetry() {
-        XCTAssertEqual(resolve(onboardingUnavailable: true), .retry)
+    func testUnavailableOnboardingOffersRetryBeforeBooking() {
+        XCTAssertEqual(
+            resolve(
+                bookingsLoaded: true,
+                nextActiveBookingID: bookingID,
+                classRemindersEnabled: true,
+                onboardingUnavailable: true
+            ),
+            .retry
+        )
     }
 
     func testConfirmedBookingOffersReminderBeforeCompactReadyState() {
         XCTAssertEqual(
             resolve(
-                creditBalanceLoaded: true,
-                creditTotal: 4,
                 bookingsLoaded: true,
                 nextActiveBookingID: bookingID,
-                nextConfirmedBookingID: bookingID
+                nextConfirmedBookingID: confirmedBookingID
             ),
-            .enableReminder(bookingID: bookingID)
+            .enableReminder(bookingID: confirmedBookingID)
         )
     }
 
     func testActivatedMemberCollapsesAfterReminderIsEnabled() {
         let state = resolve(
-            creditBalanceLoaded: true,
-            creditTotal: 4,
             bookingsLoaded: true,
             nextActiveBookingID: bookingID,
             nextConfirmedBookingID: bookingID,
@@ -80,8 +89,6 @@ final class MemberLaunchGuideTests: XCTestCase {
     func testWaitlistedOrRequestedPlaceIsActivatedWithoutReminderPrompt() {
         XCTAssertEqual(
             resolve(
-                creditBalanceLoaded: true,
-                creditTotal: 2,
                 bookingsLoaded: true,
                 nextActiveBookingID: bookingID
             ),
@@ -93,28 +100,22 @@ final class MemberLaunchGuideTests: XCTestCase {
         isSignedIn: Bool = true,
         onboardingLoaded: Bool = true,
         readinessComplete: Bool = true,
-        creditBalanceLoaded: Bool = false,
-        creditTotal: Int = 0,
         bookingsLoaded: Bool = false,
         nextActiveBookingID: UUID? = nil,
         nextConfirmedBookingID: UUID? = nil,
         classRemindersEnabled: Bool = false,
         onboardingUnavailable: Bool = false,
-        creditsUnavailable: Bool = false,
         bookingsUnavailable: Bool = false
     ) -> MemberLaunchGuideState {
         MemberLaunchGuideResolver.resolve(
             isSignedIn: isSignedIn,
             onboardingLoaded: onboardingLoaded,
             readinessComplete: readinessComplete,
-            creditBalanceLoaded: creditBalanceLoaded,
-            creditTotal: creditTotal,
             bookingsLoaded: bookingsLoaded,
             nextActiveBookingID: nextActiveBookingID,
             nextConfirmedBookingID: nextConfirmedBookingID,
             classRemindersEnabled: classRemindersEnabled,
             onboardingUnavailable: onboardingUnavailable,
-            creditsUnavailable: creditsUnavailable,
             bookingsUnavailable: bookingsUnavailable
         )
     }

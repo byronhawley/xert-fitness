@@ -173,6 +173,36 @@ private final class XertMinimumHeightSegments: UISegmentedControl {
     }
 }
 
+/// Keep the native control centered in the space SwiftUI actually allocates.
+/// On iOS18.5 the native control can be 45pt tall inside a 44pt SwiftUI host.
+/// Directly hosting that control aligns its top edge with a 44pt host, clipping
+/// the bottom of its hit target. A container shares their centers instead.
+private final class XertSegmentsContainer: UIView {
+    let control = XertMinimumHeightSegments(items: [])
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        addSubview(control)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        addSubview(control)
+    }
+
+    override var intrinsicContentSize: CGSize { control.intrinsicContentSize }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize { control.sizeThatFits(size) }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        control.frame = bounds
+        // Use the actual fitted control size; do not assume UIKit accepted the
+        // requested height or expand hit testing outside the allocated host.
+        control.center = CGPoint(x: bounds.midX, y: bounds.midY)
+    }
+}
+
 @MainActor
 private struct XertNativeSegments<Value: Hashable>: UIViewRepresentable {
     let title: String
@@ -181,15 +211,19 @@ private struct XertNativeSegments<Value: Hashable>: UIViewRepresentable {
     @Environment(\.isEnabled) private var isEnabled
     @ScaledMetric(relativeTo: .body) private var fontSize = XertTokens.nativeTypeBody
 
-    func makeUIView(context: Context) -> XertMinimumHeightSegments {
-        let control = XertMinimumHeightSegments(items: [])
+    func makeUIView(context: Context) -> XertSegmentsContainer {
+        let container = XertSegmentsContainer(frame: .zero)
+        let control = container.control
+        container.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         control.setContentHuggingPriority(.defaultLow, for: .horizontal)
         control.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         control.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .valueChanged)
-        return control
+        return container
     }
 
-    func updateUIView(_ control: XertMinimumHeightSegments, context: Context) {
+    func updateUIView(_ container: XertSegmentsContainer, context: Context) {
+        let control = container.control
         context.coordinator.parent = self
         if control.numberOfSegments != choices.count || choices.enumerated().contains(where: { control.titleForSegment(at: $0.offset) != $0.element.label }) {
             control.removeAllSegments()
@@ -206,9 +240,11 @@ private struct XertNativeSegments<Value: Hashable>: UIViewRepresentable {
         control.setTitleTextAttributes([.font: font, .foregroundColor: UIColor(XertTokens.textPrimary)], for: .normal)
         control.setTitleTextAttributes([.font: font, .foregroundColor: UIColor(XertTokens.textInverse)], for: .selected)
         control.invalidateIntrinsicContentSize()
+        container.invalidateIntrinsicContentSize()
+        container.setNeedsLayout()
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: XertMinimumHeightSegments, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: XertSegmentsContainer, context: Context) -> CGSize? {
         let intrinsic = uiView.intrinsicContentSize
         return CGSize(width: proposal.width ?? intrinsic.width, height: max(intrinsic.height, XertTokens.controlHeight))
     }
