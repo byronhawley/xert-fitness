@@ -45,9 +45,11 @@ feature is on.
 
 `20261002010000_staff_roster_push_reliability.sql` goes on top of the applied
 first release, the same way: SQL editor only, whole file, backup first. It
-starts with `set lock_timeout = '5s'`, is idempotent (safe to re-run after a
+starts with `set local lock_timeout = '5s'` (scoped to the run, so it does
+not linger on the editor's connection), is idempotent (safe to re-run after a
 timeout), runs as one implicit transaction in the SQL editor (a failure part
-way leaves nothing behind), and records `staff_roster_push_reliability` as its
+way leaves nothing behind; run the whole file at once, never statement by
+statement, or the lock timeout does not apply), and records `staff_roster_push_reliability` as its
 **last** statement, so a partial run can never look installed. It adds columns
 and a status check to `staff_notification_push_deliveries` (empty while the
 roster is off), one after-insert trigger on `staff_notifications`, and
