@@ -449,3 +449,63 @@ test('reminders are deduplicated, daytime, skip submitted coaches and never pred
   assert.equal(first, 2, 'Ava and Cam; Ben explicitly answered');
   assert.equal(second, 0);
 });
+
+// ── Production preflight: privileges as Supabase grants them, and email ────
+
+test('with Supabase-style default grants, roster tables, sequences and internal functions stay closed', async () => {
+  const { migratedDatabase } = await import('./helpers/staff-roster-db.mjs');
+  const db = await migratedDatabase({ extraSql: `
+    alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;
+    alter default privileges in schema public grant all on functions to anon, authenticated, service_role;` });
+  const sequences = await db.query(`select c.relname, has_sequence_privilege('anon', c.oid, 'usage') as anon_usage,
+      has_sequence_privilege('authenticated', c.oid, 'usage') as auth_usage, has_sequence_privilege('authenticated', c.oid, 'select') as auth_select
+    from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'S' and c.relname like 'staff\\_%' order by c.relname`);
+  assert.deepEqual(sequences.rows.map(row => row.relname), ['staff_availability_windows_id_seq', 'staff_roster_audit_events_id_seq']);
+  assert.deepEqual(sequences.rows.filter(row => row.anon_usage || row.auth_usage || row.auth_select), []);
+  const tables = await db.query(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'staff\\_%'
+      and (has_table_privilege('authenticated', c.oid, 'select') or has_table_privilege('anon', c.oid, 'select') or not c.relrowsecurity)`);
+  assert.deepEqual(tables.rows, []);
+  const fns = await db.query(`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'staff\\_roster%' and has_function_privilege('anon', p.oid, 'execute')`);
+  assert.deepEqual(fns.rows, []);
+});
+
+test('with email notices on, a notice reaches the 8-argument queue_email and is shown as queued, not sent', async () => {
+  const { db, staff } = await world();
+  await db.exec(`
+    create table public.synthetic_queued (id uuid primary key default gen_random_uuid(), type text, recipient text, subject text, html text, body text,
+      related_table text, related_id text, attachments jsonb);
+    create function public.queue_email(p_type text, p_to text, p_subject text, p_html text, p_text text default null,
+      p_related_table text default null, p_related_id text default null, p_attachments jsonb default null)
+    returns uuid language plpgsql security definer set search_path = public as $$
+    declare v_id uuid;
+    begin
+      if p_to !~ '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$' then return null; end if;
+      insert into public.synthetic_queued (type, recipient, subject, html, body, related_table, related_id, attachments)
+      values (p_type, p_to, p_subject, p_html, p_text, p_related_table, p_related_id, p_attachments) returning id into v_id;
+      return v_id;
+    end; $$;
+    update public.staff_roster_settings set email_notices_enabled = true;
+    update public.profiles set email = 'not-an-address' where id = '${ids.ben}';
+  `);
+  await submit(db, ids.ava, allWeek(0, 1440));
+  await submit(db, ids.ben, allWeek(0, 1440));
+  const s1 = await addSession(db, day(24), 375, 60);
+  const s2 = await addSession(db, day(25), 375, 60);
+  await apply(db, [{ op: 'assign', session_id: s1, slot_key: 'lead', staff_id: staff.ava }, { op: 'assign', session_id: s2, slot_key: 'lead', staff_id: staff.ben }]);
+  assert.equal((await publish(db)).ok, true);
+  const { rows: queued } = await db.query('select * from public.synthetic_queued');
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].type, 'staff_roster');
+  assert.equal(queued[0].recipient, 'ava@example.test');
+  assert.equal(queued[0].related_table, 'staff_notifications');
+  assert.equal(queued[0].attachments, null);
+  const { rows: notices } = await db.query(`select n.email_status, n.email_log_id, n.id::text as id, n.recipient_profile_id from public.staff_notifications n where kind = 'roster_published' order by recipient_profile_id`);
+  const ava = notices.find(row => row.recipient_profile_id === ids.ava);
+  const ben = notices.find(row => row.recipient_profile_id === ids.ben);
+  assert.deepEqual([ava.email_status, ava.email_log_id], ['queued', queued[0].id], 'queued, never shown as sent');
+  assert.equal(queued[0].related_id, ava.id);
+  assert.deepEqual([ben.email_status, ben.email_log_id], ['no_address', null], 'an unusable address is reported, not queued');
+});

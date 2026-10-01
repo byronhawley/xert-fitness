@@ -22,8 +22,15 @@ feature is on.
 ## 1. Apply the migration (needs approval)
 
 1. Take a database backup, or confirm point-in-time recovery is on.
-2. Apply `20261001010000_staff_roster.sql` the same way earlier migrations were
-   applied (Supabase CLI `supabase db push` or the SQL editor).
+2. Apply `20261001010000_staff_roster.sql` in the Supabase **SQL editor only**,
+   pasting the whole file. Do **not** use `supabase db push`: production's
+   migration ledger is missing about 50 of the repo's migrations, so a push
+   would try to replay them. The file starts with
+   `set lock_timeout = '5s';` so it fails fast rather than queueing behind
+   live traffic for a lock on `class_sessions`; it is idempotent, so if it
+   times out, run it again at a quieter moment. It needs `queue_email` with
+   the 8-argument signature from `20260924010000` (already in production) only
+   when roster emails are switched on.
 3. Check: `select * from public.xert_schema_capabilities where capability = 'staff_roster';`
    returns one row, and `select enabled from public.staff_roster_settings;`
    returns `false`.

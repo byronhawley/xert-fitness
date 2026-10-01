@@ -1,3 +1,7 @@
+-- Fail fast instead of queueing behind live traffic for a lock (it adds a
+-- trigger and two columns to class_sessions). Safe to re-run if it times out.
+set lock_timeout = '5s';
+
 -- ============================================================================
 -- XERT Roster — coach availability, staffing, revisions, absences and cover
 -- ============================================================================
@@ -464,6 +468,7 @@ alter table public.staff_roster_public_names add column if not exists replaced_n
 do $lockdown$
 declare
   v_table text;
+  v_sequence text;
 begin
   foreach v_table in array array[
     'staff_roster_settings', 'staff_members', 'staff_capabilities', 'staff_weekly_patterns',
@@ -477,6 +482,16 @@ begin
   ] loop
     execute format('alter table public.%I enable row level security', v_table);
     execute format('revoke all on table public.%I from public, anon, authenticated', v_table);
+    -- Identity sequences (windows, audit events) are used only by the
+    -- security-definer functions; signed-in users get no usage.
+    for v_sequence in
+      select pg_get_serial_sequence(format('public.%I', v_table), a.attname)
+      from pg_attribute a
+      where a.attrelid = format('public.%I', v_table)::regclass and a.attnum > 0 and not a.attisdropped
+        and pg_get_serial_sequence(format('public.%I', v_table), a.attname) is not null
+    loop
+      execute format('revoke all on sequence %s from public, anon, authenticated', v_sequence);
+    end loop;
   end loop;
 end;
 $lockdown$;
@@ -711,13 +726,17 @@ begin
       select email into v_email from public.profiles where id = p_profile;
       if v_email is null then
         update public.staff_notifications set email_status = 'no_address' where id = v_id;
-      elsif to_regprocedure('public.queue_email(text,text,text,text,text,text,text)') is not null then
-        execute 'select public.queue_email($1, $2, $3, $4, $5, $6, $7)'
+      elsif to_regprocedure('public.queue_email(text,text,text,text,text,text,text,jsonb)') is not null then
+        -- queue_email(type, to, subject, html, text, related_table, related_id, attachments)
+        -- since 20260924010000; roster notices carry no attachments.
+        execute 'select public.queue_email($1, $2, $3, $4, $5, $6, $7, $8)'
           into v_log
           using 'staff_roster', v_email, left(p_title, 150),
             '<p>' || replace(replace(left(p_body, 600), '<', '&lt;'), '>', '&gt;') || '</p><p>Open XERT to see the details.</p>',
-            left(p_body, 600) || E'\n\nOpen XERT to see the details.', 'staff_notifications', v_id::text;
-        update public.staff_notifications set email_status = 'queued', email_log_id = v_log where id = v_id;
+            left(p_body, 600) || E'\n\nOpen XERT to see the details.', 'staff_notifications', v_id::text, null::jsonb;
+        -- queue_email returns null without logging when the address is unusable.
+        update public.staff_notifications set email_status = case when v_log is null then 'no_address' else 'queued' end, email_log_id = v_log
+          where id = v_id;
       else
         update public.staff_notifications set email_status = 'skipped' where id = v_id;
       end if;
