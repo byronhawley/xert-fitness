@@ -3882,3 +3882,275 @@ private extension ISO8601DateFormatter {
         return formatter
     }()
 }
+
+// MARK: - Staff roster (coach)
+
+/// Coach entry points of the staff roster. Every call goes to a
+/// `staff_roster_*` database function with the member's own session; the
+/// database checks the roster switch, the staff link and every rule again on
+/// each call. Mutations carry a request id so a retried tap is applied once.
+extension XertAPI {
+    func staffRosterMe(session auth: AuthSession) async throws -> StaffRosterMe {
+        try await staffRosterCall("me", body: EmptyBody(), auth: auth)
+    }
+
+    func staffRosterMonthClasses(session auth: AuthSession, monthKey: String) async throws -> [StaffRosterMonthClass] {
+        try await staffRosterCall(
+            "month_classes",
+            body: StaffRosterMonthRequest(p_month: StaffRosterTime.monthParameter(monthKey)),
+            auth: auth
+        )
+    }
+
+    func staffRosterSaveUsualWeek(
+        session auth: AuthSession,
+        pattern: [StaffWeeklyWindow],
+        expectedVersion: Int
+    ) async throws -> StaffRosterVersionResult {
+        try await staffRosterCall(
+            "save_usual_week",
+            body: StaffRosterUsualWeekRequest(p_pattern: pattern, p_expected_version: expectedVersion),
+            auth: auth
+        )
+    }
+
+    func staffRosterSaveAvailabilityDraft(
+        session auth: AuthSession,
+        monthKey: String,
+        payload: StaffAvailabilityPayload,
+        expectedVersion: Int
+    ) async throws -> StaffRosterVersionResult {
+        try await staffRosterCall(
+            "save_availability_draft",
+            body: StaffRosterDraftRequest(
+                p_month: StaffRosterTime.monthParameter(monthKey),
+                p_payload: payload,
+                p_expected_version: expectedVersion
+            ),
+            auth: auth
+        )
+    }
+
+    func staffRosterSubmitAvailability(
+        session auth: AuthSession,
+        monthKey: String,
+        payload: StaffAvailabilityPayload,
+        requestID: UUID
+    ) async throws -> StaffRosterSubmitResult {
+        try await staffRosterCall(
+            "submit_availability",
+            body: StaffRosterSubmitRequest(
+                p_month: StaffRosterTime.monthParameter(monthKey),
+                p_payload: payload,
+                p_request_id: requestID
+            ),
+            auth: auth
+        )
+    }
+
+    func staffRosterRequestChange(
+        session auth: AuthSession,
+        monthKey: String,
+        message: String,
+        requestID: UUID
+    ) async throws -> StaffRosterIDResult {
+        try await staffRosterCall(
+            "request_change",
+            body: StaffRosterChangeRequest(
+                p_month: StaffRosterTime.monthParameter(monthKey),
+                p_message: message,
+                p_request_id: requestID
+            ),
+            auth: auth
+        )
+    }
+
+    func staffRosterConfirmSession(
+        session auth: AuthSession,
+        sessionID: UUID,
+        status: String,
+        requestID: UUID
+    ) async throws -> StaffRosterStatusResult {
+        try await staffRosterCall(
+            "confirm_session",
+            body: StaffRosterConfirmRequest(p_session_id: sessionID, p_status: status, p_request_id: requestID),
+            auth: auth
+        )
+    }
+
+    func staffRosterMyRoster(session auth: AuthSession, from: String, to: String) async throws -> StaffRosterMyRoster {
+        try await staffRosterCall("my_roster", body: StaffRosterRangeRequest(p_from: from, p_to: to), auth: auth)
+    }
+
+    func staffRosterAcknowledge(session auth: AuthSession, revisionID: UUID) async throws -> StaffRosterAcknowledgeResult {
+        try await staffRosterCall("acknowledge", body: StaffRosterRevisionRequest(p_revision_id: revisionID), auth: auth)
+    }
+
+    func staffRosterRequestAbsence(
+        session auth: AuthSession,
+        starts: Date,
+        ends: Date,
+        kind: String,
+        reason: String?,
+        requestID: UUID
+    ) async throws -> StaffRosterAbsenceResult {
+        try await staffRosterCall(
+            "request_absence",
+            body: StaffRosterAbsenceRequest(
+                p_starts: StaffRosterAbsenceRequest.timestamp(starts),
+                p_ends: StaffRosterAbsenceRequest.timestamp(ends),
+                p_kind: kind,
+                p_reason: reason,
+                p_request_id: requestID
+            ),
+            auth: auth
+        )
+    }
+
+    func staffRosterWithdraw(session auth: AuthSession, kind: String, id: UUID, requestID: UUID) async throws -> StaffRosterStatusResult {
+        try await staffRosterCall(
+            "withdraw",
+            body: StaffRosterWithdrawRequest(p_kind: kind, p_id: id, p_request_id: requestID),
+            auth: auth
+        )
+    }
+
+    func staffRosterRequestCover(
+        session auth: AuthSession,
+        assignmentID: UUID,
+        reason: String?,
+        requestID: UUID
+    ) async throws -> StaffRosterStatusResult {
+        try await staffRosterCall(
+            "request_cover",
+            body: StaffRosterCoverRequest(p_assignment_id: assignmentID, p_reason: reason, p_request_id: requestID),
+            auth: auth
+        )
+    }
+
+    func staffRosterCoverBoard(session auth: AuthSession) async throws -> [StaffRosterCoverBoardItem] {
+        try await staffRosterCall("cover_board", body: EmptyBody(), auth: auth)
+    }
+
+    func staffRosterOfferCover(session auth: AuthSession, coverID: UUID, requestID: UUID) async throws -> StaffRosterStatusResult {
+        try await staffRosterCall(
+            "offer_cover",
+            body: StaffRosterOfferRequest(p_cover_id: coverID, p_request_id: requestID),
+            auth: auth
+        )
+    }
+
+    func staffRosterMyRequests(session auth: AuthSession) async throws -> StaffRosterMyRequests {
+        try await staffRosterCall("my_requests", body: EmptyBody(), auth: auth)
+    }
+
+    func staffRosterMyNotifications(session auth: AuthSession, limit: Int = 50) async throws -> [StaffRosterNotification] {
+        try await staffRosterCall("my_notifications", body: AdminLimitRequest(p_limit: limit), auth: auth)
+    }
+
+    /// Marks notices read. Called only when the coach views them, never on receipt.
+    func staffRosterMarkNotificationsRead(session auth: AuthSession, ids: [UUID]) async throws -> Int {
+        try await staffRosterCall("mark_notifications_read", body: StaffRosterNotificationIDsRequest(p_ids: ids), auth: auth)
+    }
+
+    private func staffRosterCall<T: Decodable, Body: Encodable>(
+        _ name: String,
+        body: Body,
+        auth: AuthSession
+    ) async throws -> T {
+        var request = try request(baseURL: AppConfig.supabaseURL, path: "/rest/v1/rpc/staff_roster_\(name)")
+        request.httpMethod = "POST"
+        request.setValue(AppConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(auth.access_token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try StaffRosterJSON.encoder.encode(body)
+        let data = try await responseData(for: request)
+        return try StaffRosterJSON.decoder.decode(T.self, from: data)
+    }
+}
+
+private struct StaffRosterMonthRequest: Encodable { let p_month: String }
+private struct StaffRosterUsualWeekRequest: Encodable {
+    let p_pattern: [StaffWeeklyWindow]
+    let p_expected_version: Int
+}
+private struct StaffRosterDraftRequest: Encodable {
+    let p_month: String
+    let p_payload: StaffAvailabilityPayload
+    let p_expected_version: Int
+}
+private struct StaffRosterSubmitRequest: Encodable {
+    let p_month: String
+    let p_payload: StaffAvailabilityPayload
+    let p_request_id: UUID
+}
+private struct StaffRosterChangeRequest: Encodable {
+    let p_month: String
+    let p_message: String
+    let p_request_id: UUID
+}
+private struct StaffRosterConfirmRequest: Encodable {
+    let p_session_id: UUID
+    let p_status: String
+    let p_request_id: UUID
+}
+private struct StaffRosterRangeRequest: Encodable {
+    let p_from: String
+    let p_to: String
+}
+private struct StaffRosterRevisionRequest: Encodable { let p_revision_id: UUID }
+private struct StaffRosterAbsenceRequest: Encodable {
+    let p_starts: String
+    let p_ends: String
+    let p_kind: String
+    let p_reason: String?
+    let p_request_id: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case p_starts, p_ends, p_kind, p_reason, p_request_id
+    }
+
+    static func timestamp(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter.string(from: date)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(p_starts, forKey: .p_starts)
+        try container.encode(p_ends, forKey: .p_ends)
+        try container.encode(p_kind, forKey: .p_kind)
+        if let p_reason { try container.encode(p_reason, forKey: .p_reason) }
+        else { try container.encodeNil(forKey: .p_reason) }
+        try container.encode(p_request_id, forKey: .p_request_id)
+    }
+}
+private struct StaffRosterWithdrawRequest: Encodable {
+    let p_kind: String
+    let p_id: UUID
+    let p_request_id: UUID
+}
+private struct StaffRosterCoverRequest: Encodable {
+    let p_assignment_id: UUID
+    let p_reason: String?
+    let p_request_id: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case p_assignment_id, p_reason, p_request_id
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(p_assignment_id, forKey: .p_assignment_id)
+        if let p_reason { try container.encode(p_reason, forKey: .p_reason) }
+        else { try container.encodeNil(forKey: .p_reason) }
+        try container.encode(p_request_id, forKey: .p_request_id)
+    }
+}
+private struct StaffRosterOfferRequest: Encodable {
+    let p_cover_id: UUID
+    let p_request_id: UUID
+}
+private struct StaffRosterNotificationIDsRequest: Encodable { let p_ids: [UUID] }

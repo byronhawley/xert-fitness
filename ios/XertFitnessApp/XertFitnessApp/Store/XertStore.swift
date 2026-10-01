@@ -1525,6 +1525,12 @@ final class XertStore: ObservableObject {
         }
     }
 
+    /// The signed-in member's session, refreshed when due, for the coach
+    /// roster screens. Roster access itself is decided by the database.
+    func staffRosterSession() async throws -> AuthSession {
+        try await validAuthSession()
+    }
+
     private func validAuthSession() async throws -> AuthSession {
         let memberVersion = memberStateVersion.snapshot
         guard let current = authSession else {
