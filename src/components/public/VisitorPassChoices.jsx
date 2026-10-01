@@ -12,7 +12,7 @@ import { visitorDetailsFromSignup, visitorPassChoices, WEEKLY_MEMBERSHIP } from 
  * Their details carry across to the passes, so nobody retypes a name and
  * number they gave thirty seconds ago on the same screen.
  */
-export default function VisitorPassChoices({ settings, signup, note, onChoose }) {
+export default function VisitorPassChoices({ settings, signup, note = '', onChoose = undefined }) {
   const choices = visitorPassChoices(settings);
   const visitor = visitorDetailsFromSignup(signup);
   // Standing on the page with nobody's details to carry, remembering would
