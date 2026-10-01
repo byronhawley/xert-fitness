@@ -18,7 +18,7 @@ export const BASE_SCHEMA = `
   create function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$
     select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   $$;
-  create table public.coaches (id uuid primary key default gen_random_uuid(), name text not null);
+  create table public.coaches (id uuid primary key default gen_random_uuid(), name text not null, published boolean not null default true);
   create table public.class_templates (id uuid primary key default gen_random_uuid(), name text, class_type text, title text,
     duration_minutes integer, capacity integer, default_start_minute integer);
   create table public.class_sessions (

@@ -92,6 +92,11 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
           Also email roster notices (uses the site’s existing email sending)
         </label>
         <p className="font-body text-xs text-xert-pale/55">Every notice goes to the coach’s inbox in the app. Emails are queued and the activity log shows whether each was actually sent.</p>
+        <label className="flex items-center gap-2 font-body text-sm text-xert-pale min-h-11">
+          <input type="checkbox" checked={Boolean(settings.public_coach_names_enabled)} disabled={busy} onChange={event => save({ public_coach_names_enabled: event.target.checked }, 'Saved')} />
+          Show the lead coach on the public timetable when I publish
+        </label>
+        <p className="font-body text-xs text-xert-pale/55">Only coaches linked to a published Coaches page profile are named, using that profile’s name. A coach name typed on a class by hand is never replaced. Turning this off leaves names already shown in place.</p>
       </section>
     </div>
   );

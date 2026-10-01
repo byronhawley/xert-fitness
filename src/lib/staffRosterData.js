@@ -147,6 +147,7 @@ export function createStaffRosterClient(rpc) {
     rejectCover: (coverId, version) => call('reject_cover', { p_cover_id: coverId, p_expected_version: version, p_request_id: rid() }),
     notificationLog: (month, limit = 100) => call('notification_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
     auditLog: (month, limit = 100) => call('audit_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
+    runReminders: () => call('run_reminders', {}),
 
     // ── Coach ──
     me: () => call('me'),

@@ -32,6 +32,9 @@ create table if not exists public.staff_roster_settings (
   reminders jsonb not null default '{"onOpen":true,"daysBeforeDue":[3],"onDue":true,"overdueSummary":true,"sendMinute":540}'::jsonb,
   allow_if_needed_fallback boolean not null default true,
   email_notices_enabled boolean not null default false,
+  -- Off by default: when on, publishing writes the lead coach's public name
+  -- onto the class (the existing class_sessions.coach_name the timetable shows).
+  public_coach_names_enabled boolean not null default false,
   version integer not null default 1,
   updated_by uuid,
   updated_at timestamptz not null default now(),
@@ -422,6 +425,15 @@ create table if not exists public.staff_roster_requests (
   created_at timestamptz not null default now()
 );
 
+-- What the roster last wrote to class_sessions.coach_name, so a later publish
+-- changes only names it wrote itself and never a name someone typed by hand.
+create table if not exists public.staff_roster_public_names (
+  session_id uuid primary key references public.class_sessions(id) on delete cascade,
+  projected_name text not null,
+  revision_id uuid references public.staff_roster_revisions(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+
 -- ─── Lock down direct access ────────────────────────────────────────────────
 
 do $lockdown$
@@ -435,7 +447,7 @@ begin
     'staff_class_type_staffing', 'staff_session_staffing', 'class_schedule_series',
     'staff_roster_revisions', 'staff_assignments', 'staff_absences', 'staff_cover_requests',
     'staff_cover_offers', 'staff_roster_acknowledgements', 'staff_roster_audit_events',
-    'staff_notifications', 'staff_roster_requests'
+    'staff_notifications', 'staff_roster_requests', 'staff_roster_public_names'
   ] loop
     execute format('alter table public.%I enable row level security', v_table);
     execute format('revoke all on table public.%I from public, anon, authenticated', v_table);
@@ -680,6 +692,8 @@ begin
             '<p>' || replace(replace(left(p_body, 600), '<', '&lt;'), '>', '&gt;') || '</p><p>Open XERT to see the details.</p>',
             left(p_body, 600) || E'\n\nOpen XERT to see the details.', 'staff_notifications', v_id::text;
         update public.staff_notifications set email_status = 'queued', email_log_id = v_log where id = v_id;
+      else
+        update public.staff_notifications set email_status = 'skipped' where id = v_id;
       end if;
     exception when others then
       update public.staff_notifications set email_status = 'failed' where id = v_id;
@@ -965,6 +979,7 @@ begin
     reminders = coalesce(p_patch->'reminders', reminders),
     allow_if_needed_fallback = coalesce((p_patch->>'allow_if_needed_fallback')::boolean, allow_if_needed_fallback),
     email_notices_enabled = coalesce((p_patch->>'email_notices_enabled')::boolean, email_notices_enabled),
+    public_coach_names_enabled = coalesce((p_patch->>'public_coach_names_enabled')::boolean, public_coach_names_enabled),
     version = version + 1, updated_by = auth.uid(), updated_at = now()
   where id = 1 returning * into v_after;
   perform public.staff_roster_audit('settings_updated', 'settings', '1', null, to_jsonb(v_before), to_jsonb(v_after));
@@ -1668,6 +1683,58 @@ $$;
 -- assignment against current sessions, availability, capabilities and other
 -- months. Hard problems block; gaps need an explicit reason. Returns
 -- {ok:false, ...} without changing anything when blocked.
+-- Public coach names: only staff linked to a PUBLISHED website coach profile
+-- are named publicly, and only by that profile's name. A name someone typed
+-- on the class by hand is kept and counted, never overwritten.
+create or replace function public.staff_roster_project_public_names(p_month date)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_revision uuid;
+  v_row record;
+  v_written integer := 0;
+  v_cleared integer := 0;
+  v_kept integer := 0;
+begin
+  if not coalesce((select public_coach_names_enabled from public.staff_roster_settings where id = 1), false) then
+    return jsonb_build_object('enabled', false);
+  end if;
+  select id into v_revision from public.staff_roster_revisions where month = p_month and state = 'published';
+  if v_revision is null then return jsonb_build_object('enabled', true, 'written', 0, 'cleared', 0, 'kept_manual', 0); end if;
+  for v_row in
+    select s.id, nullif(btrim(s.coach_name), '') as current_name, p.projected_name as last_name,
+      (select c.name from public.staff_assignments a
+         join public.staff_members m on m.id = a.staff_id
+         join public.coaches c on c.id = m.coach_id and c.published
+       where a.revision_id = v_revision and a.session_id = s.id and a.role = 'lead'
+       order by (a.slot_key = 'lead') desc, a.slot_key limit 1) as next_name
+    from public.class_sessions s
+    left join public.staff_roster_public_names p on p.session_id = s.id
+    where s.start_time >= public.staff_roster_local(p_month, 0)
+      and s.start_time < public.staff_roster_local((p_month + interval '1 month')::date, 0)
+      and s.start_time > now() and s.status in ('draft', 'published', 'full')
+  loop
+    if v_row.current_name is not null and v_row.current_name is distinct from v_row.last_name then
+      v_kept := v_kept + 1;
+      continue;
+    end if;
+    if v_row.next_name is not distinct from v_row.current_name then
+      if v_row.next_name is null then delete from public.staff_roster_public_names where session_id = v_row.id; end if;
+      continue;
+    end if;
+    update public.class_sessions set coach_name = v_row.next_name where id = v_row.id;
+    if v_row.next_name is null then
+      delete from public.staff_roster_public_names where session_id = v_row.id;
+      v_cleared := v_cleared + 1;
+    else
+      insert into public.staff_roster_public_names (session_id, projected_name, revision_id) values (v_row.id, v_row.next_name, v_revision)
+      on conflict (session_id) do update set projected_name = excluded.projected_name, revision_id = excluded.revision_id, updated_at = now();
+      v_written := v_written + 1;
+    end if;
+  end loop;
+  return jsonb_build_object('enabled', true, 'written', v_written, 'cleared', v_cleared, 'kept_manual', v_kept);
+end;
+$$;
+
 create or replace function public.staff_roster_publish(p_month date, p_expected_version integer, p_gap_reason text, p_request_id uuid)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -1742,7 +1809,8 @@ begin
   perform public.staff_roster_audit('roster_published', 'revision', v_draft.id::text, p_month,
     case when v_previous.id is null then null else jsonb_build_object('revision', v_previous.number) end,
     jsonb_build_object('revision', v_draft.number, 'gaps', v_gaps, 'affected', to_jsonb(v_affected)), p_gap_reason);
-  v_result := jsonb_build_object('ok', true, 'revision_id', v_draft.id, 'number', v_draft.number, 'gaps', v_gaps, 'affected_staff', to_jsonb(v_affected));
+  v_result := jsonb_build_object('ok', true, 'revision_id', v_draft.id, 'number', v_draft.number, 'gaps', v_gaps, 'affected_staff', to_jsonb(v_affected),
+    'public_names', public.staff_roster_project_public_names(p_month));
   return public.staff_roster_remember(p_request_id, 'publish', v_result);
 end;
 $$;
@@ -1886,7 +1954,8 @@ begin
   perform public.staff_roster_audit('cover_approved', 'cover', p_cover_id::text, v_month,
     jsonb_build_object('staff_id', v_cover.requester_staff_id, 'revision', v_published.number),
     jsonb_build_object('staff_id', v_offer.staff_id, 'revision', v_new.number));
-  v_result := jsonb_build_object('ok', true, 'revision_id', v_new.id, 'number', v_new.number);
+  v_result := jsonb_build_object('ok', true, 'revision_id', v_new.id, 'number', v_new.number,
+    'public_names', public.staff_roster_project_public_names(v_month));
   return public.staff_roster_remember(p_request_id, 'approve_cover', v_result);
 end;
 $$;

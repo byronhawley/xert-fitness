@@ -38,6 +38,7 @@ export default function AvailabilityPanel({ month, today, data, settings, focusS
   const period = snapshot.period;
   const progress = useMemo(() => submissionProgress(snapshot, today), [snapshot, today]);
   const [reopenFor, setReopenFor] = useState(null);
+  const [reminded, setReminded] = useState(null);
   const [reason, setReason] = useState('');
   const [dueOn, setDueOn] = useState(period?.due_on || '');
   const sessions = useMemo(() => [...ctx.sessions.values()].filter(session => session.inMonth && LIVE_SESSION_STATUSES.includes(session.status)).sort((a, b) => a.start - b.start), [ctx]);
@@ -78,6 +79,19 @@ export default function AvailabilityPanel({ month, today, data, settings, focusS
               onClick={() => onMutate(client => client.updatePeriod(month, { dueOn, publishTargetOn: period.publish_target_on < dueOn ? dueOn : period.publish_target_on }, period.version), 'Due date changed')}>Save due date</AdminButton>
           </div>
         </details>
+      )}
+
+      {period && (
+        <div className="flex flex-wrap items-center gap-3">
+          <AdminButton variant="ghost" disabled={busy} onClick={async () => {
+            const count = await onMutate(client => client.runReminders(), null);
+            if (count !== null) setReminded(Number(count) || 0);
+          }}>Send due reminders now</AdminButton>
+          <p className="font-body text-xs text-xert-pale/60" role="status">
+            {reminded === null ? 'Sends only the reminders your settings say are due today, to coaches who haven’t answered. Running it twice sends nothing new.'
+              : reminded === 0 ? 'Nothing was due. No reminders sent.' : `${reminded} reminder${reminded === 1 ? '' : 's'} added to coach inboxes.`}
+          </p>
+        </div>
       )}
 
       {changeRequests.length > 0 && (

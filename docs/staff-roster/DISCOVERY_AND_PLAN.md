@@ -79,23 +79,34 @@ New:
 ### Database (all `security definer`, `set search_path = public`, granted to `authenticated` only)
 
 Manager (require `is_admin()`):
-`staff_roster_get_settings`, `staff_roster_update_settings`,
+`staff_roster_get_settings` (coaches may read too), `staff_roster_update_settings`,
 `staff_roster_upsert_staff`, `staff_roster_set_staff_status`,
-`staff_roster_set_capabilities`, `staff_roster_open_period`,
-`staff_roster_reopen_submission`, `staff_roster_set_session_staffing`,
-`staff_roster_upsert_series`, `staff_roster_preview_series`, `staff_roster_generate_series`,
-`staff_roster_planning_snapshot`, `staff_roster_apply_changes`,
-`staff_roster_check_assignment`, `staff_roster_publish`,
-`staff_roster_decide_absence`, `staff_roster_approve_cover`,
-`staff_roster_reject_cover`, `staff_roster_attention`.
+`staff_roster_set_capabilities`, `staff_roster_link_candidates`,
+`staff_roster_open_period`, `staff_roster_update_period`,
+`staff_roster_reopen_submission`, `staff_roster_set_staffing`,
+`staff_roster_save_series`, `staff_roster_preview_series`,
+`staff_roster_generate_series`, `staff_roster_change_series_from`,
+`staff_roster_planning_snapshot`, `staff_roster_check_assignment`,
+`staff_roster_apply_changes`, `staff_roster_discard_draft`,
+`staff_roster_publish`, `staff_roster_decide_absence`,
+`staff_roster_record_absence`, `staff_roster_approve_cover`,
+`staff_roster_reject_cover`, `staff_roster_run_reminders`,
+`staff_roster_notification_log`, `staff_roster_audit_log`.
 
-Coach (require an active linked staff record for `auth.uid()`):
-`staff_roster_me`, `staff_roster_save_availability_draft`,
-`staff_roster_submit_availability`, `staff_roster_confirm_session`,
-`staff_roster_my_assignments`, `staff_roster_acknowledge`,
-`staff_roster_request_absence`, `staff_roster_request_cover`,
-`staff_roster_volunteer_cover`, `staff_roster_withdraw`,
-`staff_roster_my_notifications`, `staff_roster_mark_notification_read`.
+Coach (require an active linked staff record for `auth.uid()`; no membership needed):
+`staff_roster_me`, `staff_roster_month_classes`, `staff_roster_save_usual_week`,
+`staff_roster_save_availability_draft`, `staff_roster_submit_availability`,
+`staff_roster_request_change`, `staff_roster_confirm_session`,
+`staff_roster_my_roster`, `staff_roster_acknowledge`,
+`staff_roster_request_absence`, `staff_roster_withdraw`,
+`staff_roster_request_cover`, `staff_roster_cover_board`,
+`staff_roster_offer_cover`, `staff_roster_my_requests`,
+`staff_roster_my_notifications`, `staff_roster_mark_notifications_read`.
+
+Internal only (not executable by signed-in users): the checker
+`staff_roster_assignment_problems`, notify/audit/idempotency helpers, and
+`staff_roster_project_public_names` (opt-in public coach names, called by
+publish and cover approval).
 
 Every mutation takes a client `request_id` (idempotency) and, where it edits a
 versioned record, an expected version. A stale version raises
@@ -154,6 +165,6 @@ Milestone C — native and hardening
 
 ## 7. Acceptance test map
 
-Each mandatory scenario (1–20 in the brief) maps to a named test in
-`test/staff-roster-*.test.js`; the final handoff lists command output and
-outcome for each, marking anything not executed.
+See [ACCEPTANCE.md](ACCEPTANCE.md) for each mandatory scenario, the tests
+that cover it and its verification level. Operations are in
+[RUNBOOK.md](RUNBOOK.md).
