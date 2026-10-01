@@ -19,7 +19,7 @@
 import { dutyInterval, normalizeStaffing } from './duty.js';
 import { candidatesFor, withIndexes } from './coverage.js';
 import { checkAssignment, indexBySession, indexByStaff, LIVE_SESSION_STATUSES, PROBLEM_MESSAGES } from './validate.js';
-import { gymDateOf } from './time.js';
+import { DAY_MS, gymDateOf, weekStartOf } from './time.js';
 
 export const DEFAULT_NODE_LIMIT = 4000;
 
@@ -29,6 +29,22 @@ function compareIds(a, b) {
 
 function rebuild(ctx, assignments) {
   return { ...ctx, assignments, byStaff: indexByStaff(assignments), bySession: indexBySession(assignments) };
+}
+
+/** Adds/removes one assignment in place so the search never re-indexes the whole roster. */
+function place(state, assignment) {
+  state.assignments.push(assignment);
+  if (!state.byStaff.has(assignment.staffId)) state.byStaff.set(assignment.staffId, []);
+  state.byStaff.get(assignment.staffId).push(assignment);
+  if (!state.bySession.has(assignment.sessionId)) state.bySession.set(assignment.sessionId, []);
+  state.bySession.get(assignment.sessionId).push(assignment);
+}
+
+function unplace(state, assignment) {
+  const drop = list => { const index = list.lastIndexOf(assignment); if (index >= 0) list.splice(index, 1); };
+  drop(state.assignments);
+  drop(state.byStaff.get(assignment.staffId));
+  drop(state.bySession.get(assignment.sessionId));
 }
 
 function monthCount(ctx, staffId, monthKey) {
@@ -55,17 +71,22 @@ function candidateScore(ctx, position, staffId, status, previous) {
   return score;
 }
 
-function rankedCandidates(ctx, position, previous, allowIfNeeded) {
-  const options = [];
-  for (const member of ctx.staff.values()) {
-    const result = checkAssignment(ctx, { sessionId: position.session.id, slotKey: position.slot.key, staffId: member.id });
-    if (!result.ok) continue;
-    const status = ctx.availability(member.id, position.session.id)?.status;
-    options.push({ staffId: member.id, status, score: candidateScore(ctx, position, member.id, status, previous) });
-  }
-  const strong = options.filter(item => item.status !== 'IF_NEEDED');
-  const pool = strong.length || !allowIfNeeded ? strong : options;
+/** Valid coaches for a position, best first; IF_NEEDED only when nobody else is valid. */
+function rankedCandidates(ctx, position, options, previous, allowIfNeeded) {
+  const entries = [...options].map(staffId => {
+    const status = ctx.availability(staffId, position.session.id)?.status;
+    return { staffId, status, score: candidateScore(ctx, position, staffId, status, previous) };
+  });
+  const strong = entries.filter(item => item.status !== 'IF_NEEDED');
+  const pool = strong.length || !allowIfNeeded ? strong : entries;
   return pool.sort((a, b) => b.score - a.score || compareIds(a.staffId, b.staffId));
+}
+
+function usableCount(ctx, position, options, allowIfNeeded) {
+  if (allowIfNeeded) return options.size;
+  let count = 0;
+  for (const staffId of options) if (ctx.availability(staffId, position.session.id)?.status !== 'IF_NEEDED') count++;
+  return count;
 }
 
 function reasonFor(ctx, choice) {
@@ -137,37 +158,79 @@ export function suggestDraft(ctx, { sessionIds, mode = 'keep', allowIfNeeded = t
   let limitReached = false;
   let best = { chosen: [], filled: -1 };
   const chosen = [];
-  let state = rebuild(ctx, base);
+  const state = rebuild(ctx, [...base]);
+
+  // Who could fill each open position right now. Placing coach C can only
+  // invalidate C elsewhere (overlap, limits, same class), so after each
+  // placement only C is re-checked, and the change is undone on backtrack.
+  const options = new Map();
+  const holders = new Map();
+  for (const position of openPositions) {
+    const valid = new Set();
+    for (const member of ctx.staff.values()) {
+      if (checkAssignment(state, { sessionId: position.session.id, slotKey: position.slot.key, staffId: member.id }).ok) valid.add(member.id);
+    }
+    options.set(position.key, valid);
+    for (const staffId of valid) {
+      if (!holders.has(staffId)) holders.set(staffId, []);
+      holders.get(staffId).push(position);
+    }
+  }
+  const usable = position => usableCount(state, position, options.get(position.key), allowIfNeeded);
+  // Placing a coach only affects their other positions that are close enough
+  // to clash: same week (weekly limit) or within a day (overlap, rest).
+  const near = (a, b) => Math.abs(a.session.start - b.session.start) <= 2 * DAY_MS
+    || weekStartOf(gymDateOf(a.session.start)) === weekStartOf(gymDateOf(b.session.start));
+  // Nobody can fill more positions than currently have a candidate; reaching
+  // that bound proves the draft is as full as it can be, so the search stops.
+  const ceiling = openPositions.filter(position => usable(position) > 0).length;
+  let complete = false;
 
   const search = open => {
+    if (complete) return;
     nodes++;
     if (nodes > nodeLimit) { limitReached = true; return; }
-    if (chosen.length + open.length <= best.filled) return;
+    let reachable = 0;
+    for (const position of open) if (usable(position) > 0) reachable++;
+    if (chosen.length + reachable <= best.filled) return;
     if (!open.length) {
       best = { chosen: chosen.map(item => ({ ...item })), filled: chosen.length };
+      if (best.filled >= ceiling) complete = true;
       return;
     }
     // Most constrained position first.
     let pick = null;
+    let pickSize = Infinity;
     for (const position of open) {
-      const ranked = rankedCandidates(state, position, previous, allowIfNeeded);
-      if (!pick || ranked.length < pick.ranked.length
-        || (ranked.length === pick.ranked.length && (position.session.start < pick.position.session.start
-          || (position.session.start === pick.position.session.start && position.key < pick.position.key)))) {
-        pick = { position, ranked };
+      const size = usable(position);
+      if (size < pickSize || (size === pickSize && (position.session.start < pick.session.start
+        || (position.session.start === pick.session.start && position.key < pick.key)))) {
+        pick = position;
+        pickSize = size;
       }
-      if (ranked.length === 0) break;
+      if (size === 0) break;
     }
-    const rest = open.filter(position => position !== pick.position);
-    for (const candidate of pick.ranked) {
-      const assignment = { id: `suggested:${pick.position.key}`, sessionId: pick.position.session.id, slotKey: pick.position.slot.key, staffId: candidate.staffId, source: 'suggested' };
-      chosen.push({ ...assignment, status: candidate.status, alternatives: pick.ranked.length - 1 });
-      const before = state;
-      state = rebuild(ctx, [...state.assignments, assignment]);
+    const rest = open.filter(position => position !== pick);
+    const ranked = pickSize ? rankedCandidates(state, pick, options.get(pick.key), previous, allowIfNeeded) : [];
+    for (const candidate of ranked) {
+      const assignment = { id: `suggested:${pick.key}`, sessionId: pick.session.id, slotKey: pick.slot.key, staffId: candidate.staffId, source: 'suggested' };
+      chosen.push({ ...assignment, status: candidate.status, alternatives: ranked.length - 1 });
+      place(state, assignment);
+      const removed = [];
+      for (const other of holders.get(candidate.staffId) || []) {
+        if (other === pick || !near(other, pick) || !rest.includes(other)) continue;
+        const set = options.get(other.key);
+        if (!set.has(candidate.staffId)) continue;
+        if (!checkAssignment(state, { sessionId: other.session.id, slotKey: other.slot.key, staffId: candidate.staffId }).ok) {
+          set.delete(candidate.staffId);
+          removed.push(set);
+        }
+      }
       search(rest);
-      state = before;
+      for (const set of removed) set.add(candidate.staffId);
+      unplace(state, assignment);
       chosen.pop();
-      if (limitReached) return;
+      if (limitReached || complete) return;
     }
     search(rest);
   };

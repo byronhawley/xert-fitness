@@ -13,11 +13,18 @@ export default function SuggestDialog({ open, onOpenChange, ctx, sessionIds, sco
   const [result, setResult] = useState(null);
   const [elapsed, setElapsed] = useState(0);
 
+  const [working, setWorking] = useState(false);
   useEffect(() => {
-    if (!open || !ctx) return;
-    const started = performance.now();
-    setResult(suggestDraft(ctx, { sessionIds, mode, allowIfNeeded }));
-    setElapsed(Math.round(performance.now() - started));
+    if (!open || !ctx) return undefined;
+    // Let the drawer paint "Working…" before the search takes the main thread.
+    setWorking(true);
+    const timer = setTimeout(() => {
+      const started = performance.now();
+      setResult(suggestDraft(ctx, { sessionIds, mode, allowIfNeeded }));
+      setElapsed(Math.round(performance.now() - started));
+      setWorking(false);
+    }, 30);
+    return () => clearTimeout(timer);
   }, [open, ctx, sessionIds, mode, allowIfNeeded]);
 
   const removals = useMemo(() => {
@@ -28,7 +35,14 @@ export default function SuggestDialog({ open, onOpenChange, ctx, sessionIds, sco
       && ctx.sessions.get(item.sessionId)?.start > ctx.now && !keep.has(`${item.sessionId}:${item.slotKey}:${item.staffId}`));
   }, [result, ctx, sessionIds]);
 
-  if (!result) return null;
+  if (!open) return null;
+  if (!result || working) {
+    return (
+      <AdminDrawer open={open} onOpenChange={onOpenChange} title="Suggested draft" description={`For ${scopeLabel}.`} closeLabel="Close suggested draft">
+        <p className="font-body text-sm text-xert-pale/70" role="status">Working out a draft…</p>
+      </AdminDrawer>
+    );
+  }
   const changes = [
     ...removals.map(item => ({ op: 'unassign', assignment_id: item.id })),
     ...result.added.map(item => ({ op: 'assign', session_id: item.sessionId, slot_key: item.slotKey, staff_id: item.staffId, source: 'suggested' })),

@@ -9,8 +9,11 @@
 .staff-roster-layout { display: grid; gap: var(--space-group); grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 1200px) { .staff-roster-layout { grid-template-columns: minmax(0, 1fr) 20rem; } }
 
+.staff-roster-week-frame { container-type: inline-size; min-width: 0; }
 .staff-roster-week { display: grid; gap: var(--space-control); grid-template-columns: minmax(0, 1fr); }
-@media (min-width: 900px) { .staff-roster-week { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+/* Seven days side by side only when each day gets room for a name; otherwise days wrap. */
+@container (min-width: 520px) { .staff-roster-week { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); } }
+@container (min-width: 1190px) { .staff-roster-week { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 .staff-roster-day { display: grid; align-content: start; gap: var(--space-inline); min-width: 0; }
 .staff-roster-day[data-other-month="true"] { opacity: 0.7; }
 .staff-roster-day-heading { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-inline); padding-block: var(--space-label); border-bottom: var(--nav-line-width) solid var(--border-hairline); }

@@ -30,7 +30,7 @@ function SlotRow({ ctx, session, slot, assignment, moving, readOnly, onOpen, onD
           onDragStart={event => { event.dataTransfer.setData('text/plain', assignment.id); event.dataTransfer.effectAllowed = 'move'; }}
           onClick={() => onOpen(session, slot)}
           aria-label={`${label}: ${staffName(ctx, assignment.staffId)}${check && !check.ok ? ', has a problem' : ''}. Open details`}>
-          <span className="font-body text-sm truncate">{staffName(ctx, assignment.staffId)}</span>
+          <span className="font-body text-sm break-words min-w-0">{staffName(ctx, assignment.staffId)}</span>
           {assignment.pinned && <span aria-hidden="true" title="Pinned">📌</span>}
           {check && !check.ok && <span className="font-body text-xs text-status-danger-200">⚠ {check.hard[0].message}</span>}
         </button>
@@ -60,7 +60,7 @@ function SessionCard({ ctx, session, coverage, shortage, focused, selected, onTo
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-body text-xs text-xert-pale/55">{timeLabel(session.start)}–{timeLabel(session.end)}</p>
-          <p className="font-body text-sm font-semibold text-xert-offwhite truncate">{session.title}</p>
+          <p className="font-body text-sm font-semibold text-xert-offwhite break-words">{session.title}</p>
         </div>
         {session.inMonth && live && !past && (
           <label className="min-h-11 min-w-11 inline-flex items-center justify-center">
@@ -222,7 +222,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
               </div>
             </div>
           ) : (
-            <div className="staff-roster-week" style={view === 'day' ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
+            <div className="staff-roster-week-frame"><div className="staff-roster-week" style={view === 'day' ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
               {dates.map(date => {
                 const list = (sessionsByDate.get(date) || []).filter(visible);
                 const other = date.slice(0, 7) !== month;
@@ -243,7 +243,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
                   </section>
                 );
               })}
-            </div>
+            </div></div>
           )}
         </div>
 

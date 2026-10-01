@@ -120,14 +120,24 @@ export function toMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-/** Gym date of an instant (never the browser's date). */
-export function gymDateOf(value) {
-  return gymDateKey(toMs(value));
+// Intl formatting is the slowest step in roster checks, which ask for the same
+// few hundred class instants over and over. Pure, so a bounded memo is safe.
+function memo(compute) {
+  const cache = new Map();
+  return value => {
+    const ms = toMs(value);
+    if (cache.has(ms)) return cache.get(ms);
+    if (cache.size > 50000) cache.clear();
+    const result = compute(ms);
+    cache.set(ms, result);
+    return result;
+  };
 }
 
-export function gymMinuteOf(value) {
-  return gymMinutesOfDay(toMs(value));
-}
+/** Gym date of an instant (never the browser's date). */
+export const gymDateOf = memo(ms => gymDateKey(ms));
+
+export const gymMinuteOf = memo(ms => gymMinutesOfDay(ms));
 
 export function monthKeyOfInstant(value) {
   const date = gymDateOf(value);
