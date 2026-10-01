@@ -25,6 +25,10 @@ function Input({ ...props }) {
 }
 
 const TRAINING_LEVELS = ['New / beginner', 'Some gym experience', 'Regular trainer', 'Advanced'];
+const MEMBERSHIP_OPTIONS = [
+  { value: true, label: 'Yes, I am a member' },
+  { value: false, label: 'No, not yet' },
+];
 
 // What the signed-in account already knows about them, so a member types
 // their name, email and phone once, on their account, not on every class.
@@ -185,7 +189,7 @@ export default function BookingRequestForm({
           Do you already have a XERT membership?<span className="text-xert-steel ml-1" aria-hidden="true">*</span>
         </legend>
         <div className="flex flex-wrap gap-2">
-          {[[true, 'Yes, I am a member'], [false, 'No, not yet']].map(([value, label]) => (
+          {MEMBERSHIP_OPTIONS.map(({ value, label }) => (
             <button type="button" key={label}
               onClick={() => { setHasMembership(value); setError(''); }}
               aria-pressed={hasMembership === value}
