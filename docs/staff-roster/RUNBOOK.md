@@ -53,9 +53,14 @@ All in **Coach roster → Settings** and **Coaches**:
      When on, it uses the site's existing `queue_email`; the Activity tab shows
      each email's real status from `email_log`.
    - Leave **Show the lead coach on the public timetable** off unless wanted.
-     When on, publishing writes the lead's *website profile* name into
-     `class_sessions.coach_name`, only for coaches with a published profile,
-     and never replaces a name typed by hand.
+     When on, the lead's *website profile* name from the published roster is
+     written into `class_sessions.coach_name` (at once for upcoming classes,
+     then on every publish), only for coaches with a published profile, and
+     never over a name typed by hand. `staff_roster_public_names` records each
+     name the roster wrote and the value it replaced.
+     Turning it off removes the names the roster wrote from upcoming classes
+     (putting back what was there before) and leaves any name typed or edited
+     by hand. Turning it back on derives names from the roster published now.
    - Press **Switch on** at the top of Settings.
 3. **Availability** tab: open the month. Coaches get an inbox notice.
 
@@ -83,7 +88,8 @@ Settings → **Switch off** (or
 - Class changes stop queueing roster notices.
 - All data stays. Switching back on resumes where it was.
 - Public coach names already written to classes stay as ordinary class text.
-  Edit them in the Class calendar if needed.
+  Edit them in the Class calendar if needed. (To remove the names the roster
+  wrote, switch off **Show the lead coach on the public timetable** first.)
 
 ## 5. Roll back
 

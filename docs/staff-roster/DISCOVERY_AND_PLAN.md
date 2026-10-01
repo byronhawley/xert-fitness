@@ -106,7 +106,8 @@ Coach (require an active linked staff record for `auth.uid()`; no membership nee
 Internal only (not executable by signed-in users): the checker
 `staff_roster_assignment_problems`, notify/audit/idempotency helpers, and
 `staff_roster_project_public_names` (opt-in public coach names, called by
-publish and cover approval).
+publish, cover approval and switching the option on) and
+`staff_roster_withdraw_public_names` (called when it is switched off).
 
 Every mutation takes a client `request_id` (idempotency) and, where it edits a
 versioned record, an expected version. A stale version raises

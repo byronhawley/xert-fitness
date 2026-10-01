@@ -93,10 +93,12 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
         </label>
         <p className="font-body text-xs text-xert-pale/55">Every notice goes to the coach’s inbox in the app. Emails are queued and the activity log shows whether each was actually sent.</p>
         <label className="flex items-center gap-2 font-body text-sm text-xert-pale min-h-11">
-          <input type="checkbox" checked={Boolean(settings.public_coach_names_enabled)} disabled={busy} onChange={event => save({ public_coach_names_enabled: event.target.checked }, 'Saved')} />
-          Show the lead coach on the public timetable when I publish
+          <input type="checkbox" checked={Boolean(settings.public_coach_names_enabled)} disabled={busy} onChange={event => save({ public_coach_names_enabled: event.target.checked }, event.target.checked
+            ? 'Saved. Upcoming classes now show the lead coach from the published roster.'
+            : 'Saved. Names the roster put on upcoming classes are removed; names typed or edited by hand stay.')} />
+          Show the lead coach on the public timetable
         </label>
-        <p className="font-body text-xs text-xert-pale/55">Only coaches linked to a published Coaches page profile are named, using that profile’s name. A coach name typed on a class by hand is never replaced. Turning this off leaves names already shown in place.</p>
+        <p className="font-body text-xs text-xert-pale/55">Only coaches linked to a published Coaches page profile are named, using that profile’s name, from the published roster. A coach name typed or edited on a class by hand is never replaced or removed. Turning this off removes only the names the roster put on upcoming classes; past classes keep theirs.</p>
       </section>
     </div>
   );

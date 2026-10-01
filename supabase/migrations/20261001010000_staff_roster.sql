@@ -427,12 +427,16 @@ create table if not exists public.staff_roster_requests (
 
 -- What the roster last wrote to class_sessions.coach_name, so a later publish
 -- changes only names it wrote itself and never a name someone typed by hand.
+-- A row exists only while the roster owns the class's current name.
+-- `replaced_name` is the exact value the roster first replaced (the roster only
+-- writes over an empty or blank name), put back when it gives the name up.
 create table if not exists public.staff_roster_public_names (
   session_id uuid primary key references public.class_sessions(id) on delete cascade,
   projected_name text not null,
   revision_id uuid references public.staff_roster_revisions(id) on delete set null,
   updated_at timestamptz not null default now()
 );
+alter table public.staff_roster_public_names add column if not exists replaced_name text;
 
 -- ─── Lock down direct access ────────────────────────────────────────────────
 
@@ -960,6 +964,7 @@ declare
   v_after public.staff_roster_settings;
   v_presets jsonb;
   v_minutes integer[];
+  v_names jsonb;
 begin
   perform public.staff_roster_require_manager();
   perform public.staff_roster_lock();
@@ -983,6 +988,24 @@ begin
     version = version + 1, updated_by = auth.uid(), updated_at = now()
   where id = 1 returning * into v_after;
   perform public.staff_roster_audit('settings_updated', 'settings', '1', null, to_jsonb(v_before), to_jsonb(v_after));
+  -- Public names follow the switch at once: off gives back what the roster
+  -- wrote; on derives names from each current published roster, never from
+  -- what was shown before.
+  if v_before.public_coach_names_enabled and not v_after.public_coach_names_enabled then
+    v_names := public.staff_roster_withdraw_public_names();
+  elsif v_after.public_coach_names_enabled and not v_before.public_coach_names_enabled then
+    select jsonb_build_object('enabled', true,
+        'written', coalesce(sum((r->>'written')::integer), 0), 'cleared', coalesce(sum((r->>'cleared')::integer), 0),
+        'kept_manual', coalesce(sum((r->>'kept_manual')::integer), 0))
+      into v_names
+      from (select public.staff_roster_project_public_names(month) as r from public.staff_roster_revisions
+        where state = 'published' and month >= public.staff_roster_month_of(now()) order by month) projected;
+  end if;
+  if v_names is not null then
+    perform public.staff_roster_audit(case when v_after.public_coach_names_enabled then 'public_names_projected' else 'public_names_withdrawn' end,
+      'settings', '1', null, null, v_names);
+    return (to_jsonb(v_after) - 'updated_by') || jsonb_build_object('public_names', v_names);
+  end if;
   return to_jsonb(v_after) - 'updated_by';
 end;
 $$;
@@ -1701,7 +1724,8 @@ begin
   select id into v_revision from public.staff_roster_revisions where month = p_month and state = 'published';
   if v_revision is null then return jsonb_build_object('enabled', true, 'written', 0, 'cleared', 0, 'kept_manual', 0); end if;
   for v_row in
-    select s.id, nullif(btrim(s.coach_name), '') as current_name, p.projected_name as last_name,
+    select s.id, s.coach_name as raw_name, nullif(btrim(s.coach_name), '') as current_name, p.projected_name as last_name,
+      p.replaced_name,
       (select c.name from public.staff_assignments a
          join public.staff_members m on m.id = a.staff_id
          join public.coaches c on c.id = m.coach_id and c.published
@@ -1714,6 +1738,8 @@ begin
       and s.start_time > now() and s.status in ('draft', 'published', 'full')
   loop
     if v_row.current_name is not null and v_row.current_name is distinct from v_row.last_name then
+      -- Typed or edited by hand: never touched, and no longer the roster's.
+      if v_row.last_name is not null then delete from public.staff_roster_public_names where session_id = v_row.id; end if;
       v_kept := v_kept + 1;
       continue;
     end if;
@@ -1721,17 +1747,51 @@ begin
       if v_row.next_name is null then delete from public.staff_roster_public_names where session_id = v_row.id; end if;
       continue;
     end if;
-    update public.class_sessions set coach_name = v_row.next_name where id = v_row.id;
     if v_row.next_name is null then
+      update public.class_sessions set coach_name = v_row.replaced_name where id = v_row.id;
       delete from public.staff_roster_public_names where session_id = v_row.id;
       v_cleared := v_cleared + 1;
     else
-      insert into public.staff_roster_public_names (session_id, projected_name, revision_id) values (v_row.id, v_row.next_name, v_revision)
+      update public.class_sessions set coach_name = v_row.next_name where id = v_row.id;
+      insert into public.staff_roster_public_names (session_id, projected_name, revision_id, replaced_name)
+      values (v_row.id, v_row.next_name, v_revision, v_row.raw_name)
       on conflict (session_id) do update set projected_name = excluded.projected_name, revision_id = excluded.revision_id, updated_at = now();
       v_written := v_written + 1;
     end if;
   end loop;
   return jsonb_build_object('enabled', true, 'written', v_written, 'cleared', v_cleared, 'kept_manual', v_kept);
+end;
+$$;
+
+-- Switching public names off: give back every upcoming class name the roster
+-- still owns. A name still exactly as the roster wrote it goes back to what
+-- was there before (empty); a name edited since is left as it is and becomes
+-- ordinary class text. Ownership rows for those classes are dropped, so a
+-- later switch-on starts from the current published roster. Past, cancelled
+-- and completed classes are history and are not changed.
+create or replace function public.staff_roster_withdraw_public_names()
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  v_row record;
+  v_cleared integer := 0;
+  v_kept integer := 0;
+begin
+  for v_row in
+    select p.session_id, p.projected_name, p.replaced_name, nullif(btrim(s.coach_name), '') as current_name
+    from public.staff_roster_public_names p
+    join public.class_sessions s on s.id = p.session_id
+    where s.start_time > now() and s.status in ('draft', 'published', 'full')
+    order by s.start_time, p.session_id
+  loop
+    if v_row.current_name is not distinct from v_row.projected_name then
+      update public.class_sessions set coach_name = v_row.replaced_name where id = v_row.session_id;
+      v_cleared := v_cleared + 1;
+    elsif v_row.current_name is not null then
+      v_kept := v_kept + 1;
+    end if;
+    delete from public.staff_roster_public_names where session_id = v_row.session_id;
+  end loop;
+  return jsonb_build_object('enabled', false, 'cleared', v_cleared, 'kept_edited', v_kept);
 end;
 $$;
 
