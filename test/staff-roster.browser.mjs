@@ -12,7 +12,7 @@ import { resolve } from 'node:path';
 import { createServer } from 'vite';
 import { installDesignFixtures } from './fixtures/design-data.mjs';
 import { DEMO_COACHES, DEMO_OWNER, demoMonth, rpcAs } from './fixtures/staff-roster-demo.mjs';
-import { addMonths, datesOfMonth, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
+import { addDays, addMonths, datesOfMonth, gymInstantIso, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
 import { gymDateKey } from '../src/lib/gymTime.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href : 'playwright');
@@ -108,6 +108,99 @@ try {
     await drawer.getByText(/Said they are unavailable|Has not said they are available|Already coaching/).first().waitFor();
     if (shots) await page.screenshot({ path: `${shots}/04-assignment-drawer.png` });
     await drawer.getByRole('button', { name: 'Close position details' }).click();
+  });
+
+  await step('Move… / Place here moves a coach by keyboard, and the server checks every placement', async () => {
+    // From the real draft, pick one assignment in this week (coach C) and a
+    // position held by someone else that C could take if it were open. Open
+    // that position server-side as the manager would, so the move has a valid
+    // target; any position C cannot take serves as the refused target.
+    const weekEnd = addDays(firstMonday, 7);
+    const pairSql = `
+      with d as (select id from public.staff_roster_revisions where state = 'draft'),
+      wk as (select * from public.staff_roster_sessions($1::timestamptz, $2::timestamptz)
+        where status in ('draft', 'published', 'full') and starts_at > now()),
+      slots as (
+        select wk.session_id, x->>'key' as slot_key, x->>'role' as role,
+          (select a.id from public.staff_assignments a where a.revision_id = (select id from d) and a.session_id = wk.session_id and a.slot_key = x->>'key') as holder
+        from wk, jsonb_array_elements(public.staff_roster_normalize_slots(wk.slots)) x where (x->>'required')::boolean),
+      src as (select a.* from public.staff_assignments a join wk on wk.session_id = a.session_id where a.revision_id = (select id from d) and not a.pinned)
+      select src.id, src.staff_id, src.session_id as from_session, src.slot_key as from_slot, src.role as from_role,
+        o.session_id as to_session, o.slot_key as to_slot, o.role as to_role, o.holder,
+        public.staff_roster_assignment_problems(src.revision_id, o.session_id, o.slot_key, src.staff_id,
+          array_remove(array[src.id, o.holder], null)) as problems
+      from src cross join slots o
+      where o.session_id <> src.session_id
+      order by src.id, o.session_id, o.slot_key`;
+    const { rows: pairs } = await db.query(pairSql, [gymInstantIso(firstMonday, 0), gymInstantIso(weekEnd, 0)]);
+    const good = pairs.find(row => row.problems.length === 0);
+    assert.ok(good, 'the synthetic week has a coach who could take another position');
+    const bad = pairs.find(row => row.id === good.id && row.holder === null && row.problems.length > 0);
+    assert.ok(bad, 'and an open position the same coach cannot take');
+    if (good.holder) {
+      const draft = (await db.query(`select version from public.staff_roster_revisions where state = 'draft'`)).rows[0];
+      await rpcAs(db, DEMO_OWNER, 'staff_roster_apply_changes', { p_month: `${MONTH}-01`, p_expected_version: draft.version,
+        p_changes: [{ op: 'unassign', assignment_id: good.holder }], p_request_id: crypto.randomUUID() });
+    }
+    const name = (await db.query('select display_name from public.staff_members where id = $1', [good.staff_id])).rows[0].display_name;
+    const label = role => ({ lead: 'Lead coach', assistant: 'Assistant', shadow: 'Shadow' })[role];
+    const applyCalls = () => rpcLog.filter(item => item.name === 'staff_roster_apply_changes').length;
+
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterView=week&rosterDate=${firstMonday}`, { waitUntil: 'networkidle' });
+    const startMove = async () => {
+      const chip = page.locator(`#roster-session-${good.from_session}`).getByRole('button', { name: new RegExp(`^${label(good.from_role)}: ${name}`) });
+      await chip.focus();
+      await page.keyboard.press('Enter');
+      const drawer = page.getByRole('dialog').last();
+      const move = drawer.getByRole('button', { name: 'Move…' });
+      await move.focus();
+      await page.keyboard.press('Enter');
+      await page.getByText(`Moving ${name}`).waitFor();
+    };
+    const placeButton = row => page.locator(`#roster-session-${row.to_session} .staff-roster-slot`)
+      .filter({ has: page.getByText(label(row.to_role), { exact: true }) })
+      .getByRole('button', { name: `Place ${name} here` });
+
+    // Escape cancels a move without touching anything.
+    await startMove();
+    await placeButton(good).waitFor();
+    await page.keyboard.press('Escape');
+    await page.getByText(`Moving ${name}`).waitFor({ state: 'hidden' });
+    assert.equal(await placeButton(good).count(), 0, 'Place here buttons go away after Escape');
+
+    // A placement the rules forbid is refused by the server; nothing moves.
+    const before = applyCalls();
+    await startMove();
+    await placeButton(bad).focus();
+    await page.keyboard.press('Enter');
+    await page.getByText('Not saved').first().waitFor();
+    assert.equal(applyCalls(), before + 1, 'the placement went to the server');
+    const kept = await db.query('select session_id, slot_key, staff_id from public.staff_assignments where id = $1', [good.id]);
+    assert.deepEqual(kept.rows, [{ session_id: good.from_session, slot_key: good.from_slot, staff_id: good.staff_id }], 'a refused move leaves the coach where they were');
+    if (shots) await page.screenshot({ path: `${shots}/04b-move-refused.png` });
+
+    // A valid placement moves the coach in one server-checked change.
+    const version = (await db.query(`select version from public.staff_roster_revisions where state = 'draft'`)).rows[0].version;
+    await startMove();
+    if (shots) await page.screenshot({ path: `${shots}/04c-move-place-here.png`, fullPage: true });
+    await placeButton(good).focus();
+    await page.keyboard.press('Enter');
+    await page.getByText('Coach moved').first().waitFor();
+    assert.equal(applyCalls(), before + 2);
+    const gone = await db.query('select count(*)::int as n from public.staff_assignments where id = $1', [good.id]);
+    assert.equal(gone.rows[0].n, 0, 'the old assignment is replaced, not copied');
+    const { rows: placed } = await db.query(`select a.staff_id from public.staff_assignments a join public.staff_roster_revisions r on r.id = a.revision_id and r.state = 'draft'
+      where a.session_id = $1 and a.slot_key = $2`, [good.to_session, good.to_slot]);
+    assert.deepEqual(placed.map(row => row.staff_id), [good.staff_id], 'the coach now holds the new position');
+    const { rows: vacated } = await db.query(`select count(*)::int as n from public.staff_assignments a join public.staff_roster_revisions r on r.id = a.revision_id and r.state = 'draft'
+      where a.session_id = $1 and a.slot_key = $2`, [good.from_session, good.from_slot]);
+    assert.equal(vacated[0].n, 0, 'the old position is open again');
+    const after = await db.query(`select version, state from public.staff_roster_revisions where state in ('draft', 'published')`);
+    assert.deepEqual(after.rows, [{ version: version + 1, state: 'draft' }], 'one draft edit; nothing was published');
+    const audit = await db.query(`select count(*)::int as n from public.staff_roster_audit_events where action = 'assignment_moved' and entity_id = (
+      select a.id::text from public.staff_assignments a join public.staff_roster_revisions r on r.id = a.revision_id and r.state = 'draft' where a.session_id = $1 and a.slot_key = $2)`, [good.to_session, good.to_slot]);
+    assert.equal(audit.rows[0].n, 1, 'the move is audited');
+    await page.locator(`#roster-session-${good.to_session}`).getByRole('button', { name: new RegExp(`^${label(good.to_role)}: ${name}`) }).waitFor();
   });
 
   await step('publishing with gaps needs a reason, then coaches are notified in the app only', async () => {
