@@ -1980,7 +1980,7 @@ begin
         perform public.staff_roster_notify_managers('overdue_summary', 'overdue:' || v_period.month::text,
           v_missing || ' coaches have not submitted availability',
           v_missing || ' active coaches have not submitted availability for ' || to_char(v_period.month, 'FMMonth YYYY') || ', which was due ' || to_char(v_period.due_on, 'FMDD FMMonth') || '.',
-          '/admin/roster?month=' || to_char(v_period.month, 'YYYY-MM') || '&panel=attention', v_period.month);
+          '/admin/roster?rosterTab=availability&rosterMonth=' || to_char(v_period.month, 'YYYY-MM'), v_period.month);
         v_queued := v_queued + 1;
       end if;
     end if;
@@ -2253,7 +2253,7 @@ begin
   insert into public.staff_roster_change_requests (month, staff_id, message) values (p_month, v_staff.id, p_message) returning * into v_row;
   perform public.staff_roster_notify_managers('availability_change_request', 'change-request:' || v_row.id::text,
     'Availability change requested', v_staff.display_name || ' asked to change their availability for ' || to_char(p_month, 'FMMonth YYYY') || '.',
-    '/admin/roster?month=' || to_char(p_month, 'YYYY-MM') || '&panel=attention', p_month);
+    '/admin/roster?rosterTab=availability&rosterMonth=' || to_char(p_month, 'YYYY-MM'), p_month);
   return public.staff_roster_remember(p_request_id, 'request_change', jsonb_build_object('id', v_row.id));
 end;
 $$;
@@ -2374,7 +2374,7 @@ begin
     v_staff.display_name || case when p_kind = 'urgent' then ' reported they cannot work ' else ' asked for time off ' end
       || to_char(p_starts at time zone 'Australia/Brisbane', 'Dy DD Mon FMHH12:MI am') || ' to ' || to_char(p_ends at time zone 'Australia/Brisbane', 'Dy DD Mon FMHH12:MI am')
       || case when v_affected > 0 then '. ' || v_affected || ' rostered ' || case when v_affected = 1 then 'class needs' else 'classes need' end || ' attention.' else '.' end,
-    '/admin/roster?panel=attention', null);
+    '/admin/roster?rosterTab=requests&rosterMonth=' || to_char(p_starts at time zone 'Australia/Brisbane', 'YYYY-MM') || '&rosterFocus=' || v_row.id::text, null);
   perform public.staff_roster_audit('absence_' || v_row.status, 'absence', v_row.id::text, null, null, to_jsonb(v_row) - 'reason_private');
   return public.staff_roster_remember(p_request_id, 'request_absence', jsonb_build_object('id', v_row.id, 'status', v_row.status, 'affected_classes', v_affected));
 end;
@@ -2436,7 +2436,7 @@ begin
   perform public.staff_roster_notify_managers('cover_requested', 'cover-requested:' || v_row.id::text,
     'Cover requested', v_staff.display_name || ' asked for cover for ' || coalesce(v_assignment.session_title, 'a class') || ' on '
       || to_char(v_assignment.session_start at time zone 'Australia/Brisbane', 'Dy DD Mon, FMHH12:MI am') || '. They stay rostered until a replacement is approved.',
-    '/admin/roster?panel=attention', v_revision.month);
+    '/admin/roster?rosterTab=requests&rosterMonth=' || to_char(v_revision.month, 'YYYY-MM') || '&rosterFocus=' || v_row.id::text, v_revision.month);
   perform public.staff_roster_audit('cover_requested', 'cover', v_row.id::text, v_revision.month, null, to_jsonb(v_row) - 'reason_private');
   return public.staff_roster_remember(p_request_id, 'request_cover', jsonb_build_object('id', v_row.id, 'status', v_row.status));
 exception when unique_violation then
@@ -2501,7 +2501,7 @@ begin
   update public.staff_cover_requests set status = 'offered', version = version + 1 where id = p_cover_id;
   perform public.staff_roster_notify_managers('cover_offered', 'cover-offered:' || p_cover_id::text || ':' || v_staff.id::text,
     'Cover offered — needs your approval', v_staff.display_name || ' offered to cover a class. Approve it to change the roster.',
-    '/admin/roster?panel=attention', null);
+    '/admin/roster?rosterTab=requests&rosterFocus=' || p_cover_id::text, null);
   perform public.staff_roster_audit('cover_offered', 'cover', p_cover_id::text, null, null, jsonb_build_object('staff_id', v_staff.id));
   return public.staff_roster_remember(p_request_id, 'offer_cover', jsonb_build_object('ok', true, 'status', 'offered'));
 end;

@@ -28,6 +28,7 @@ const Coaches = lazy(() => import('./pages/Coaches'));
 const Events = lazy(() => import('./pages/Events'));
 const Booking = lazy(() => import('./pages/Booking'));
 const Account = lazy(() => import('./pages/Account'));
+const Coaching = lazy(() => import('./pages/Coaching'));
 const Login = lazy(() => import('./pages/Login'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
@@ -63,6 +64,7 @@ const AppRoutes = () => (
       <Route path="/events" element={<Events />} />
       <Route path="/booking" element={<Booking />} />
       <Route path="/account" element={<Account />} />
+      <Route path="/coaching" element={<Coaching />} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />

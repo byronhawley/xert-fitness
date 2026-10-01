@@ -1,6 +1,7 @@
 User-agent: *
 Allow: /
 Disallow: /account
+Disallow: /coaching
 Disallow: /admin
 Disallow: /checkout-return
 Disallow: /reset-password

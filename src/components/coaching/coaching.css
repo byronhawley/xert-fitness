@@ -1,0 +1,35 @@
+/* Coach screens. Phone first; colours from the shared tokens. */
+.coaching-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.coaching-tabs button { min-height: 44px; border-radius: var(--radius-control); font-family: var(--font-body, inherit); font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); position: relative; }
+.coaching-tabs button[aria-selected="true"] { color: var(--text-inverse); background: var(--accent-default); }
+.coaching-tabs .coaching-count { margin-inline-start: 4px; padding: 0 6px; border-radius: 999px; background: var(--state-danger-text); color: var(--text-inverse); font-size: 0.7rem; }
+
+.coaching-card { border: 1px solid var(--border-hairline); border-radius: var(--nav-radius-card); background: var(--surface-raised); padding: 14px 16px; min-width: 0; overflow-wrap: anywhere; }
+.coaching-card[data-changed="true"] { border-color: var(--state-warning); }
+.coaching-card[data-cancelled="true"] { opacity: 0.7; }
+
+.coaching-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--pill-color, var(--border-strong)); color: var(--pill-color, var(--text-secondary)); font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+.coaching-pill[data-tone="success"] { --pill-color: var(--state-success); }
+.coaching-pill[data-tone="warning"] { --pill-color: var(--state-warning); }
+.coaching-pill[data-tone="danger"] { --pill-color: var(--state-danger-text); }
+.coaching-pill[data-tone="info"] { --pill-color: var(--state-info); }
+
+.coaching-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--banner-color, var(--border-strong)); border-radius: var(--nav-radius-card); background: var(--surface-raised); }
+.coaching-banner[data-tone="success"] { --banner-color: var(--state-success); }
+.coaching-banner[data-tone="warning"] { --banner-color: var(--state-warning); }
+.coaching-banner[data-tone="danger"] { --banner-color: var(--state-danger-text); }
+.coaching-banner[data-tone="info"] { --banner-color: var(--state-info); }
+
+.coaching-choice { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+.coaching-choice button { min-height: 44px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); background: var(--surface-overlay); }
+.coaching-choice button[aria-pressed="true"][data-status="PREFERRED"], .coaching-choice button[aria-pressed="true"][data-status="AVAILABLE"] { background: var(--state-success); color: var(--text-inverse); border-color: var(--state-success); }
+.coaching-choice button[aria-pressed="true"][data-status="IF_NEEDED"] { background: var(--state-warning); color: var(--text-inverse); border-color: var(--state-warning); }
+.coaching-choice button[aria-pressed="true"][data-status="UNAVAILABLE"] { background: var(--state-danger-text); color: var(--text-inverse); border-color: var(--state-danger-text); }
+
+.coaching-sheet-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-end; justify-content: center; background: var(--surface-scrim-80); }
+.coaching-sheet { width: 100%; max-width: 32rem; max-height: 90dvh; overflow-y: auto; padding: 20px 16px max(20px, env(safe-area-inset-bottom)); border: 1px solid var(--border-strong); border-radius: 16px 16px 0 0; background: var(--surface-base); }
+@media (min-width: 640px) { .coaching-sheet-backdrop { align-items: center; } .coaching-sheet { border-radius: 16px; padding: 24px; } }
+
+.coaching-save-state { font-size: 0.75rem; color: var(--text-secondary); }
+.coaching-save-state[data-state="error"] { color: var(--state-danger-text); }
+.coaching-save-state[data-state="saved"] { color: var(--state-success); }
