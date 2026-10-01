@@ -3,5 +3,5 @@ import { nativeTaskFallback } from '@/lib/nativeTaskLinks';
 
 export default function NativeTaskBridge() {
   const location = useLocation();
-  return <Navigate replace to={nativeTaskFallback(location.pathname)} />;
+  return <Navigate replace to={nativeTaskFallback(location.pathname, location.search)} />;
 }
