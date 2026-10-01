@@ -25,7 +25,7 @@ const statements = sql => sql.replace(/--[^\n]*/g, '').split(/;\s*\n/).map(part 
 
 test('it starts with a lock timeout and records its capability as the very last statement', () => {
   const parts = statements(FORWARD);
-  assert.equal(parts[0], "set lock_timeout = '5s'");
+  assert.equal(parts[0], "set local lock_timeout = '5s'");
   assert.match(parts.at(-1), /^insert into public\.xert_schema_capabilities \(capability\) values \('staff_roster_push_reliability'\) on conflict \(capability\) do nothing;?$/);
   assert.equal(FORWARD.match(/xert_schema_capabilities/g).length, 1);
   assert.doesNotMatch(FORWARD, /cron\.schedule|net\.http_post|vault\./, 'the scheduler is a separate, not-applied file');

@@ -87,6 +87,27 @@ test('obsolete instructions are closed honestly, never sent to empty the queue',
   assert.deepEqual((await deliveries(db3)).filter(row => row.kind === 'session_retimed').map(row => row.status), ['expired', 'expired']);
 });
 
+test('two retimes in one transaction (same created_at): the current time is still pushed', async () => {
+  const { db, session } = await pushWorld();
+  await db.query(`update public.staff_notifications set read_at = now() where kind = 'roster_published'`);
+  await retime(db, session, 405);
+  await retime(db, session, 435);
+  // One transaction gives both notices the same now(); only ids differ.
+  await db.query(`update public.staff_notifications set created_at = (select min(created_at) from public.staff_notifications where kind = 'session_retimed') where kind = 'session_retimed'`);
+  const notices = await retimeNotices(db);
+  assert.equal(notices.length, 2);
+  const current = (await db.query(`select n.id from public.staff_notifications n join public.class_sessions c on c.id = $2
+    where n.kind = 'session_retimed' and n.recipient_profile_id = $1
+      and split_part(n.dedupe_key, ':', 4)::bigint = extract(epoch from c.start_time)::bigint`, [ids.ava, session])).rows[0];
+  assert.ok(current, 'one notice matches the class as it is now');
+  const apns = fakeAPNs();
+  await scheduler(db, apns);
+  assert.deepEqual(apns.sent.map(item => item.body.staff_notification_id), [current.id, current.id], 'exactly the notice for the current time is pushed');
+  const stale = notices.find(row => row.id !== current.id);
+  assert.deepEqual((await deliveries(db, 'd.notification_id = $1', [stale.id])).map(row => [row.status, row.reason]),
+    [['superseded', 'CLASS_CHANGED_AGAIN'], ['superseded', 'CLASS_CHANGED_AGAIN']]);
+});
+
 test('staleness is separate from cadence: old, read, and no-longer-allowed notices are not pushed', async () => {
   const { db, staff } = await pushWorld();
   const apns = fakeAPNs();

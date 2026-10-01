@@ -1,6 +1,8 @@
 -- Fail fast instead of queueing behind live traffic for a lock. Safe to re-run
--- if it times out: every statement below is idempotent.
-set lock_timeout = '5s';
+-- if it times out: every statement below is idempotent. `local` keeps the
+-- setting to this run's transaction (the SQL editor sends the file as one
+-- implicit transaction), so it does not linger on the editor's connection.
+set local lock_timeout = '5s';
 
 -- ============================================================================
 -- XERT Roster: dependable phone push for staff notices
@@ -119,7 +121,9 @@ begin
                where o.recipient_profile_id = p_notice.recipient_profile_id and o.id <> p_notice.id
                  and o.kind in ('session_retimed', 'session_cancelled')
                  and o.dedupe_key like 'session:' || v_session_id::text || ':%'
-                 and (o.created_at, o.id) > (p_notice.created_at, p_notice.id)) then
+                 -- Strictly later only: notices from one transaction share
+                 -- created_at, and the class's current state below decides.
+                 and o.created_at > p_notice.created_at) then
       return 'superseded:NEWER_NOTICE';
     end if;
     if p_notice.kind = 'session_cancelled' then
