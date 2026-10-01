@@ -7,7 +7,7 @@ import { at, Banner, BUTTON, dateName, GHOST, INPUT, LABEL, monthName, Pill, She
 const SHORT = { PREFERRED: 'Prefer', AVAILABLE: 'Yes', IF_NEEDED: 'If needed', UNAVAILABLE: 'No' };
 const TONE = { PREFERRED: 'success', AVAILABLE: 'success', IF_NEEDED: 'warning', UNAVAILABLE: 'danger', PARTIAL: 'warning', UNKNOWN: 'neutral' };
 
-function Choice({ label, value, onChange, disabled }) {
+function Choice({ label, value, onChange, disabled = false }) {
   return (
     <div className="coaching-choice" role="group" aria-label={label}>
       {AVAILABILITY_STATUSES.map(status => (

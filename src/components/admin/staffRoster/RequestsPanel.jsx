@@ -57,8 +57,8 @@ function RecordAbsence({ ctx, busy, onMutate, onDone }) {
 export default function RequestsPanel({ data, focus, onMutate, onShowSession }) {
   const { snapshot, publishedCtx: ctx, busy } = data;
   const [recording, setRecording] = useState(false);
-  const absences = [...(snapshot.absences || [])].sort((a, b) => (['reported', 'requested'].includes(b.status) - ['reported', 'requested'].includes(a.status)) || toMs(a.starts_at) - toMs(b.starts_at));
-  const covers = [...(snapshot.cover_requests || [])].sort((a, b) => (['open', 'offered'].includes(b.status) - ['open', 'offered'].includes(a.status)) || toMs(a.created_at) - toMs(b.created_at));
+  const absences = [...(snapshot.absences || [])].sort((a, b) => (Number(['reported', 'requested'].includes(b.status)) - Number(['reported', 'requested'].includes(a.status))) || toMs(a.starts_at) - toMs(b.starts_at));
+  const covers = [...(snapshot.cover_requests || [])].sort((a, b) => (Number(['open', 'offered'].includes(b.status)) - Number(['open', 'offered'].includes(a.status))) || toMs(a.created_at) - toMs(b.created_at));
 
   return (
     <div className="space-y-8">

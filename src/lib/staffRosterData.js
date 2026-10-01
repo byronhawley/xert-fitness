@@ -85,11 +85,7 @@ export function rosterError(error) {
   if (code === 'ASSIGNMENT_BLOCKED' && detail?.problems?.length) {
     message = detail.problems.map(item => PROBLEM_MESSAGES[item] || item).join(' ');
   }
-  const result = new Error(message || 'The roster could not be updated. Try again.');
-  result.code = code;
-  result.detail = detail;
-  result.cause = error;
-  return result;
+  return Object.assign(new Error(message || 'The roster could not be updated. Try again.'), { code, detail, cause: error });
 }
 
 export function newRequestId() {

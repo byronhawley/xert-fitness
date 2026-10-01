@@ -26,7 +26,7 @@ function workload(ctx, staffId, session) {
   return `${month}${target ? ` of ${target}` : ''} this month · ${thisWeek} this week · ${today} today`;
 }
 
-function Candidate({ ctx, session, entry, onAssign, busy, actionLabel }) {
+function Candidate({ ctx, session, entry, onAssign = null, busy = false, actionLabel = null }) {
   return (
     <li className="staff-roster-row">
       <div className="min-w-0">

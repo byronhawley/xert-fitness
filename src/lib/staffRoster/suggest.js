@@ -119,8 +119,8 @@ function unfilledReason(ctx, sessionId, slotKey, allowIfNeeded) {
 }
 
 /**
- * @param ctx planning context (sessions, staff, availability, assignments = the current draft + other months' published)
- * @param options { sessionIds, mode: 'keep'|'fresh', allowIfNeeded, nodeLimit, previous: Map }
+ * @param {object} ctx planning context (sessions, staff, availability, assignments = the current draft + other months' published)
+ * @param {{ sessionIds?: string[], mode?: string, allowIfNeeded?: boolean, nodeLimit?: number, fillOptional?: boolean }} [options]
  */
 export function suggestDraft(ctx, { sessionIds, mode = 'keep', allowIfNeeded = true, nodeLimit = DEFAULT_NODE_LIMIT, fillOptional = false } = {}) {
   const inScope = new Set(sessionIds);

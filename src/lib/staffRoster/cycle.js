@@ -62,6 +62,8 @@ export function defaultPeriodDates(monthKey, cycle = DEFAULT_CYCLE) {
  * clearly labelled shortened cycle starting today; nothing is backdated and no
  * reminder is generated for a time before the period was opened. When the
  * default due date has already passed the manager must choose one.
+ * @param {string} monthKey
+ * @param {{ today?: string, cycle?: object, dueOn?: string | null, publishTargetOn?: string | null }} [options]
  */
 export function planPeriodOpening(monthKey, { today, cycle = DEFAULT_CYCLE, dueOn: chosenDue = null, publishTargetOn: chosenPublish = null } = {}) {
   if (!isDateKey(today)) throw new Error('Opening a roster month needs today’s gym date.');

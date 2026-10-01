@@ -10,7 +10,7 @@ export function AvailabilityBadge({ status }) {
   return <Tone tone={STATUS_TONE[status] || 'neutral'}>{STATUS_LABELS[status] || status}</Tone>;
 }
 
-export function Notice({ tone = 'info', title, children, action = null }) {
+export function Notice({ tone = 'info', title = null, children, action = null }) {
   return (
     <div role={tone === 'danger' ? 'alert' : 'status'} className="staff-roster-notice" data-tone={tone}>
       <div className="min-w-0">

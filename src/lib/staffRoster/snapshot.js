@@ -62,8 +62,8 @@ function toAssignment(row, extra = {}) {
 }
 
 /**
- * @param snapshot server snapshot
- * @param options { view: 'draft' | 'published', now }
+ * @param {object} snapshot server snapshot
+ * @param {{ view?: 'draft' | 'published', now?: number }} [options]
  */
 export function planningContext(snapshot, { view = 'draft', now = Date.now() } = {}) {
   const sessions = (snapshot.sessions || []).map(toSession);
@@ -139,6 +139,8 @@ const ATTENTION_ORDER = ['urgent_absence', 'invalid_published', 'uncovered', 'ch
 
 /**
  * Items the manager should look at, each pointing at its exact record.
+ * @param {object} snapshot
+ * @param {{ today?: string, now?: number }} [options]
  */
 export function needsAttention(snapshot, { today, now = Date.now() } = {}) {
   const items = [];

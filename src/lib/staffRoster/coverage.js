@@ -37,7 +37,7 @@ export function candidatesFor(ctx, sessionId, slotKey, { ignoreAssignmentIds = [
     else if (status === 'IF_NEEDED') ifNeeded.push(entry);
     else eligible.push(entry);
   }
-  const preferredFirst = (a, b) => (b.status === 'PREFERRED') - (a.status === 'PREFERRED') || a.name.localeCompare(b.name);
+  const preferredFirst = (a, b) => Number(b.status === 'PREFERRED') - Number(a.status === 'PREFERRED') || a.name.localeCompare(b.name);
   return { eligible: eligible.sort(preferredFirst), ifNeeded, ineligible };
 }
 
