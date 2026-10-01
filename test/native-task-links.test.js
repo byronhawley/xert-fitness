@@ -34,6 +34,24 @@ test('shared native task links fall back to the nearest real web workflow', () =
   assert.equal(nativeTaskFallback(null), '/app');
 });
 
+test('coach roster links fall back to the coaching screen, carrying only a valid month', () => {
+  assert.equal(nativeTaskFallback('/open/coaching'), '/coaching');
+  assert.equal(nativeTaskFallback('/open/coaching/'), '/coaching');
+  assert.equal(nativeTaskFallback('/open/coaching', '?month=2026-12'), '/coaching?month=2026-12');
+  assert.equal(nativeTaskFallback('/open/coaching/roster'), '/coaching?tab=roster');
+  assert.equal(nativeTaskFallback('/open/coaching/availability', '?month=2026-12'), '/coaching?tab=availability&month=2026-12');
+  assert.equal(nativeTaskFallback('/OPEN/COACHING/REQUESTS/', 'month=2027-01'), '/coaching?tab=requests&month=2027-01');
+  assert.equal(nativeTaskFallback('/open/coaching/roster', '?month=2026-12&staff=abc&note=private'), '/coaching?tab=roster&month=2026-12', 'anything but the month is dropped');
+  for (const month of ['2026-13', '2026-00', '2026-1', '26-12', '2026-12-01', '2026-12%0A', 'december', '', '2026-12&month=2027-01']) {
+    assert.equal(nativeTaskFallback('/open/coaching/roster', `?month=${month}`), '/coaching?tab=roster', `rejects month ${JSON.stringify(month)}`);
+  }
+  assert.equal(nativeTaskFallback('/open/coaching/roster', '?month=2026-12&month=2027-01'), '/coaching?tab=roster', 'an ambiguous month is dropped');
+  assert.equal(nativeTaskFallback('/open/coaching/roster', null), '/coaching?tab=roster');
+  assert.equal(nativeTaskFallback('/open/coaching/inbox'), '/app', 'only the shared tabs are links');
+  assert.equal(nativeTaskFallback('/open/coaching/roster/00000000-0000-0000-0000-000000000026'), '/app', 'no record ids in roster links');
+  assert.equal(nativeTaskFallback('/open/home', '?month=2026-12'), '/', 'other links ignore the query');
+});
+
 test('native routes expose trusted privacy-aware HTTPS sharing without changing signing entitlements', async () => {
   const [navigation, root, app, bridge, modelsTests, account, events, booking] = await Promise.all([
     readFile(navigationURL, 'utf8'),
@@ -56,7 +74,7 @@ test('native routes expose trusted privacy-aware HTTPS sharing without changing 
   assert.match(root, /xert-navigation-share/);
   assert.match(root, /xert-navigation-share-private/);
   assert.match(app, /<Route path="\/open\/\*" element=\{<NativeTaskBridge \/>\} \/>/);
-  assert.match(bridge, /<Navigate replace to=\{nativeTaskFallback\(location\.pathname\)\} \/>/);
+  assert.match(bridge, /<Navigate replace to=\{nativeTaskFallback\(location\.pathname, location\.search\)\} \/>/);
   assert.match(account, /<section id="notices"/);
   assert.match(account, /<section id="bookings"/);
   assert.match(events, /<div id="goals"/);

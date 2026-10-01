@@ -7,6 +7,7 @@ struct AccountView: View {
     let pendingNavigationTitle: String?
     let onCancelPendingNavigation: () -> Void
     let onOpenOwner: () -> Void
+    @ObservedObject var staffRoster: StaffRosterStore
 
     @EnvironmentObject private var store: XertStore
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -32,6 +33,9 @@ struct AccountView: View {
     @State private var showingMemberReadiness = false
     @State private var authenticationSupport = DeviceAuthenticator.support()
     @State private var handledRouteSequence: UInt = 0
+    @State private var handledCoachingRouteSequence: UInt = 0
+    @State private var handledCoachingLinkSequence: UInt = 0
+    @State private var showingCoaching = false
     @State private var isSubmittingAuthentication = false
     @FocusState private var focusedProfileField: ProfileField?
     @FocusState private var focusedAuthField: AuthField?
@@ -105,22 +109,35 @@ struct AccountView: View {
                 }
                 .refreshable {
                     await store.refresh()
+                    if store.isSignedIn { await staffRoster.refreshAccess() }
+                }
+                .navigationDestination(isPresented: $showingCoaching) {
+                    MyCoachingView(staffRoster: staffRoster)
                 }
                 .onAppear(perform: syncProfileForm)
                 .onAppear {
                     authenticationSupport = DeviceAuthenticator.support()
                     focusRoute(using: proxy)
+                    followCoachingRoute()
+                    presentRequestedCoaching()
                 }
                 .onChange(of: routeSequence) { _ in
                     focusRoute(using: proxy)
+                    followCoachingRoute()
+                }
+                .onChange(of: staffRoster.linkSequence) { _ in
+                    presentRequestedCoaching()
                 }
                 .onChange(of: store.isSignedIn) { isSignedIn in
                     if isSignedIn {
                         focusedAuthField = nil
                         password = ""
                         passwordConfirmation = ""
+                    } else {
+                        showingCoaching = false
                     }
                     focusRoute(using: proxy)
+                    followCoachingRoute()
                 }
                 .onChange(of: store.isLoading) { _ in
                     focusRoute(using: proxy)
@@ -210,6 +227,29 @@ struct AccountView: View {
         }
     }
 
+    /// A `.coaching` route (deep link, push, handoff or restoration) asks the
+    /// store to open that section; the store's link sequence presents it.
+    private func followCoachingRoute() {
+        guard
+            store.isSignedIn,
+            routeSequence > 0,
+            routeSequence != handledCoachingRouteSequence,
+            case .coaching(let link) = route
+        else { return }
+        handledCoachingRouteSequence = routeSequence
+        staffRoster.open(link)
+    }
+
+    private func presentRequestedCoaching() {
+        guard
+            store.isSignedIn,
+            staffRoster.linkSequence > 0,
+            staffRoster.linkSequence != handledCoachingLinkSequence
+        else { return }
+        handledCoachingLinkSequence = staffRoster.linkSequence
+        showingCoaching = true
+    }
+
     // MARK: - Signed-in profile
 
     @ViewBuilder
@@ -229,6 +269,10 @@ struct AccountView: View {
 
         if store.profile?.isAdmin == true {
             ownerCommandCentreSection
+        }
+
+        if staffRoster.showsEntry {
+            staffCoachingSection
         }
 
         memberReadinessSection
@@ -280,6 +324,62 @@ struct AccountView: View {
             Text("Owner Tools").xertEyebrow()
         }
         .listRowBackground(Color.xertInk)
+    }
+
+    /// Shown only while `staff_roster_me` reports an active coach with the
+    /// roster switched on. Members never see it.
+    private var staffCoachingSection: some View {
+        Section {
+            Button {
+                XertHaptics.play(.lightImpact)
+                staffRoster.open(XertCoachingLink())
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.badge.clock")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Color.xertSteel)
+                        .frame(width: 36, height: 36)
+                        .background(Color.xertSteel.opacity(0.12))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("My Coaching")
+                            .font(.headline)
+                            .foregroundStyle(Color.xertOffWhite)
+                        Text(staffCoachingDetail)
+                            .font(.footnote)
+                            .foregroundStyle(Color.xertPale)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(Color.xertSteel)
+                }
+                .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens your classes, availability and cover requests")
+            .accessibilityIdentifier("account-my-coaching")
+        } header: {
+            Text("Coach").xertEyebrow()
+        }
+        .listRowBackground(Color.xertInk)
+    }
+
+    private var staffCoachingDetail: String {
+        guard let me = staffRoster.me else { return "Your classes, availability and requests" }
+        var parts: [String] = []
+        if me.unread_notifications > 0 {
+            parts.append("\(me.unread_notifications) unread \(me.unread_notifications == 1 ? "notice" : "notices")")
+        }
+        if !me.pending_acknowledgements.isEmpty {
+            parts.append("roster changed")
+        }
+        let due = me.periods.filter { StaffAvailabilityEditor.phase($0) == .open && $0.submission == nil }.count
+        if due > 0 {
+            parts.append("availability due")
+        }
+        return parts.isEmpty ? "Your classes, availability and requests" : parts.joined(separator: " · ")
     }
 
     private var memberReadinessSection: some View {

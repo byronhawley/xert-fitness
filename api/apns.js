@@ -64,7 +64,7 @@ export function buildAnnouncementPush(announcement) {
   };
 }
 
-function apnsHost(environment) {
+export function apnsHost(environment) {
   return environment === 'sandbox' ? 'https://api.sandbox.push.apple.com' : 'https://api.push.apple.com';
 }
 
@@ -72,6 +72,26 @@ export function sendNotification(
   client,
   subscription,
   announcement,
+  config,
+  providerToken,
+  timeoutMs = APNS_REQUEST_TIMEOUT_MS,
+) {
+  return sendAPNsAlert(client, subscription, {
+    collapseId: `notice-${announcement.id}`,
+    expiresAt: announcement.expires_at,
+    payload: () => buildAnnouncementPush(announcement),
+  }, config, providerToken, timeoutMs);
+}
+
+/**
+ * Posts one alert to APNs. `payload` is built lazily so a bad payload is an
+ * auditable failed result, never a throw. Status 'delivered' means APNs
+ * accepted the request (HTTP 200); it is not proof the device showed it.
+ */
+export function sendAPNsAlert(
+  client,
+  subscription,
+  { collapseId, expiresAt = null, payload },
   config,
   providerToken,
   timeoutMs = APNS_REQUEST_TIMEOUT_MS,
@@ -84,11 +104,11 @@ export function sendNotification(
       'apns-topic': config.bundleId,
       'apns-push-type': 'alert',
       'apns-priority': '10',
-      'apns-collapse-id': `notice-${announcement.id}`,
+      'apns-collapse-id': collapseId,
     };
-    if (announcement.expires_at) {
-      const expiresAt = Math.floor(new Date(announcement.expires_at).getTime() / 1000);
-      if (Number.isFinite(expiresAt)) headers['apns-expiration'] = String(expiresAt);
+    if (expiresAt) {
+      const expiresAtSeconds = Math.floor(new Date(expiresAt).getTime() / 1000);
+      if (Number.isFinite(expiresAtSeconds)) headers['apns-expiration'] = String(expiresAtSeconds);
     }
     let statusCode = 0;
     let responseBody = '';
@@ -125,7 +145,7 @@ export function sendNotification(
       try { request.close(http2.constants.NGHTTP2_CANCEL); } catch { /* stream already closed */ }
     }, Math.max(1, Number(timeoutMs) || APNS_REQUEST_TIMEOUT_MS));
     try {
-      request.end(JSON.stringify(buildAnnouncementPush(announcement)));
+      request.end(JSON.stringify(typeof payload === 'function' ? payload() : payload));
     } catch (error) {
       finish({ subscription, status: 'failed', reason: clean(error.message) || 'APNS_NETWORK_ERROR' });
       try { request.close(http2.constants.NGHTTP2_CANCEL); } catch { /* stream already closed */ }

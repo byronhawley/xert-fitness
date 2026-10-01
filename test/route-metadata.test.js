@@ -17,7 +17,7 @@ test('public routes have distinct indexable search metadata', () => {
 });
 
 test('private, transactional and unknown routes are never indexed', () => {
-  for (const path of ['/account', '/admin/orders', '/checkout-return', '/reset-password', '/missing']) {
+  for (const path of ['/account', '/coaching', '/admin/orders', '/checkout-return', '/reset-password', '/missing']) {
     assert.equal(metadataForPath(path).indexable, false, path);
   }
 });

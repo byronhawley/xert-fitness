@@ -69,6 +69,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   booking_integrity_overhaul: 'Apply supabase/migrations/20260906010000_booking_integrity_overhaul.sql in Supabase.',
   booking_overhaul_repair: 'Apply supabase/migrations/20260906020000_booking_overhaul_repair.sql in Supabase.',
   booking_repair_followups: 'Apply supabase/migrations/20260906030000_booking_repair_followups.sql in Supabase.',
+  // Installs switched off; applying it changes nothing a member or coach sees.
+  staff_roster: 'Apply supabase/migrations/20261001010000_staff_roster.sql in Supabase.',
 });
 
 export function summarizeSchemaCapabilities(rows) {

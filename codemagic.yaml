@@ -360,6 +360,7 @@ workflows:
               "booking_integrity_overhaul",
               "booking_overhaul_repair",
               "booking_repair_followups",
+              "staff_roster",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

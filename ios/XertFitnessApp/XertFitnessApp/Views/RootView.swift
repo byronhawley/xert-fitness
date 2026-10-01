@@ -19,6 +19,7 @@ struct RootView: View {
     @SceneStorage("xert.adminNavigationUserID") private var restoredAdminNavigationUserID = ""
     @StateObject private var navigation = XertNavigationCoordinator()
     @StateObject private var ownerNavigationPulse = XertOwnerNavigationPulseStore()
+    @StateObject private var staffRoster = StaffRosterStore()
     @State private var checkoutReturnStatus: CheckoutReturnStatus?
     @State private var pendingCheckoutCallback: CheckoutCallback?
     @State private var isProcessingCheckoutCallback = false
@@ -60,6 +61,8 @@ struct RootView: View {
         .onChange(of: store.isSignedIn) { isSignedIn in
             guard isSignedIn else {
                 ownerNavigationPulse.reset()
+                staffRoster.reset()
+                StaffRosterPushNavigation.clearPending()
                 showingAdminCommandCentre = false
                 ownerAdminStore = nil
                 ownerAdminStoreUserID = nil
@@ -145,6 +148,8 @@ struct RootView: View {
             consumePendingReminderRoute()
             consumePendingAnnouncementRoute()
             consumePendingQuickActionRoute()
+            bindStaffRoster()
+            consumePendingStaffRosterRoute()
             refreshOwnerNavigationPulse()
         }
         .onChange(of: navigation.route) { route in
@@ -160,6 +165,7 @@ struct RootView: View {
             }
             reloadPinnedMemberRoutes()
             reloadMemberWorkspaceOrder()
+            bindStaffRoster()
         }
         .onReceive(NotificationCenter.default.publisher(for: .xertOpenBookings)) { _ in
             consumePendingReminderRoute()
@@ -179,6 +185,16 @@ struct RootView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .xertRefreshAnnouncements)) { _ in
             Task { await store.refreshAnnouncements() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xertOpenStaffRoster)) { _ in
+            consumePendingStaffRosterRoute()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .xertRefreshStaffRoster)) { _ in
+            guard store.isSignedIn else { return }
+            Task {
+                await staffRoster.refreshAccess()
+                if staffRoster.me != nil { await staffRoster.loadNotifications() }
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .xertCheckoutCallback)) { notification in
             guard let url = notification.object as? URL else { return }
@@ -241,7 +257,8 @@ struct RootView: View {
                 routeSequence: navigation.routeSequence,
                 pendingNavigationTitle: pendingProtectedNavigation?.route.navigationTitle,
                 onCancelPendingNavigation: cancelPendingProtectedNavigation,
-                onOpenOwner: { openOwnerCommandCentre() }
+                onOpenOwner: { openOwnerCommandCentre() },
+                staffRoster: staffRoster
             )
                 .toolbar(.hidden, for: .tabBar)
                 .tabItem {
@@ -813,6 +830,11 @@ struct RootView: View {
         }
         pendingProtectedNavigation = nil
         navigation.open(route, source: source)
+        if case .coaching(let link) = route {
+            // Re-open My Coaching even when the coordinator is already on
+            // this route (for example after the coach went back to Account).
+            staffRoster.open(link)
+        }
         return true
     }
 
@@ -1007,6 +1029,29 @@ struct RootView: View {
     private func consumePendingQuickActionRoute() {
         guard let route = XertQuickActionNavigation.consumePendingRoute() else { return }
         openMemberRoute(route, source: .quickAction)
+    }
+
+    private func bindStaffRoster() {
+        let member = store
+        staffRoster.bind(userID: store.authSession?.user?.id) {
+            try await member.staffRosterSession()
+        }
+        // Ask the server once per account whether My Coaching should appear.
+        if store.isSignedIn, staffRoster.access == .unknown {
+            Task { await staffRoster.refreshAccess() }
+        }
+    }
+
+    /// A tapped staff roster push opens its `open_path` through the same
+    /// route as a universal link. Its notice is marked read only once My
+    /// Coaching is showing for the coach.
+    private func consumePendingStaffRosterRoute() {
+        guard let target = StaffRosterPushNavigation.consumePending() else { return }
+        if let notificationID = target.notificationID {
+            staffRoster.noteOpenedFromNotification(notificationID)
+        }
+        openMemberRoute(.coaching(target.link), source: .pushNotification)
+        XertHaptics.play(.mediumImpact)
     }
 }
 
