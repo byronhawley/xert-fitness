@@ -426,7 +426,7 @@ create index if not exists staff_notifications_inbox on public.staff_notificatio
 -- stays the only read state. A row is claimed ('sending') before the send so
 -- a notice reaches each device at most once even when two sends race;
 -- 'accepted' means Apple's push service accepted it, not that the phone
--- showed it. Written only by the service role (api/staff-roster-push.js).
+-- showed it. Written only by the service role (src/lib/staffRosterPush.js via api/push-subscription.js).
 create table if not exists public.staff_notification_push_deliveries (
   id uuid primary key default gen_random_uuid(),
   notification_id uuid not null references public.staff_notifications(id) on delete cascade,

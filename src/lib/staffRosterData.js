@@ -201,10 +201,10 @@ export async function requestRosterPush(getSession, fetcher = globalThis.fetch) 
     const { data } = await getSession();
     const token = data?.session?.access_token;
     if (!token || typeof fetcher !== 'function') return { requested: false };
-    const response = await fetcher('/api/staff-roster-push', {
+    const response = await fetcher('/api/push-subscription', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: '{}',
+      body: JSON.stringify({ action: 'staff_roster_push' }),
       keepalive: true,
     });
     return { requested: true, ok: Boolean(response?.ok), status: response?.status ?? null };

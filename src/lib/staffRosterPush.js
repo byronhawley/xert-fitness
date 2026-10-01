@@ -1,8 +1,12 @@
 import http2 from 'node:http2';
 import { createClient } from '@supabase/supabase-js';
-import { requestHeader, sendJson } from '../src/lib/serverHttp.js';
-import { apnsHost, createAPNsProviderToken, inspectAPNsEnvironment, sendAPNsAlert } from './apns.js';
+import { requestHeader, sendJson } from './serverHttp.js';
+import { apnsHost, createAPNsProviderToken, inspectAPNsEnvironment, sendAPNsAlert } from '../../api/apns.js';
 
+// SERVER ONLY (Vercel function code; never imported by the browser bundle).
+// Served by api/push-subscription.js as `{ action: 'staff_roster_push' }`, so
+// the Hobby plan's twelve-function ceiling is kept.
+//
 // Phone push for coach roster notices. The durable notice is the in-app
 // `staff_notifications` row the database already wrote; this only nudges the
 // recipient's iPhone, at most once per notice and device. A signed-in manager
@@ -12,7 +16,7 @@ import { apnsHost, createAPNsProviderToken, inspectAPNsEnvironment, sendAPNsAler
 // Lock-screen text is deliberately generic: no names, reasons, notes or
 // class details ever leave the database in a push.
 
-export const config = { maxDuration: 30 };
+export const STAFF_ROSTER_PUSH_ACTION = 'staff_roster_push';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -157,7 +161,7 @@ export async function sendStaffRosterPushes({
   return { configured: true, enabled: true, claimed: claimed.length, attempted: results.length, accepted, failed: results.length - accepted };
 }
 
-export default async function handler(request, response, { createAdmin = createClient, send = sendStaffRosterPushes, env = process.env } = {}) {
+export async function staffRosterPushHandler(request, response, { createAdmin = createClient, send = sendStaffRosterPushes, env = process.env } = {}) {
   const json = (body, status = 200) => sendJson(response, body, status);
   const SUPABASE_URL = env.SUPABASE_URL || env.VITE_SUPABASE_URL;
   const SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;

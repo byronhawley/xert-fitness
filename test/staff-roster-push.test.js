@@ -6,9 +6,11 @@ import { generateKeyPairSync } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import handler, {
+import {
   STAFF_PUSH_TITLE, buildStaffRosterPush, recordedPushStatus, sendStaffRosterPushes, staffPushBody, staffPushOpenPath,
-} from '../api/staff-roster-push.js';
+  staffRosterPushHandler as handler,
+} from '../src/lib/staffRosterPush.js';
+import pushSubscriptionHandler from '../api/push-subscription.js';
 import { createStaffRosterClient, requestRosterPush } from '../src/lib/staffRosterData.js';
 import { MONTH, ids, rid, rpc, world, addSession, allWeek, submit, apply, publish, day } from './helpers/staff-roster-world.mjs';
 import { as } from './helpers/staff-roster-db.mjs';
@@ -312,6 +314,14 @@ test('the route rejects missing, invalid and non-staff callers before doing anyt
   assert.equal(unconfigured.body.configured, false);
 });
 
+test('the existing push endpoint serves roster pushes, so no new serverless function is added', async () => {
+  const viaPushEndpoint = await read(await pushSubscriptionHandler({ method: 'POST', headers: {}, body: { action: 'staff_roster_push' } }));
+  assert.equal(viaPushEndpoint.status, 401, 'routed to the roster push handler, which needs a session first');
+  assert.deepEqual(viaPushEndpoint.body, { error: 'Not authenticated.' });
+  const registration = await read(await pushSubscriptionHandler({ method: 'POST', headers: {}, body: { action: 'register' } }));
+  assert.notEqual(registration.body.error, undefined, 'device registration still goes its own way');
+});
+
 // ── The web client asks for a push only after actions that create notices ──
 
 test('roster actions ask for a push after they succeed, and a push failure never fails the action', async () => {
@@ -347,10 +357,10 @@ test('the push request carries only the session token, and reports instead of th
   const fetcher = async (url, init) => { seen.push({ url, init }); return { ok: true, status: 200 }; };
   const session = async () => ({ data: { session: { access_token: 'session-token' } } });
   assert.deepEqual(await requestRosterPush(session, fetcher), { requested: true, ok: true, status: 200 });
-  assert.equal(seen[0].url, '/api/staff-roster-push');
+  assert.equal(seen[0].url, '/api/push-subscription');
   assert.equal(seen[0].init.method, 'POST');
   assert.equal(seen[0].init.headers.Authorization, 'Bearer session-token');
-  assert.equal(seen[0].init.body, '{}', 'no roster detail is sent');
+  assert.equal(seen[0].init.body, JSON.stringify({ action: 'staff_roster_push' }), 'no roster detail is sent');
   assert.deepEqual(await requestRosterPush(async () => ({ data: { session: null } }), fetcher), { requested: false });
   assert.deepEqual(await requestRosterPush(session, async () => { throw new Error('offline'); }), { requested: false });
   assert.deepEqual(await requestRosterPush(async () => { throw new Error('no auth'); }, fetcher), { requested: false });

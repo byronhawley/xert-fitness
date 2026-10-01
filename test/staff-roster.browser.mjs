@@ -52,7 +52,7 @@ async function rosterContext(browser, origin, uid, viewport) {
     }
   });
   // The phone-push nudge is answered locally; nothing is sent anywhere.
-  await context.route('**/api/staff-roster-push', async route => {
+  await context.route('**/api/push-subscription', async route => {
     pushRequests.push({ uid, authorization: route.request().headers().authorization || '', body: route.request().postData() });
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: false, claimed: 0, attempted: 0 }) });
   });
@@ -230,7 +230,7 @@ try {
     const nudge = pushRequests.find(item => item.uid === DEMO_OWNER);
     assert.ok(nudge, 'publishing asks the server to push the new notices');
     assert.match(nudge.authorization, /^Bearer \S+/);
-    assert.equal(nudge.body, '{}', 'no roster detail goes with the push request');
+    assert.equal(nudge.body, JSON.stringify({ action: 'staff_roster_push' }), 'no roster detail goes with the push request');
   });
 
   const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 390, height: 844 });

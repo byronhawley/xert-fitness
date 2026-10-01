@@ -89,7 +89,7 @@ coaches who have answered.
 
 Every roster notice is first an in-app notice (`staff_notifications`). When
 the iOS app has registered a device (`push_subscriptions`, the same table as
-member notices), the web roster screens also call `POST /api/staff-roster-push`
+member notices), the web roster screens also call `POST /api/push-subscription` with `{ "action": "staff_roster_push" }` (the existing push endpoint, so the Hobby plan's twelve-function limit holds)
 after publishing, cover approve/decline, absence decisions, reopening and
 **Send due reminders now**. The route:
 

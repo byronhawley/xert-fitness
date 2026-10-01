@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { requestHeader, requestJson, sendJson } from '../src/lib/serverHttp.js';
+import { STAFF_ROSTER_PUSH_ACTION, staffRosterPushHandler } from '../src/lib/staffRosterPush.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -24,13 +25,19 @@ export function pushSubscriptionClaim(existing, userId) {
 export default async function handler(request, response) {
   const json = (body, status = 200) => sendJson(response, body, status);
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  let body = null;
+  let bodyError = null;
+  try { body = await requestJson(request); } catch (error) { bodyError = error; }
+  // Coach roster notices reuse this push endpoint (see src/lib/staffRosterPush.js).
+  if (String(body?.action || '').trim().toLowerCase() === STAFF_ROSTER_PUSH_ACTION) return staffRosterPushHandler(request, response);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: 'Push registration is not configured.' }, 500);
 
   try {
     const authHeader = requestHeader(request, 'authorization');
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
     if (!token) return json({ error: 'Not authenticated.' }, 401);
-    const subscription = normalizePushSubscription(await requestJson(request));
+    if (bodyError) throw bodyError;
+    const subscription = normalizePushSubscription(body);
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const { data: { user }, error: userError } = await admin.auth.getUser(token);
     if (userError || !user) return json({ error: 'Invalid or expired session.' }, 401);
