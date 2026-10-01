@@ -31,6 +31,7 @@ final class NativePickerEvidenceTests: XCTestCase {
         // WINDOW's routing, not the SwiftUI frame or control.point(inside:) alone.
         let width = control.bounds.width / CGFloat(control.numberOfSegments)
         XCTAssertGreaterThanOrEqual(width, 44)
+        XCTAssertGreaterThanOrEqual(control.bounds.height, 44)
         for index in 0..<control.numberOfSegments {
             let center = CGPoint(x: width * (CGFloat(index) + 0.5), y: control.bounds.midY)
             for dx in [CGFloat(-21.9), 0, 21.9] {
@@ -53,6 +54,13 @@ final class NativePickerEvidenceTests: XCTestCase {
                     }
                     XCTAssertTrue(control.point(inside: localPoint, with: nil),
                         "Segment \(index) must contain its 44pt target probe at \(localPoint) inside bounds \(control.bounds)")
+                    var ancestor = control.superview
+                    while let view = ancestor {
+                        let converted = window.convert(point, to: view)
+                        XCTAssertTrue(view.point(inside: converted, with: nil),
+                            "Segment \(index)'s 44pt target at \(point) must fit inside ancestor bounds \(view.bounds), converted point \(converted)")
+                        ancestor = view.superview
+                    }
                     XCTAssertTrue(receivesHit,
                         "Segment \(index) missed 44pt target at \(point); actual control bounds \(control.bounds); hit \(String(describing: hit))")
                 }
