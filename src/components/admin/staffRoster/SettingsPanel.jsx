@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AdminButton, AdminFormField, ADMIN_TEXT } from '@/components/admin/ui';
 import { DEFAULT_REMINDERS, defaultPeriodDates, normalizeCycle, normalizeReminders } from '@/lib/staffRoster/cycle';
 import { normalizeStaffing } from '@/lib/staffRoster/duty';
+import { rosterSwitchState } from '@/lib/staffRoster/switchOrder';
 import { addMonths, clockLabel, dateInMonth, daysInMonth, minuteLabel, parseClock } from '@/lib/staffRoster/time';
 import { dayLabel, monthLabel } from './rosterFormat';
 import { Notice, Tone } from './rosterBits';
@@ -20,6 +21,7 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
   let example = null;
   try { const dates = defaultPeriodDates(month, cycle); example = `${monthLabel(month)}: opens ${dayLabel(dates.opensOn)}, due ${dayLabel(dates.dueOn)}, aim to publish by ${dayLabel(dates.publishTargetOn)}.`; } catch (error) { example = error.message; }
   const save = (patch, message) => onMutate(client => client.updateSettings(patch, settings.version), message);
+  const switchState = rosterSwitchState(settings);
   const cycleField = (key, label) => (
     <AdminFormField label={label}><input type="number" min="0" max={key.endsWith('Day') ? 31 : 12} inputMode="numeric" value={cycle[key]} onChange={event => setCycle(current => ({ ...current, [key]: Number(event.target.value) }))} /></AdminFormField>
   );
@@ -29,9 +31,15 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
       <section className="space-y-3" aria-labelledby="roster-switch">
         <h3 id="roster-switch" className={ADMIN_TEXT.sectionHeading}>Coach roster</h3>
         <Notice tone={settings.enabled ? 'success' : 'warning'} title={settings.enabled ? 'On — coaches can see their screens' : 'Off — only managers can see the roster'}
-          action={<AdminButton variant={settings.enabled ? 'danger' : 'primary'} disabled={busy} onClick={() => save({ enabled: !settings.enabled }, settings.enabled ? 'Coach roster switched off' : 'Coach roster switched on')}>{settings.enabled ? 'Switch off' : 'Switch on'}</AdminButton>}>
-          While it’s off, coaches can’t open availability or roster screens and class changes send no roster notices. Turning it off never deletes anything.
+          action={<AdminButton variant={settings.enabled ? 'danger' : 'primary'} disabled={busy || (settings.enabled && !switchState.canSwitchOff)} aria-describedby={switchState.blockReason ? 'roster-switch-order' : undefined} onClick={() => save({ enabled: !settings.enabled }, settings.enabled ? 'Coach roster switched off' : 'Coach roster switched on')}>{settings.enabled ? 'Switch off' : 'Switch on'}</AdminButton>}>
+          While it’s off, coaches can’t open availability or roster screens and class changes send no roster notices or phone pushes. Turning it off never deletes anything, and on its own it does not remove coach names from the public timetable.
         </Notice>
+        {switchState.blockReason && <p id="roster-switch-order" className="font-body text-sm text-xert-pale/80">{switchState.blockReason}</p>}
+        {switchState.namesStillShowing && (
+          <Notice tone="warning" title="Coach names are still on the public timetable">
+            The roster is off, but the names it put on upcoming classes are still showing. Turn off “Show the lead coach on the public timetable” below to remove them; names typed by hand stay.
+          </Notice>
+        )}
       </section>
 
       <section className="space-y-3" aria-labelledby="roster-presets">
