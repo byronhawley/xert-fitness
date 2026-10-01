@@ -45,6 +45,11 @@ private final class XertRemoteImageLoader: ObservableObject {
         )
         request.setValue("image/*", forHTTPHeaderField: "Accept")
 
+        #if DEBUG
+        // UI-test fixture mode never loads remote images.
+        if XertUITestFixtures.isActive { return }
+        #endif
+
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             try Task.checkCancellation()

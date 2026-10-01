@@ -150,7 +150,8 @@ final class StaffRosterTests: XCTestCase {
         let target = try XCTUnwrap(StaffRosterPush.target(from: payload))
         XCTAssertEqual(target.link, XertCoachingLink(tab: .roster, month: "2026-11"))
         XCTAssertEqual(target.notificationID, notificationID)
-        XCTAssertEqual(target.link.openPath, "/open/coaching/roster?month=2026-11")
+        XCTAssertEqual(target.link?.openPath, "/open/coaching/roster?month=2026-11")
+        XCTAssertEqual(target.destination.audience, .coach)
     }
 
     func testStaffRosterPushFallsBackToUpcomingAndIgnoresOtherPushes() throws {
@@ -199,6 +200,211 @@ final class StaffRosterTests: XCTestCase {
         defaults.set("/open/coaching/payroll", forKey: StaffRosterPushNavigation.pendingPathKey)
         XCTAssertNil(StaffRosterPushNavigation.consumePending(defaults: defaults))
         XCTAssertNil(defaults.string(forKey: StaffRosterPushNavigation.pendingPathKey))
+    }
+
+    // MARK: Coach versus manager destinations
+
+    private func rosterPush(audience: String?, openPath: String?) -> [AnyHashable: Any] {
+        var payload: [AnyHashable: Any] = [
+            "aps": ["category": "xert.staff-roster", "thread-id": "xert-staff-roster"],
+            "staff_notification_id": "0b5a0a52-3c7a-4b55-9f43-7f0c6c0d9a99",
+        ]
+        if let audience { payload["audience"] = audience }
+        if let openPath { payload["open_path"] = openPath }
+        return payload
+    }
+
+    /// Recipient 1: an active coach getting a personal notice opens My Coaching.
+    func testCoachPersonalNoticeOpensMyCoaching() throws {
+        for audience in ["coach", nil] as [String?] {
+            let target = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+                audience: audience,
+                openPath: "/open/coaching/availability?month=2026-11"
+            )))
+            XCTAssertEqual(target.destination, .coaching(XertCoachingLink(tab: .availability, month: "2026-11")))
+            XCTAssertEqual(target.link, XertCoachingLink(tab: .availability, month: "2026-11"))
+            XCTAssertEqual(target.notificationID, UUID(uuidString: "0b5a0a52-3c7a-4b55-9f43-7f0c6c0d9a99"))
+        }
+        // A coach notice never opens the manager console, whatever its path says.
+        let mislabelled = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "coach",
+            openPath: "/admin/roster?rosterTab=requests"
+        )))
+        XCTAssertEqual(mislabelled.destination, .coaching(XertCoachingLink()))
+
+        let notice = StaffRosterNotification(
+            id: UUID(), kind: "roster_published", title: "Roster published", body: "Ready.",
+            link: "/coaching?tab=roster&month=2026-12", created_at: Date(), read_at: nil
+        )
+        XCTAssertEqual(notice.coachingLink, XertCoachingLink(tab: .roster, month: "2026-12"))
+        XCTAssertNil(notice.managerLink)
+    }
+
+    /// Recipient 2: an admin who is not a coach gets the web manager console,
+    /// on the canonical host, with only the allowlisted tab and month.
+    func testManagerRequestOpensTheWebConsoleNotMyCoaching() throws {
+        for audience in ["manager", nil] as [String?] {
+            let target = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+                audience: audience,
+                openPath: "/admin/roster?rosterTab=requests&rosterMonth=2026-11"
+            )))
+            XCTAssertNil(target.link, "a manager notice must not open coach-only My Coaching")
+            guard case .managerConsole(let console) = target.destination else {
+                return XCTFail("manager notices open the web console")
+            }
+            XCTAssertEqual(console, XertManagerRosterLink(tab: "requests", month: "2026-11"))
+            XCTAssertEqual(console.webPath, "/admin/roster?rosterTab=requests&rosterMonth=2026-11")
+            XCTAssertEqual(
+                console.webURL?.absoluteString,
+                "https://\(host)/admin/roster?rosterTab=requests&rosterMonth=2026-11"
+            )
+        }
+        // A manager notice never opens My Coaching, whatever its path says.
+        let mislabelled = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "manager",
+            openPath: "/open/coaching/requests"
+        )))
+        XCTAssertEqual(mislabelled.destination, .managerConsole(XertManagerRosterLink()))
+        XCTAssertEqual(mislabelled.destination.path, "/admin/roster")
+    }
+
+    /// Recipient 3: an admin who is also a coach. The notice's audience
+    /// decides, not the account: manager notices go to the console (push and
+    /// in-app), their own coach notices go to My Coaching.
+    func testAdminWhoAlsoCoachesGetsTheDestinationOfEachNotice() throws {
+        let manager = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "manager",
+            openPath: "/admin/roster?rosterTab=availability&rosterMonth=2026-12"
+        )))
+        let coach = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "coach",
+            openPath: "/open/coaching/roster?month=2026-12"
+        )))
+        XCTAssertEqual(manager.destination, .managerConsole(XertManagerRosterLink(tab: "availability", month: "2026-12")))
+        XCTAssertEqual(coach.destination, .coaching(XertCoachingLink(tab: .roster, month: "2026-12")))
+
+        // In-app notices stored as `/admin/roster?…` route the same way and
+        // drop record ids such as `rosterFocus`.
+        let stored = "/admin/roster?rosterTab=requests&rosterMonth=2026-11&rosterFocus=0b5a0a52-3c7a-4b55-9f43-7f0c6c0d9a12"
+        let managerNotice = StaffRosterNotification(
+            id: UUID(), kind: "cover_offered", title: "Cover offered", body: "Decide in the console.",
+            link: stored, created_at: Date(), read_at: nil
+        )
+        XCTAssertNil(managerNotice.coachingLink)
+        XCTAssertEqual(managerNotice.managerLink, XertManagerRosterLink(tab: "requests", month: "2026-11"))
+        XCTAssertEqual(
+            managerNotice.managerLink?.webURL?.absoluteString,
+            "https://\(host)/admin/roster?rosterTab=requests&rosterMonth=2026-11"
+        )
+        XCTAssertEqual(
+            StaffRosterDestination.destination(inAppNotice: stored),
+            .managerConsole(XertManagerRosterLink(tab: "requests", month: "2026-11"))
+        )
+        XCTAssertEqual(
+            StaffRosterDestination.destination(inAppNotice: "/coaching?tab=requests"),
+            .coaching(XertCoachingLink(tab: .requests))
+        )
+    }
+
+    /// Recipient 4: signed out. The coach destination waits for sign-in (and
+    /// survives a cold launch); the manager console needs no app sign-in.
+    func testSignedOutDestinationSurvivesSignInAndColdLaunch() throws {
+        let suiteName = "StaffRosterDestinations-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let coach = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "coach",
+            openPath: "/open/coaching/availability?month=2026-11"
+        )))
+        StaffRosterPushNavigation.markPending(coach, defaults: defaults)
+        XCTAssertEqual(StaffRosterPushNavigation.consumePending(defaults: defaults), coach)
+        let route = XertMemberRoute.coaching(XertCoachingLink(tab: .availability, month: "2026-11"))
+        let intent = XertNavigationIntent(route: route, source: .pushNotification)
+        XCTAssertEqual(intent.disposition(isSignedIn: false), .requireAuthentication)
+        XCTAssertEqual(intent.disposition(isSignedIn: true), .open)
+        // The pending intent keeps the month through sign-in.
+        XCTAssertEqual(intent.route, route)
+
+        let manager = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: nil,
+            openPath: "/admin/roster?rosterTab=requests&rosterMonth=2026-11"
+        )))
+        StaffRosterPushNavigation.markPending(manager, defaults: defaults)
+        XCTAssertEqual(defaults.string(forKey: StaffRosterPushNavigation.pendingAudienceKey), "manager")
+        XCTAssertEqual(StaffRosterPushNavigation.consumePending(defaults: defaults), manager)
+        XCTAssertNil(StaffRosterPushNavigation.consumePending(defaults: defaults))
+
+        // A tampered stored value never becomes another host.
+        defaults.set("https://evil.example/admin/roster", forKey: StaffRosterPushNavigation.pendingPathKey)
+        defaults.set("manager", forKey: StaffRosterPushNavigation.pendingAudienceKey)
+        XCTAssertNil(StaffRosterPushNavigation.consumePending(defaults: defaults))
+    }
+
+    /// Recipient 5: permission revoked after the notice was created. The link
+    /// still only picks a destination; the server answers NOT_STAFF and My
+    /// Coaching shows its not-available state (the console checks on the web).
+    func testRevokedRecipientIsDecidedByTheServerNotTheLink() throws {
+        let target = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "coach",
+            openPath: "/open/coaching/requests"
+        )))
+        XCTAssertEqual(target.destination, .coaching(XertCoachingLink(tab: .requests)))
+        let revoked = StaffRosterError.from(APIError(message: "NOT_STAFF", statusCode: 400))
+        XCTAssertTrue(revoked.isAccessDenied)
+        XCTAssertFalse(StaffRosterVisibility.showsEntry(for: .unavailable(revoked)))
+
+        let console = try XCTUnwrap(XertManagerRosterLink.link(webPath: "/admin/roster?rosterTab=requests"))
+        XCTAssertEqual(console.webURL?.host, AppConfig.vercelHost)
+        XCTAssertEqual(console.webURL?.scheme, "https")
+    }
+
+    func testManagerConsoleLinksAreStrictlyAllowlisted() throws {
+        let rejected = [
+            "https://evil.example/admin/roster?rosterTab=requests",
+            "https://\(host)/admin/roster?rosterTab=requests",
+            "//evil.example/admin/roster",
+            "/admin/rosterx",
+            "/admin/roster/../users",
+            "/admin/roster/extra",
+            "/admin/members",
+            "/coaching?tab=roster",
+            "javascript:alert(1)",
+        ]
+        for value in rejected {
+            XCTAssertNil(XertManagerRosterLink.link(webPath: value), value)
+        }
+
+        let dropped = try XCTUnwrap(XertManagerRosterLink.link(
+            webPath: "/admin/roster?rosterTab=payroll&rosterMonth=2026-13&rosterFocus=x&next=https://evil.example#top"
+        ))
+        XCTAssertEqual(dropped, XertManagerRosterLink())
+        XCTAssertEqual(dropped.webURL?.absoluteString, "https://\(host)/admin/roster")
+
+        let repeated = try XCTUnwrap(XertManagerRosterLink.link(
+            webPath: "/admin/roster?rosterTab=requests&rosterTab=settings&rosterMonth=2026-11"
+        ))
+        XCTAssertEqual(repeated, XertManagerRosterLink(tab: nil, month: "2026-11"))
+
+        for tab in XertManagerRosterLink.allowedTabs {
+            XCTAssertEqual(XertManagerRosterLink.link(webPath: "/admin/roster?rosterTab=\(tab)")?.tab, tab)
+        }
+        XCTAssertEqual(XertManagerRosterLink.link(webPath: "/admin/roster/")?.webPath, "/admin/roster")
+
+        // A manager payload pointing at another host falls back to the console home.
+        let foreign = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "manager",
+            openPath: "https://evil.example/admin/roster?rosterTab=requests"
+        )))
+        XCTAssertEqual(foreign.destination, .managerConsole(XertManagerRosterLink()))
+        // Unknown audiences are inferred from the path.
+        let inferred = try XCTUnwrap(StaffRosterPush.target(from: rosterPush(
+            audience: "owner",
+            openPath: "/admin/roster?rosterTab=coaches"
+        )))
+        XCTAssertEqual(inferred.destination, .managerConsole(XertManagerRosterLink(tab: "coaches")))
+        XCTAssertEqual(StaffRosterAudience.inferred(fromPath: "/open/coaching"), .coach)
+        XCTAssertEqual(StaffRosterAudience.inferred(fromPath: "/admin/roster?rosterTab=requests"), .manager)
     }
 
     // MARK: Brisbane time

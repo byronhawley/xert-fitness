@@ -169,6 +169,16 @@ are retained for seven days even when the job fails. This provides a visible
 source-control check when a Codemagic team webhook is delayed or disconnected;
 Codemagic remains the only workflow that signs or publishes the app.
 
+After the unit tests, the same GitHub job runs the **My Coaching XCUITests**
+(`XertFitnessUITests`, via `ci/run-swift-ui-tests.sh`) on the same simulator.
+They launch a Debug build with `-XertRosterFixtures`, a DEBUG-only fixture mode
+(`StaffRoster/StaffRosterFixtures.swift`) that signs in a fixture coach without
+Supabase, answers every `staff_roster_*` call from memory, refuses all network
+requests and records (instead of opening) manager-console browser links. The
+`.xcresult` bundle and exported screenshots are kept for fourteen days. Release
+builds contain none of this code. Real-device universal links, APNs receipt and
+TestFlight are not covered by these tests.
+
 Create the XERT-specific Codemagic environment group named `xert_env` and add these variables to it. The same group is loaded by both workflows:
 
 ```text

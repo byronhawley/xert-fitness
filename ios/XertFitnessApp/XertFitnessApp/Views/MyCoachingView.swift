@@ -483,6 +483,7 @@ private struct CoachUpcomingSections: View {
 private struct CoachNoticesSection: View {
     @ObservedObject var staffRoster: StaffRosterStore
     let onOpen: (XertCoachingLink) -> Void
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Section {
@@ -546,6 +547,17 @@ private struct CoachNoticesSection: View {
                         }
                     }
                     .buttonStyle(XertControlButtonStyle(variant: .ghost))
+                } else if let managerLink = item.managerLink {
+                    // A manager notice (shown to an admin who also coaches)
+                    // belongs to the web manager console, not My Coaching.
+                    Button("Open manager console") {
+                        StaffRosterManagerConsole.open(managerLink, using: openURL)
+                        if item.isUnread {
+                            Task { await staffRoster.markRead([item.id]) }
+                        }
+                    }
+                    .buttonStyle(XertControlButtonStyle(variant: .ghost))
+                    .accessibilityHint("Opens the roster manager console in your browser")
                 }
                 if item.isUnread {
                     Button("Mark read") {

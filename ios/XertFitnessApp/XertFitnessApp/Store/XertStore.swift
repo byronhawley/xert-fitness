@@ -125,6 +125,16 @@ final class XertStore: ObservableObject {
     }
 
     private func performBootstrap() async {
+        #if DEBUG
+        // UI-test fixture mode: no keychain session, no cached member data and
+        // no network. The fixture decides whether a member is signed in.
+        if XertUITestFixtures.isActive {
+            authSession = XertUITestFixtures.initialSession
+            lastRefreshCompletedAt = Date()
+            hasBootstrapped = true
+            return
+        }
+        #endif
         if let cached = await PublicDataCache.loadAsync() {
             products = cached.products
             sessions = cached.sessions
@@ -152,6 +162,12 @@ final class XertStore: ObservableObject {
     }
 
     func refresh() async {
+        #if DEBUG
+        if XertUITestFixtures.isActive {
+            lastRefreshCompletedAt = Date()
+            return
+        }
+        #endif
         if let dataRefreshTask {
             await dataRefreshTask.value
             return
@@ -469,6 +485,13 @@ final class XertStore: ObservableObject {
     }
 
     func signIn(email: String, password: String) async {
+        #if DEBUG
+        // Fixture sign-in: no network and nothing saved to the keychain.
+        if XertUITestFixtures.isActive {
+            replaceAuthSession(with: XertUITestFixtures.signedInSession)
+            return
+        }
+        #endif
         await authenticate {
             try await api.signIn(email: email, password: password)
         }

@@ -43,7 +43,7 @@ jobs:
   ios:
     name: Swift unit tests
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       BUNDLE_ID: com.xertfitness.app
       IOS_DIRECTORY: ios/XertFitnessApp
@@ -76,3 +76,17 @@ jobs:
             /tmp/xcodebuild_logs/*.log
           if-no-files-found: warn
           retention-days: 7
+      - name: Run My Coaching UI tests (fixtures only, no live services)
+        working-directory: ${{ env.IOS_DIRECTORY }}
+        timeout-minutes: 20
+        run: bash ci/run-swift-ui-tests.sh
+      - name: Retain My Coaching UI test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-coaching-ui-tests-${{ github.run_attempt }}
+          path: |
+            ios/XertFitnessApp/build/ui-test-results.xcresult
+            ios/XertFitnessApp/build/ui-test-screenshots
+          if-no-files-found: warn
+          retention-days: 14

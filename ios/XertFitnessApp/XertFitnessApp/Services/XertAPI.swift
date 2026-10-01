@@ -3305,6 +3305,12 @@ final class XertAPI {
     }
 
     private func validatedResponse(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        #if DEBUG
+        // UI-test fixture mode must never reach Supabase or Vercel.
+        if XertUITestFixtures.isActive {
+            throw APIError(message: "XERT services are not used in UI-test fixture mode.")
+        }
+        #endif
         let data: Data
         let response: URLResponse
         do {
