@@ -96,6 +96,19 @@ test('a My Coaching link resumed after sign-in or a cold launch still presents M
   assert.match(coaching, /Text\("Hi \\\(me\.staff\.display_name\)"\)[\s\S]{0,160}\.accessibilityIdentifier\("coaching-greeting"\)/);
 });
 
+test('My Coaching sheets hang off one row, never off a List Section', async () => {
+  const coaching = await read('ios/XertFitnessApp/XertFitnessApp/Views/MyCoachingView.swift');
+  const availability = await read('ios/XertFitnessApp/XertFitnessApp/Views/CoachAvailabilityView.swift');
+  // A Section modifier is applied to each of its rows: one presenter per row
+  // on the same binding, and the sheet closes as it opens.
+  for (const [name, source] of [['MyCoachingView', coaching], ['CoachAvailabilityView', availability]]) {
+    assert.doesNotMatch(source, /\n {8}\.(?:listRowBackground\(Color\.xertInk\)|onChange\(of: requestedMonth\) \{ _ in applyRequestedMonth\(\) \}|onDisappear\(perform: flushPendingSave\))\s*\n\s*\.sheet\(/, `${name} has a Section-level sheet`);
+  }
+  assert.match(coaching, /Label\("I need time away", systemImage: "calendar\.badge\.minus"\)\s*\n\s*\}\s*\n\s*\.buttonStyle\([^\n]*\)\s*\n(?:\s*\/\/[^\n]*\n)*\s*\.sheet\(isPresented: \$showingAbsence\)/);
+  assert.match(coaching, /monthNavigator\s*\n(?:\s*\/\/[^\n]*\n)*\s*\.sheet\(item: \$coverFor\)/);
+  assert.match(availability, /\.padding\(\.vertical, XertSpace\.xs\)\s*\n(?:\s*\/\/[^\n]*\n)*\s*\.sheet\(item: \$sheet\)/);
+});
+
 test('UI-test fixtures compile only into DEBUG builds and block the network', async () => {
   const fixtures = await read('ios/XertFitnessApp/XertFitnessApp/StaffRoster/StaffRosterFixtures.swift');
   assert.match(fixtures, /^#if DEBUG\n/);
@@ -140,6 +153,9 @@ test('XCUITests run on the CI simulator and keep screenshots', async () => {
   assert.match(uiTests, /attachment\.lifetime = \.keepAlways/);
   assert.doesNotMatch(uiTests, /staticTexts\["Hi Sam Fixture"\]/, 'the greeting label is upper case on device');
   assert.match(uiTests, /app\.staticTexts\["coaching-greeting"\]/);
+  // Rows scrolled under the floating dock are "hittable" but taps hit the dock.
+  assert.match(uiTests, /private func isOnScreen[\s\S]*frame\.minY >= band\.top && frame\.maxY <= band\.bottom/);
+  assert.match(uiTests, /matching\(identifier: "xert-navigation-home"\)[\s\S]*dock\.frame\.minY/);
   assert.match(uiTests, /greeting\.label\.lowercased\(\),\s*\n\s*"hi sam fixture"/);
   assert.doesNotMatch(uiTests, /URLSession|supabase\.co|apikey/i);
   for (const name of [

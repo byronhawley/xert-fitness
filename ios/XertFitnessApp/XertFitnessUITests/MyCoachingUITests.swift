@@ -345,7 +345,10 @@ final class MyCoachingUITests: XCTestCase {
         }
     }
 
-    /// Scrolls until the element is on screen. Lists only build visible rows.
+    /// Scrolls until the element is on screen: between the navigation bar and
+    /// the floating dock. Lists only build visible rows, and List content
+    /// scrolls under the dock, where XCUITest still calls a row "hittable" but
+    /// a tap lands on the dock button above it (Home, Events, …).
     @discardableResult
     private func reveal(
         _ element: XCUIElement,
@@ -354,16 +357,69 @@ final class MyCoachingUITests: XCTestCase {
         timeout: TimeInterval = 3,
         attempts: Int = 10
     ) -> Bool {
-        if element.waitForExistence(timeout: timeout), element.isHittable { return true }
+        _ = element.waitForExistence(timeout: timeout)
+        if isOnScreen(element, in: app) { return true }
         for _ in 0..<attempts {
-            if upward {
+            if element.exists {
+                // Built but under the dock or the navigation bar: drag it by
+                // just enough to bring it to the middle of the visible band.
+                scrollTowardMiddle(element, in: app)
+            } else if upward {
                 scrollable(app).swipeUp()
             } else {
                 scrollable(app).swipeDown()
             }
-            if element.exists, element.isHittable { return true }
+            if isOnScreen(element, in: app) { return true }
         }
-        return element.exists
+        return isOnScreen(element, in: app)
+    }
+
+    /// The part of the screen a tap reaches: below the navigation bar and
+    /// above the dock.
+    private func visibleBand(_ app: XCUIApplication) -> (top: CGFloat, bottom: CGFloat) {
+        let window = app.windows.firstMatch.frame
+        var top = window.minY
+        var bottom = window.maxY
+        let bar = app.navigationBars.firstMatch
+        if bar.exists {
+            top = max(top, bar.frame.maxY)
+        }
+        let dock = app.buttons.matching(identifier: "xert-navigation-home").firstMatch
+        if dock.exists, dock.frame.minY > top {
+            bottom = min(bottom, dock.frame.minY - 8)
+        }
+        return (top, bottom)
+    }
+
+    private func isOnScreen(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard element.exists, element.isHittable else { return false }
+        let band = visibleBand(app)
+        let frame = element.frame
+        if frame.height >= band.bottom - band.top {
+            // Taller than the visible band: its hittable point is on screen.
+            return true
+        }
+        return frame.minY >= band.top && frame.maxY <= band.bottom
+    }
+
+    /// A slow drag (no fling) that moves the element's centre to the middle
+    /// of the visible band, at most half a band per call. It starts at the
+    /// left margin, outside the rows, so it never drags a control.
+    private func scrollTowardMiddle(_ element: XCUIElement, in app: XCUIApplication) {
+        let band = visibleBand(app)
+        let middle = (band.top + band.bottom) / 2
+        let limit = max(40, (band.bottom - band.top) / 2 - 40)
+        var distance = element.frame.midY - middle
+        distance = max(-limit, min(limit, distance))
+        if abs(distance) < 30 {
+            distance = distance < 0 ? -30 : 30
+        }
+        let window = app.windows.firstMatch
+        let origin = window.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
+        let x = window.frame.minX + 8
+        let start = origin.withOffset(CGVector(dx: x, dy: middle + distance / 2))
+        let end = origin.withOffset(CGVector(dx: x, dy: middle - distance / 2))
+        start.press(forDuration: 0.1, thenDragTo: end)
     }
 
     private static var brisbane: TimeZone {
