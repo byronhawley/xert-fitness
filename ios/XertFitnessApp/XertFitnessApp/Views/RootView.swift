@@ -875,6 +875,11 @@ struct RootView: View {
         guard store.isSignedIn, let intent = pendingProtectedNavigation else { return }
         pendingProtectedNavigation = nil
         navigation.open(intent.route, source: intent.source)
+        if case .coaching(let link) = intent.route {
+            // Same as `openMemberRoute`: ask My Coaching to open on the link's
+            // section once sign-in has finished, not only via Account's route.
+            staffRoster.open(link)
+        }
         if intent.route == .purchaseConfirmation {
             Task { await store.reconcilePendingCheckout() }
         }

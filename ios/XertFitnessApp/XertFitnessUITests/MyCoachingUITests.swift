@@ -173,7 +173,7 @@ final class MyCoachingUITests: XCTestCase {
         // Return submits the form (the Sign In button can sit under the keyboard).
         password.typeText("fixture-password\n")
 
-        XCTAssertTrue(app.staticTexts["Hi Sam Fixture"].waitForExistence(timeout: 15), "continued after sign-in")
+        assertCoachGreeting(in: app, timeout: 15, "continued after sign-in")
         XCTAssertTrue(element(containing: "Not submitted yet", in: app).waitForExistence(timeout: 10), "availability section kept")
         capture("20-signed-out-link-continued", app)
     }
@@ -186,7 +186,7 @@ final class MyCoachingUITests: XCTestCase {
             "XERT_FIXTURE_PUSH_OPEN_PATH": "/open/coaching/requests",
             "XERT_FIXTURE_PUSH_AUDIENCE": "coach",
         ])
-        XCTAssertTrue(app.staticTexts["Hi Sam Fixture"].waitForExistence(timeout: 15))
+        assertCoachGreeting(in: app, timeout: 15, "coach push opened My Coaching")
         XCTAssertTrue(app.buttons["I need time away"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts["uitest-opened-external-url"].exists)
         capture("21-coach-push-my-coaching", app)
@@ -202,7 +202,7 @@ final class MyCoachingUITests: XCTestCase {
         let opened = app.staticTexts["uitest-opened-external-url"]
         XCTAssertTrue(opened.waitForExistence(timeout: 15))
         XCTAssertEqual(opened.label, "https://\(webHost)/admin/roster?rosterTab=requests&rosterMonth=2026-11")
-        XCTAssertFalse(app.staticTexts["Hi Sam Fixture"].waitForExistence(timeout: 3))
+        XCTAssertFalse(coachGreeting(in: app).waitForExistence(timeout: 3))
         capture("22-manager-push-web-console", app)
     }
 
@@ -286,7 +286,35 @@ final class MyCoachingUITests: XCTestCase {
         XCTAssertTrue(reveal(entry, in: app), "My Coaching entry")
         capture("02-account-my-coaching", app)
         entry.tap()
-        XCTAssertTrue(app.staticTexts["Hi Sam Fixture"].waitForExistence(timeout: 10), "My Coaching opened")
+        assertCoachGreeting(in: app, timeout: 10, "My Coaching opened")
+    }
+
+    /// The greeting is styled upper case (`xertDisplay`), which VoiceOver and
+    /// XCUITest read as "HI SAM FIXTURE"; find it by identifier and compare
+    /// the fixture coach's name without regard to case.
+    private func coachGreeting(in app: XCUIApplication) -> XCUIElement {
+        app.staticTexts["coaching-greeting"]
+    }
+
+    private func assertCoachGreeting(
+        in app: XCUIApplication,
+        timeout: TimeInterval,
+        _ message: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let greeting = coachGreeting(in: app)
+        guard greeting.waitForExistence(timeout: timeout) else {
+            XCTFail("\(message): no My Coaching greeting", file: file, line: line)
+            return
+        }
+        XCTAssertEqual(
+            greeting.label.lowercased(),
+            "hi sam fixture",
+            "\(message): greeting names the fixture coach",
+            file: file,
+            line: line
+        )
     }
 
     private func selectSection(_ title: String, _ app: XCUIApplication) {

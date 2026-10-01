@@ -79,6 +79,7 @@ struct MyCoachingView: View {
                 Text("Hi \(me.staff.display_name)")
                     .xertDisplay(30)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("coaching-greeting")
                 XertSegmented(
                     title: "Section",
                     selection: $tab,

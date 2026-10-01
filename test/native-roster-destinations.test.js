@@ -75,6 +75,27 @@ test('manager pushes open the console; coach pushes keep My Coaching and sign-in
   assert.match(coaching, /else if let managerLink = item\.managerLink \{[\s\S]*StaffRosterManagerConsole\.open\(managerLink, using: openURL\)/);
 });
 
+test('a My Coaching link resumed after sign-in or a cold launch still presents My Coaching', async () => {
+  const root = await read('ios/XertFitnessApp/XertFitnessApp/Views/RootView.swift');
+  const account = await read('ios/XertFitnessApp/XertFitnessApp/Views/AccountView.swift');
+  const coaching = await read('ios/XertFitnessApp/XertFitnessApp/Views/MyCoachingView.swift');
+
+  const resume = root.slice(root.indexOf('private func resumePendingProtectedNavigation'));
+  const resumeBody = resume.slice(0, resume.indexOf('\n    }\n'));
+  assert.match(resumeBody, /navigation\.open\(intent\.route, source: intent\.source\)\s*\n\s*if case \.coaching\(let link\) = intent\.route \{[\s\S]*staffRoster\.open\(link\)/);
+
+  const present = account.slice(account.indexOf('private func presentRequestedCoaching'));
+  const presentBody = present.slice(0, present.indexOf('\n    }\n'));
+  assert.match(presentBody, /presentCoaching\(attempt: 0\)/);
+  assert.doesNotMatch(presentBody, /showingCoaching = true/, 'never pushed in the same update that asked for it');
+  const retry = account.slice(account.indexOf('private func presentCoaching(attempt: Int)'));
+  assert.match(retry, /await Task\.yield\(\)[\s\S]*showingCoaching = true[\s\S]*!coachingDestinationVisible[\s\S]*coachingAppearances == appearances[\s\S]*presentCoaching\(attempt: attempt \+ 1\)/);
+  assert.match(account, /MyCoachingView\(staffRoster: staffRoster\)\s*\n\s*\.onAppear \{\s*\n\s*coachingDestinationVisible = true\s*\n\s*coachingAppearances &\+= 1/);
+
+  // The greeting is styled upper case, so UI tests find it by identifier.
+  assert.match(coaching, /Text\("Hi \\\(me\.staff\.display_name\)"\)[\s\S]{0,160}\.accessibilityIdentifier\("coaching-greeting"\)/);
+});
+
 test('UI-test fixtures compile only into DEBUG builds and block the network', async () => {
   const fixtures = await read('ios/XertFitnessApp/XertFitnessApp/StaffRoster/StaffRosterFixtures.swift');
   assert.match(fixtures, /^#if DEBUG\n/);
@@ -117,6 +138,9 @@ test('XCUITests run on the CI simulator and keep screenshots', async () => {
 
   assert.match(uiTests, /"-XertRosterFixtures"/);
   assert.match(uiTests, /attachment\.lifetime = \.keepAlways/);
+  assert.doesNotMatch(uiTests, /staticTexts\["Hi Sam Fixture"\]/, 'the greeting label is upper case on device');
+  assert.match(uiTests, /app\.staticTexts\["coaching-greeting"\]/);
+  assert.match(uiTests, /greeting\.label\.lowercased\(\),\s*\n\s*"hi sam fixture"/);
   assert.doesNotMatch(uiTests, /URLSession|supabase\.co|apikey/i);
   for (const name of [
     'testCoachWalksUpcomingAndMyRosterAcrossTheMonthBoundary',
