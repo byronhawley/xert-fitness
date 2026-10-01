@@ -71,6 +71,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   booking_repair_followups: 'Apply supabase/migrations/20260906030000_booking_repair_followups.sql in Supabase.',
   // Installs switched off; applying it changes nothing a member or coach sees.
   staff_roster: 'Apply supabase/migrations/20261001010000_staff_roster.sql in Supabase.',
+  // Leased, retried and scheduler-driven roster push; the roster stays off.
+  staff_roster_push_reliability: 'Apply supabase/migrations/20261002010000_staff_roster_push_reliability.sql in Supabase (after 20261001010000_staff_roster.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

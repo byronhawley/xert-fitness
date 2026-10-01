@@ -7,8 +7,19 @@
 -- Coaches page and class_sessions.coach_name are left untouched (names the
 -- roster wrote onto classes stay as ordinary class text).
 --
--- After running it, also revert the app release that lists `staff_roster` as a
--- required capability, or the release gate will report it missing.
+-- Covers both roster migrations: 20261001010000_staff_roster.sql and
+-- 20261002010000_staff_roster_push_reliability.sql (its functions are named
+-- staff_roster_push_* and are dropped by the loop below; its trigger and
+-- columns go with the staff_notifications and push-delivery tables).
+--
+-- If the push dispatch schedule was ever activated
+-- (docs/staff-roster/push-dispatch-schedule.sql), unschedule it FIRST:
+--   select cron.unschedule('staff-roster-push-dispatch');
+-- otherwise the job keeps calling a function that no longer exists.
+--
+-- After running it, also revert the app release that lists `staff_roster` and
+-- `staff_roster_push_reliability` as required capabilities, or the release
+-- gate will report them missing.
 
 begin;
 
@@ -43,6 +54,6 @@ drop table if exists
   public.staff_members, public.staff_roster_settings
 cascade;
 
-delete from public.xert_schema_capabilities where capability = 'staff_roster';
+delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability');
 
 commit;

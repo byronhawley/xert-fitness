@@ -15,6 +15,12 @@ export function normalizePushSubscription(body) {
   return { action, deviceToken, environment };
 }
 
+function queryAction(request) {
+  const fromQuery = request.query?.action;
+  if (typeof fromQuery === 'string') return fromQuery.trim().toLowerCase();
+  try { return String(new URL(request.url || '', 'https://local.invalid').searchParams.get('action') || '').trim().toLowerCase(); } catch { return ''; }
+}
+
 export function pushSubscriptionClaim(existing, userId) {
   if (!existing) return 'insert';
   if (existing.user_id === userId) return 'refresh';
@@ -24,11 +30,15 @@ export function pushSubscriptionClaim(existing, userId) {
 
 export default async function handler(request, response) {
   const json = (body, status = 200) => sendJson(response, body, status);
+  // Staff roster push dispatch reuses this endpoint (see src/lib/staffRosterPush.js),
+  // so the Hobby plan's twelve-function limit holds. A cron runner calls it
+  // with GET ?action=staff_roster_push and its own secret; that handler
+  // refuses GET for anyone else.
+  if (request.method === 'GET' && queryAction(request) === STAFF_ROSTER_PUSH_ACTION) return staffRosterPushHandler(request, response);
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   let body = null;
   let bodyError = null;
   try { body = await requestJson(request); } catch (error) { bodyError = error; }
-  // Coach roster notices reuse this push endpoint (see src/lib/staffRosterPush.js).
   if (String(body?.action || '').trim().toLowerCase() === STAFF_ROSTER_PUSH_ACTION) return staffRosterPushHandler(request, response);
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return json({ error: 'Push registration is not configured.' }, 500);
 
