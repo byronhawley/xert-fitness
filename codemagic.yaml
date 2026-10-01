@@ -426,8 +426,7 @@ workflows:
           printf '%s' "$SIGNING_KEY" > "$CERT_KEY"
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --certificate-key=@file:"$CERT_KEY" \
-            --create
+            --certificate-key=@file:"$CERT_KEY"
           keychain add-certificates
           xcode-project use-profiles
       - name: Stamp incrementing build number
