@@ -14,7 +14,8 @@ import { createServer } from 'vite';
 import { fixtureSession, fixtureUser, installDesignFixtures } from './fixtures/design-data.mjs';
 import { as } from './helpers/staff-roster-db.mjs';
 import { DEMO_COACHES, DEMO_OWNER, demoMonth, rpcAs } from './fixtures/staff-roster-demo.mjs';
-import { addDays, addMonths, datesOfMonth, gymInstantIso, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
+import { addDays, addMonths, datesOfMonth, gymInstant, gymInstantIso, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
+import { partMonthStartRange, planPartMonthOpening } from '../src/lib/staffRoster/cycle.js';
 import { gymDateKey } from '../src/lib/gymTime.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_MODULE)).href : 'playwright');
@@ -25,6 +26,8 @@ if (shots) await mkdir(shots, { recursive: true });
 const today = gymDateKey(new Date());
 const MONTH = addMonths(monthKeyOf(today), 2);
 const firstMonday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 1);
+const MONTH_WORD = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(MONTH.slice(5)) - 1];
+const dayLabel = date => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekdayOf(date)]} ${Number(date.slice(8))} ${MONTH_WORD.slice(0, 3)}`;
 const coach = key => DEMO_COACHES.find(item => item.key === key);
 const results = [];
 const step = async (name, fn) => {
@@ -42,6 +45,30 @@ await db.exec(`
     status text not null default 'confirmed', guest_visit boolean not null default false, created_at timestamptz not null default now());`);
 const rpcLog = [];
 const pushRequests = [];
+// PGlite has one session and rpcAs sets the caller before each call, so calls
+// run one at a time: a call can never run as someone else's account.
+let rpcQueue = Promise.resolve();
+const serialRpc = (uid, name, args) => {
+  const run = rpcQueue.then(() => rpcAs(db, uid, name, args));
+  rpcQueue = run.catch(() => {});
+  return run;
+};
+// Roster texts: the REAL sender (api/admin-publish-announcement.js) runs here
+// against the database, with Twilio replaced by a recorder. No request can
+// reach Twilio: `twilio.calls` is the only place a text goes.
+const { sendRosterSms } = await import('../api/admin-publish-announcement.js');
+const twilio = { calls: [], configured: true };
+const SMS_CREDENTIALS = { accountSid: 'ACsyntheticbrowser', authToken: 'synthetic-token', fromNumber: '+61400000999' };
+const serviceRole = { rpc: async (name, args) => {
+  try { return { data: await serialRpc(null, name, args), error: null }; } catch (error) { return { data: null, error: { message: error.message } }; }
+} };
+const twilioRecorder = async (url, init) => {
+  assert.match(String(url), /^https:\/\/api\.twilio\.com\/2010-04-01\/Accounts\/ACsyntheticbrowser\/Messages\.json$/);
+  const params = Object.fromEntries(new URLSearchParams(init.body));
+  twilio.calls.push(params);
+  return new Response(JSON.stringify({ sid: `SMsynthetic${twilio.calls.length}`, status: 'queued' }), { status: 201 });
+};
+const smsRequests = [];
 
 async function rosterContext(browser, origin, uid, viewport, { signedIn = true } = {}) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', deviceScaleFactor: viewport.width < 600 ? 2 : 1, timezoneId: 'Australia/Brisbane' });
@@ -52,7 +79,7 @@ async function rosterContext(browser, origin, uid, viewport, { signedIn = true }
     const args = request.method() === 'POST' ? request.postDataJSON() || {} : {};
     rpcLog.push({ uid, name });
     try {
-      const result = await rpcAs(db, uid, name, args);
+      const result = await serialRpc(uid, name, args);
       await route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(result) });
     } catch (error) {
       await route.fulfill({ status: 400, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' },
@@ -63,6 +90,16 @@ async function rosterContext(browser, origin, uid, viewport, { signedIn = true }
   await context.route('**/api/push-subscription', async route => {
     pushRequests.push({ uid, authorization: route.request().headers().authorization || '', body: route.request().postData() });
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ configured: false, claimed: 0, attempted: 0 }) });
+  });
+  // Roster texts go to the real sender with Twilio stubbed (see above).
+  await context.route('**/api/admin-publish-announcement', async route => {
+    const body = route.request().postDataJSON() || {};
+    smsRequests.push({ uid, authorization: route.request().headers().authorization || '', body });
+    if (uid !== DEMO_OWNER || body.action !== 'send_roster_sms') {
+      return route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ error: 'Admin access required.' }) });
+    }
+    const result = await sendRosterSms(serviceRole, { credentials: twilio.configured ? SMS_CREDENTIALS : null, fetcher: twilioRecorder, baseUrl: 'https://xert.example.test', sleep: async () => {} });
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(result) });
   });
   const page = await context.newPage();
   const problems = [];
@@ -191,7 +228,7 @@ try {
     assert.ok(bad, 'and an open position the same coach cannot take');
     if (good.holder) {
       const draft = (await db.query(`select version from public.staff_roster_revisions where state = 'draft'`)).rows[0];
-      await rpcAs(db, DEMO_OWNER, 'staff_roster_apply_changes', { p_month: `${MONTH}-01`, p_expected_version: draft.version,
+      await serialRpc(DEMO_OWNER, 'staff_roster_apply_changes', { p_month: `${MONTH}-01`, p_expected_version: draft.version,
         p_changes: [{ op: 'unassign', assignment_id: good.holder }], p_request_id: crypto.randomUUID() });
     }
     const name = (await db.query('select display_name from public.staff_members where id = $1', [good.staff_id])).rows[0].display_name;
@@ -280,46 +317,90 @@ try {
   });
 
   const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 375, height: 812 });
-  await step('coach gives availability on a 375px phone: tap grid, days away, autosave, plain review, submit', async () => {
+  await step('coach gives availability on a 375px phone: days first, then each class, free time on a day with no classes, autosave, review, submit', async () => {
     const phone = quinn.page;
     await phone.goto(`${origin}/coaching?tab=availability&month=${MONTH}`, { waitUntil: 'networkidle' });
     await phone.getByRole('heading', { name: /Hi Quinn Synthetic/ }).waitFor();
     await phone.getByText('What we need from you').waitFor();
+    await phone.getByRole('heading', { name: new RegExp(`^Your availability for ${MONTH_WORD} classes \\(1–\\d+ ${MONTH_WORD.slice(0, 3)}\\)$`) }).waitFor();
+    await phone.getByText('Send your answers by', { exact: true }).waitFor();
     await phone.getByText('Not started', { exact: true }).waitFor();
-    const cell = name => phone.getByRole('button', { name: new RegExp(`^${name}:`) });
-    await phone.getByRole('radio', { name: 'Can do' }).waitFor();
-    assert.equal(await phone.getByRole('radio', { name: 'Can do' }).getAttribute('aria-checked'), 'true', 'Can do is the starting answer');
-    await cell('Tuesday 6:15 am').click();
-    await cell('Thursday 6:15 am').click();
-    await phone.getByRole('radio', { name: 'Prefer' }).click();
-    await cell('Saturday 6:15 am').click();
-    await phone.getByRole('radio', { name: 'Can’t' }).click();
-    await cell('Wednesday 4:30 pm').click();
-    await cell('Tuesday 6:15 am').getByText('Can do').waitFor();
-    await cell('Saturday 6:15 am').getByText('Prefer').waitFor();
-    await cell('Wednesday 4:30 pm').getByText('Can’t').waitFor();
+    const calendar = phone.getByRole('group', { name: `Days in ${MONTH_WORD} ${MONTH.slice(0, 4)}` });
+    const dayButton = date => calendar.getByRole('button', { name: new RegExp(`^${dayLabel(date)},`) });
+    const panel = date => phone.getByRole('region', { name: `${dayLabel(date)} classes` });
+    await dayButton(firstMonday).and(phone.locator(':enabled')).waitFor();
+    assert.equal(await phone.getByRole('radio', { name: /I can work/ }).getAttribute('aria-checked'), 'true', 'a tap marks "can work" to start with');
+
+    // Every Tuesday and Thursday: every class on those days starts as Can do.
+    await phone.getByRole('button', { name: 'Every Tuesday' }).click();
+    await phone.getByRole('button', { name: 'Every Thursday' }).click();
+    const tuesday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2);
+    await dayButton(tuesday).getByText('Work').waitFor();
+
+    // A Saturday: prefer the 6:15 Engine.
+    const saturday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 6);
+    await dayButton(saturday).click();
+    await panel(saturday).getByRole('button', { name: 'Prefer: 6:15 am Saturday Engine' }).click();
+    await panel(saturday).getByRole('button', { name: 'Prefer: 6:15 am Saturday Engine' }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+    assert.equal(await panel(saturday).getByRole('button', { name: 'Can do: 9:30 am Saturday Strength' }).getAttribute('aria-pressed'), 'true', 'other classes default to Can do');
+
+    // A Wednesday: can't do the 4:30 pm Engine.
+    const wednesday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 3);
+    await dayButton(wednesday).click();
+    await panel(wednesday).getByRole('button', { name: 'Can’t: 4:30 pm Engine 4:30' }).click();
+    await panel(wednesday).getByRole('button', { name: 'Can’t: 4:30 pm Engine 4:30' }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+
+    // A Sunday has no classes, so it asks for free time instead.
+    const sunday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 0);
+    await dayButton(sunday).click();
+    await panel(sunday).getByText('No classes on the timetable this day yet. When are you free?').waitFor();
+    await panel(sunday).getByRole('button', { name: /^All day/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+    await panel(sunday).getByRole('button', { name: /^Evening/ }).click();
+    await panel(sunday).getByRole('button', { name: /^Evening/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+
+    // Away on one Tuesday.
     const awayDay = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2 && date > firstMonday);
-    await phone.getByRole('group', { name: /^Days away in/ }).getByRole('button').filter({ hasText: new RegExp(`^${Number(awayDay.slice(8))}$`) }).click();
-    await phone.getByText(/^Away 1 day:/).waitFor();
+    await phone.getByRole('radio', { name: /I’m away/ }).click();
+    await dayButton(awayDay).click();
+    await dayButton(awayDay).getByText('Away').waitFor();
+    await phone.getByText(/^Can work \d+ days · Away 1 day$/).waitFor();
+
     await phone.getByText('Draft saved. Not sent to the manager until you submit.').waitFor({ timeout: 10000 });
     await phone.getByText('Draft saved', { exact: true }).waitFor();
     const draft = await db.query(`select count(*)::int as n, (select payload from public.staff_availability_drafts limit 1) as payload from public.staff_availability_drafts`);
     assert.equal(draft.rows[0].n, 1, 'autosave writes a draft, not a submission');
-    assert.deepEqual(draft.rows[0].payload.exceptions, [{ date: awayDay, start: 0, end: 1440, status: 'UNAVAILABLE' }]);
+    const saved = draft.rows[0].payload;
+    assert.deepEqual(saved.weekly, [], 'day-first answers are dates only');
+    assert.deepEqual(saved.exceptions.filter(item => item.date === awayDay), [{ date: awayDay, start: 0, end: 1440, status: 'UNAVAILABLE' }]);
+    assert.deepEqual(saved.exceptions.filter(item => item.date === sunday), [{ date: sunday, start: 960, end: 1260, status: 'AVAILABLE' }]);
+    assert.equal(saved.exceptions.filter(item => item.date === firstMonday).length, 0, 'a Monday nobody tapped stays not stated');
     const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
-    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-cell, .coaching-day, .coaching-brush button')]
+    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-day, .coaching-every-day, .coaching-brush button, .coaching-day-states button, .coaching-class-choices button, .coaching-presets button')]
       .map(node => node.getBoundingClientRect()).filter(box => box.width < 44 || box.height < 44).length);
-    assert.equal(small, 0, 'every grid, calendar and answer button is at least 44px');
+    assert.equal(small, 0, 'every calendar, day and class button is at least 44px');
     if (shots) await phone.screenshot({ path: `${shots}/06-coach-availability-phone.png`, fullPage: true });
     await phone.getByRole('button', { name: 'Review and submit' }).click();
-    await phone.getByText(/^You can do \d+ classes? of \d+, prefer \d+, can’t do \d+, away 1 day\.$/).first().waitFor();
+    await phone.getByText(/^You can do \d+ classes? of \d+, prefer 1, can’t do \d+, away 1 day, free on 1 day with no classes\.$/).first().waitFor();
     if (shots) await phone.screenshot({ path: `${shots}/07-coach-availability-review-phone.png`, fullPage: true });
-    await phone.getByRole('button', { name: /^Submit / }).click();
+    await phone.getByRole('button', { name: `Submit ${MONTH_WORD} classes` }).click();
     await phone.getByText(/submitted/).first().waitFor();
     await phone.getByText('Submitted', { exact: true }).waitFor();
-    const submitted = await db.query(`select s.version from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id where m.display_name = 'Quinn Synthetic'`);
+    const submitted = await db.query(`select s.version, s.staff_id from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id where m.display_name = 'Quinn Synthetic'`);
     assert.deepEqual(submitted.rows.map(row => row.version), [1]);
+
+    // What the manager's "who can take what" matrix now shows for Quinn.
+    const matrix = await serialRpc(DEMO_OWNER, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` });
+    const quinnId = submitted.rows[0].staff_id;
+    const classAt = (date, minute) => matrix.sessions.find(item => item.start === gymInstantIso(date, minute) || new Date(item.start).getTime() === new Date(gymInstantIso(date, minute)).getTime());
+    const statusOf = (date, minute) => matrix.availability.find(item => item.staff_id === quinnId && item.session_id === classAt(date, minute)?.id)?.status || 'UNKNOWN';
+    assert.equal(statusOf(tuesday, 315), 'AVAILABLE');
+    assert.equal(statusOf(saturday, 375), 'PREFERRED');
+    assert.equal(statusOf(saturday, 570), 'AVAILABLE');
+    assert.equal(statusOf(wednesday, 990), 'UNAVAILABLE');
+    assert.equal(statusOf(wednesday, 315), 'AVAILABLE');
+    assert.equal(statusOf(awayDay, 315), 'UNAVAILABLE');
+    assert.equal(statusOf(firstMonday, 315), 'UNKNOWN', 'blank days are unanswered, never available');
   });
 
   const riley = await rosterContext(browser, origin, coach('riley').profileId, { width: 390, height: 844 });
@@ -344,7 +425,7 @@ try {
   let volunteer = null;
   await step('another coach volunteers; volunteering alone changes nothing', async () => {
     for (const candidate of DEMO_COACHES.filter(item => item.key !== 'riley' && item.key !== 'taylor')) {
-      const board = await rpcAs(db, candidate.profileId, 'staff_roster_cover_board', {});
+      const board = await serialRpc(candidate.profileId, 'staff_roster_cover_board', {});
       if (board.length && board[0].problems.length === 0) { volunteer = candidate; break; }
     }
     assert.ok(volunteer, 'some synthetic coach can cover');
@@ -438,7 +519,7 @@ try {
     await revoked.page.getByText('Admin access only').waitFor();
     assert.equal(rpcLog.slice(before).length, 0, 'no roster data is requested for a non-manager');
     // And the server refuses the manager RPC even if called directly.
-    await assert.rejects(() => rpcAs(db, coach('quinn').profileId, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` }), /MANAGER_ONLY/);
+    await assert.rejects(() => serialRpc(coach('quinn').profileId, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` }), /MANAGER_ONLY/);
     await revoked.context.close();
   });
 
@@ -453,7 +534,7 @@ try {
     return { ...session, access_token: `${header}.${claims}.${signature}`, user: samUser };
   };
   await db.query(`insert into public.profiles (id, full_name, email, role) values ($1, 'Sam Synthetic', 'sam@example.invalid', 'member')`, [SAM]);
-  const samStaff = await rpcAs(db, DEMO_OWNER, 'staff_roster_upsert_staff', { p_staff: { display_name: 'Sam Synthetic', roles: ['assistant'] }, p_expected_version: null, p_request_id: crypto.randomUUID() });
+  const samStaff = await serialRpc(DEMO_OWNER, 'staff_roster_upsert_staff', { p_staff: { display_name: 'Sam Synthetic', roles: ['assistant'] }, p_expected_version: null, p_request_id: crypto.randomUUID() });
   let inviteUrl = null;
   await step('manager creates an invite link for a coach with no sign-in', async () => {
     await page.goto(`${origin}/admin/roster?rosterTab=coaches&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
@@ -539,7 +620,7 @@ try {
     const { rows } = await db.query('select session_id, author_staff_id from public.staff_session_notes');
     assert.equal(rows.length, 1);
     assert.equal(rows[0].author_staff_id, rileyStaff);
-    await assert.rejects(() => rpcAs(db, coach('quinn').profileId, 'staff_roster_class_detail', { p_session_id: rows[0].session_id }), /NOT_ON_CLASS/);
+    await assert.rejects(() => serialRpc(coach('quinn').profileId, 'staff_roster_class_detail', { p_session_id: rows[0].session_id }), /NOT_ON_CLASS/);
     await sheet.getByRole('button', { name: 'Close Class details' }).click();
   });
 
@@ -603,8 +684,235 @@ try {
     if (shots) await page.screenshot({ path: `${shots}/26-manager-coaches-tab.png`, fullPage: true });
   });
 
+  // ── Part-month: the month that has already started ──────────────────────
+  // This month (today's) has no roster period. The manager asks coaches about
+  // the rest of it from a chosen day; earlier classes stay out of the roster.
+  const CURRENT = monthKeyOf(today);
+  const CURRENT_WORD = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(CURRENT.slice(5)) - 1];
+  const shortDay = date => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekdayOf(date)]} ${Number(date.slice(8))} ${CURRENT_WORD.slice(0, 3)}`;
+  const restOfMonth = partMonthStartRange(CURRENT, today);
+  const partPlan = restOfMonth ? planPartMonthOpening(CURRENT, { today, startsOn: restOfMonth.suggested }) : null;
+  // Synthetic evening classes on every remaining day of this month.
+  const currentClasses = [];
+  for (const date of datesOfMonth(CURRENT).filter(item => item > today)) {
+    const { rows } = await db.query(`insert into public.class_sessions (start_time, end_time, duration_minutes, title, class_type, status)
+      values ($1, $2, 45, 'Current Engine 6:00', 'XERT Engine', 'published') returning id`, [gymInstantIso(date, 1080), new Date(gymInstant(date, 1080) + 45 * 60000).toISOString()]);
+    currentClasses.push({ date, id: rows[0].id });
+  }
+  const partSmall = await rosterContext(browser, origin, DEMO_OWNER, { width: 375, height: 812 });
+  await step('a started month: the manager asks coaches about the rest of it from a chosen day; earlier classes stay out', async () => {
+    await page.goto(`${origin}/admin/roster?rosterMonth=${CURRENT}&rosterTab=availability`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: 'Coach roster', exact: true }).waitFor();
+    if (!restOfMonth) {
+      // The last day of the month: nothing left to ask about, said plainly.
+      await page.getByText(new RegExp(`too late to ask for ${CURRENT_WORD}`)).waitFor();
+      return;
+    }
+    const guide = page.getByRole('group', { name: /steps$/ });
+    await guide.getByText(new RegExp(`${CURRENT_WORD} has started\\. You can still ask coaches`)).waitFor();
+    await guide.getByRole('button', { name: `Ask coaches for the rest of ${CURRENT_WORD}` }).click();
+    await page.getByRole('heading', { name: `Ask coaches for the rest of ${CURRENT_WORD}` }).waitFor();
+    const start = page.getByLabel(/Roster coaches from/);
+    assert.equal(await start.inputValue(), restOfMonth.suggested, 'a start day is suggested');
+    assert.equal(await start.getAttribute('min'), restOfMonth.min, 'no start day today or earlier');
+    assert.equal(await start.getAttribute('max'), restOfMonth.max, 'no start day in another month');
+    if (shots) await page.screenshot({ path: `${shots}/27-manager-rest-of-month.png`, fullPage: true });
+    // The same screen at 375px: readable, nothing scrolls sideways.
+    await partSmall.page.goto(`${origin}/admin/roster?rosterMonth=${CURRENT}&rosterTab=availability`, { waitUntil: 'networkidle' });
+    await partSmall.page.getByRole('heading', { name: `Ask coaches for the rest of ${CURRENT_WORD}` }).waitFor();
+    const overflow = await partSmall.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
+    if (shots) await partSmall.page.screenshot({ path: `${shots}/28-manager-rest-of-month-phone.png`, fullPage: true });
+
+    await page.getByRole('button', { name: `Ask coaches about classes from ${shortDay(partPlan.startsOn)}` }).click();
+    await page.getByText(`Coaches asked about classes from ${shortDay(partPlan.startsOn)}.`, { exact: false }).first().waitFor();
+    const { rows } = await db.query(`select starts_on::text, opens_on::text, due_on::text, publish_target_on::text, shortened from public.staff_roster_periods where month = $1`, [`${CURRENT}-01`]);
+    assert.deepEqual(rows[0], { starts_on: partPlan.startsOn, opens_on: today, due_on: partPlan.dueOn, publish_target_on: partPlan.publishTargetOn, shortened: true });
+    await page.getByText(`Classes from ${shortDay(partPlan.startsOn)}.`, { exact: true }).waitFor();
+    await guide.getByText(new RegExp(`Roster starts ${shortDay(partPlan.startsOn)}\\.`)).waitFor();
+
+    // A class before the start day is shown but can't be rostered from here.
+    const before = currentClasses.find(item => item.date < partPlan.startsOn);
+    if (before) {
+      await page.goto(`${origin}/admin/roster?rosterMonth=${CURRENT}&rosterView=day&rosterDate=${before.date}`, { waitUntil: 'networkidle' });
+      await page.locator(`#roster-session-${before.id}`).getByText(`Before this roster starts on ${shortDay(partPlan.startsOn)}; it stays with the current coach.`).first().waitFor();
+    }
+    // Asking twice is refused in plain words, never raw database text.
+    const again = await serialRpc(DEMO_OWNER, 'staff_roster_open_part_month', { p_month: `${CURRENT}-01`, p_starts_on: partPlan.startsOn, p_due_on: partPlan.dueOn, p_publish_target_on: partPlan.publishTargetOn, p_request_id: crypto.randomUUID() }).catch(error => error);
+    assert.match(String(again.message), /PERIOD_EXISTS/);
+  });
+
+  const quinnPart = await rosterContext(browser, origin, coach('quinn').profileId, { width: 375, height: 812 });
+  await step('coach answers a part-month on a 375px phone: days before the start are off, nothing is kept for them, and a quick tab switch loses nothing', async () => {
+    if (!restOfMonth) return;
+    const phone = quinnPart.page;
+    const startsOn = partPlan.startsOn;
+    await phone.goto(`${origin}/coaching?tab=availability&month=${CURRENT}`, { waitUntil: 'networkidle' });
+    const last = datesOfMonth(CURRENT).at(-1);
+    await phone.getByRole('heading', { name: `Your availability for ${CURRENT_WORD} classes (${Number(startsOn.slice(8))}–${Number(last.slice(8))} ${CURRENT_WORD.slice(0, 3)})` }).waitFor();
+    const calendar = phone.getByRole('group', { name: `Days in ${CURRENT_WORD} ${CURRENT.slice(0, 4)}` });
+    await calendar.getByRole('button', { name: new RegExp(`^${shortDay(startsOn)},`) }).and(phone.locator(':enabled')).waitFor();
+    // Every day before the start is disabled and says why; every day from it can be tapped.
+    const outside = calendar.getByRole('button', { name: /not part of this roster$/ });
+    assert.equal(await outside.count(), Number(startsOn.slice(8)) - 1);
+    for (const date of datesOfMonth(CURRENT)) {
+      const button = calendar.getByRole('button', { name: new RegExp(`^${shortDay(date)},`) });
+      assert.equal(await button.isDisabled(), date < startsOn, `${date} ${date < startsOn ? 'disabled' : 'enabled'}`);
+    }
+    await phone.getByText(new RegExp(`this roster starts ${shortDay(startsOn)}; earlier days are greyed out`)).waitFor();
+
+    // "Every <weekday>" marks only days from the start.
+    const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const firstMonthDay = `${CURRENT}-01`;
+    await phone.getByRole('button', { name: `Every ${weekdayNames[weekdayOf(firstMonthDay)]}` }).click();
+    // Tap one more day, then leave the tab before the autosave delay: the change is still saved.
+    const lastDay = calendar.getByRole('button', { name: new RegExp(`^${shortDay(last)},`) });
+    const lastWasMarked = (await lastDay.getAttribute('aria-label')).includes('can work');
+    if (!lastWasMarked) await lastDay.click();
+    await phone.getByRole('tab', { name: /^Inbox/ }).click();
+    let draft = null;
+    for (let tries = 0; tries < 50; tries++) {
+      draft = (await db.query(`select d.payload from public.staff_availability_drafts d join public.staff_members m on m.id = d.staff_id
+        where m.display_name = 'Quinn Synthetic' and d.month = $1`, [`${CURRENT}-01`])).rows[0]?.payload || null;
+      if (draft?.exceptions?.some(item => item.date === last)) break;
+      await new Promise(done => setTimeout(done, 100));
+    }
+    assert.ok(draft?.exceptions?.some(item => item.date === last), 'the last tap was saved even though the tab closed straight away');
+    assert.equal(draft.exceptions.filter(item => item.date < startsOn).length, 0, 'nothing is written for days before the start');
+    const marked = new Set(draft.exceptions.map(item => item.date));
+    for (const date of datesOfMonth(CURRENT).filter(item => weekdayOf(item) === weekdayOf(firstMonthDay))) {
+      assert.equal(marked.has(date), date >= startsOn, `${date} every-weekday answer only from the start`);
+    }
+
+    // Back on the tab, the answers are there. Ticking "can't coach at all" and
+    // unticking it again gives every answer back.
+    await phone.getByRole('tab', { name: /^Availability/ }).click();
+    await lastDay.getByText('Work').waitFor();
+    const none = phone.getByLabel(`I can’t coach at all in ${CURRENT_WORD} ${CURRENT.slice(0, 4)}`);
+    await none.check();
+    await calendar.waitFor({ state: 'hidden' });
+    await none.uncheck();
+    await lastDay.getByText('Work').waitFor();
+    await phone.getByText('Draft saved. Not sent to the manager until you submit.').waitFor({ timeout: 10000 });
+    const restored = (await db.query(`select d.payload from public.staff_availability_drafts d join public.staff_members m on m.id = d.staff_id
+      where m.display_name = 'Quinn Synthetic' and d.month = $1`, [`${CURRENT}-01`])).rows[0].payload;
+    assert.deepEqual(restored.exceptions, draft.exceptions, 'unticking restores the same answers');
+    assert.equal(restored.noAvailability, false);
+
+    const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
+    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-day, .coaching-every-day, .coaching-brush button')]
+      .map(node => node.getBoundingClientRect()).filter(box => box.width < 44 || box.height < 44).length);
+    assert.equal(small, 0, 'every calendar button is at least 44px');
+    if (shots) await phone.screenshot({ path: `${shots}/29-coach-part-month-phone.png`, fullPage: true });
+
+    await phone.getByRole('button', { name: 'Review and submit' }).click();
+    await phone.getByRole('button', { name: `Submit ${CURRENT_WORD} classes` }).click();
+    await phone.getByText('Submitted', { exact: true }).waitFor();
+    const submitted = await db.query(`select s.payload from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id
+      where m.display_name = 'Quinn Synthetic' and s.month = $1`, [`${CURRENT}-01`]);
+    assert.equal(submitted.rows.length, 1);
+    assert.equal(submitted.rows[0].payload.exceptions.filter(item => item.date < startsOn).length, 0);
+  });
+
+  // ── Roster texts (Twilio stubbed; no real SMS) ──────────────────────────
+  const publishChange = async () => {
+    // One coach comes off one future class in the draft, then the manager publishes in the UI.
+    let draft = (await db.query(`select id, version from public.staff_roster_revisions where month = $1 and state = 'draft'`, [`${MONTH}-01`])).rows[0];
+    if (!draft) {
+      await serialRpc(DEMO_OWNER, 'staff_roster_draft', { p_month: `${MONTH}-01` });
+      draft = (await db.query(`select id, version from public.staff_roster_revisions where month = $1 and state = 'draft'`, [`${MONTH}-01`])).rows[0];
+    }
+    const target = (await db.query(`select id, staff_id from public.staff_assignments where revision_id = $1 and session_start > now() + interval '1 day'
+      order by session_start, id limit 1`, [draft.id])).rows[0];
+    // Earlier steps (an urgent absence) left some assignments breaking a rule; those come off too, or publishing is blocked.
+    const broken = (await db.query(`select a.id from public.staff_assignments a where a.revision_id = $1 and a.session_start > now() and a.id <> $2
+      and cardinality(public.staff_roster_assignment_problems(a.revision_id, a.session_id, a.slot_key, a.staff_id, array[a.id])) > 0`, [draft.id, target.id])).rows;
+    await serialRpc(DEMO_OWNER, 'staff_roster_apply_changes', { p_month: `${MONTH}-01`, p_expected_version: draft.version,
+      p_changes: [target, ...broken].map(item => ({ op: 'unassign', assignment_id: item.id })), p_request_id: crypto.randomUUID() });
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterView=month`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: 'Review & publish' }).click();
+    const dialog = page.getByRole('dialog', { name: /^Publish / });
+    await dialog.getByRole('heading', { name: 'Classes still without a coach' }).waitFor();
+    if (await dialog.getByText(/required spots? (is|are) still open/).count()) await dialog.getByLabel(/Why publish with empty spots/).fill('Synthetic demo: texts check');
+    await dialog.getByRole('button', { name: /^Publish/ }).click();
+    await dialog.getByText(/^Version \d+ of .* is published$/).waitFor();
+    return { dialog, staffId: target.staff_id };
+  };
+
+  await step('texts off: publishing sends no text and says how to turn them on', async () => {
+    const before = twilio.calls.length;
+    const { dialog } = await publishChange();
+    await dialog.getByText(/Texts are off\. Turn on “Text coaches when you publish” in Settings/).waitFor();
+    assert.equal(twilio.calls.length, before);
+    const queued = await db.query('select count(*)::int as n from public.staff_roster_sms_messages');
+    assert.equal(queued.rows[0].n, 0, 'nothing is even queued while texts are off');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+  });
+
+  await step('texts on: the publish dialog texts the coaches whose classes changed through Twilio (stubbed), once', async () => {
+    // Synthetic mobiles on example accounts.
+    for (const [index, item] of DEMO_COACHES.entries()) {
+      await db.query('update public.profiles set phone = $2 where id = $1', [item.profileId, `04000000${String(index + 10)}`]);
+    }
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterTab=settings`, { waitUntil: 'networkidle' });
+    await page.getByText('Off — no texts are sent').waitFor();
+    await page.getByRole('button', { name: 'Text coaches when you publish' }).click();
+    await page.getByText('On — coaches get a text when you publish').waitFor();
+
+    const before = twilio.calls.length;
+    const { dialog, staffId } = await publishChange();
+    await dialog.getByText(/^Texts: \d+ sent/).waitFor({ timeout: 15000 });
+    const sent = twilio.calls.slice(before);
+    const messages = (await db.query(`select m.status, m.phone, m.kind, m.body, s.display_name from public.staff_roster_sms_messages m join public.staff_members s on s.id = m.staff_id`)).rows;
+    assert.ok(sent.length >= 1, 'at least the coach taken off a class is texted');
+    assert.equal(sent.length, messages.filter(row => row.status === 'sent').length, 'one Twilio request per text recorded as sent');
+    for (const call of sent) {
+      assert.match(call.To, /^\+614000000\d\d$/, 'only synthetic numbers');
+      assert.equal(call.From, '+61400000999');
+      // Their first text lists all their classes; later ones only what changed.
+      assert.match(call.Body, /^XERT: Hi \w+, your \w+ (classes|roster changed): .*(See all|see the app): https:\/\/xert\.example\.test\/coaching\?tab=roster$/);
+    }
+    assert.ok(messages.some(row => row.status === 'sent' && row.phone && sent.some(call => call.To === row.phone)));
+    const owner = smsRequests.filter(item => item.uid === DEMO_OWNER).at(-1);
+    assert.match(owner.authorization, /^Bearer \S+/);
+    assert.deepEqual(owner.body, { action: 'send_roster_sms' });
+    assert.ok(staffId);
+    if (shots) await page.screenshot({ path: `${shots}/30-publish-texts-sent.png` });
+
+    // Opening the roster again sends nothing twice.
+    const afterPublish = twilio.calls.length;
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: 'Coach roster', exact: true }).waitFor();
+    await new Promise(done => setTimeout(done, 500));
+    assert.equal(twilio.calls.length, afterPublish, 'no text is sent twice');
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterTab=settings`, { waitUntil: 'networkidle' });
+  });
+
+  await step('texts on but Twilio not set up: nothing is sent and the dialog says the texts are waiting', async () => {
+    twilio.configured = false;
+    const before = twilio.calls.length;
+    try {
+      const { dialog } = await publishChange();
+      await dialog.getByText(/SMS is not set up on the server yet/).waitFor({ timeout: 15000 });
+      const waiting = await db.query(`select count(*)::int as n from public.staff_roster_sms_messages where status = 'pending'`);
+      assert.ok(waiting.rows[0].n >= 1, 'the texts stay queued for when SMS is set up');
+      await dialog.getByRole('button', { name: 'Done' }).click();
+      // Switching texts off cancels what was waiting, so nothing old goes out later.
+      await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterTab=settings`, { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: 'Stop texting coaches' }).click();
+      await page.getByText('Off — no texts are sent').waitFor();
+      const left = await db.query(`select count(*)::int as n from public.staff_roster_sms_messages where status in ('pending', 'sending')`);
+      assert.equal(left.rows[0].n, 0);
+    } finally {
+      twilio.configured = true;
+    }
+    assert.equal(twilio.calls.length, before, 'nothing reached Twilio');
+  });
+
   await step('no page errors in any session', async () => {
-    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems, ...signedOut.problems, ...samContext.problems];
+    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems, ...signedOut.problems, ...samContext.problems,
+      ...partSmall.problems, ...quinnPart.problems];
     assert.deepEqual(all, []);
   });
   const names = new Set(rpcLog.map(item => item.name));

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from '@/components/ui/use-toast';
 import AdminLoadError from '@/components/admin/AdminLoadError';
@@ -55,6 +55,23 @@ export default function StaffRosterWorkspace({ client = null }) {
   const clearIntent = useCallback(() => setIntent(null), []);
 
   const { mutate, client: rpcClient, reload: reloadMonth } = data;
+
+  // Texts are sent by the server only when a manager's screen asks, so the
+  // roster asks once each time it opens if any are still waiting (a send cut
+  // short, a temporary Twilio failure). No scheduler or extra secret needed.
+  const textsChecked = useRef(false);
+  useEffect(() => {
+    if (!rpcClient || textsChecked.current || typeof rpcClient.smsStatus !== 'function') return;
+    textsChecked.current = true;
+    (async () => {
+      try {
+        const status = await rpcClient.smsStatus(null);
+        if (!status?.enabled || !status?.due) return;
+        const sent = await rpcClient.sendTexts();
+        if (sent?.sent) toast({ title: `${sent.sent} roster ${sent.sent === 1 ? 'text' : 'texts'} sent`, description: 'They were waiting from an earlier publish.' });
+      } catch { /* the publish dialog and next open try again */ }
+    })();
+  }, [rpcClient]);
   const onMutate = useCallback(async (action, message, { reload = true } = {}) => {
     try {
       const result = reload ? await mutate(action) : await action(rpcClient);

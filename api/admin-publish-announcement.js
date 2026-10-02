@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
 import { requestHeader, requestJson, sendJson } from '../src/lib/serverHttp.js';
 import { sendMemberAnnouncementPushes } from './apns.js';
+import { buildRosterSms } from '../src/lib/staffRoster/sms.js';
 
 export const config = { maxDuration: 60 };
 
@@ -106,37 +107,70 @@ export function normalizeSmsSendRequest(body) {
   return { message, recipients };
 }
 
-async function sendOneSms(recipient, message) {
-  const params = new URLSearchParams({ To: recipient.phone, From: TWILIO_FROM_NUMBER, Body: message });
-  const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString('base64');
+/**
+ * One Twilio send. Never throws: returns `{ ok, sid, status }` or
+ * `{ ok: false, error, retryable }`. Rate limits (429), Twilio outages (5xx),
+ * timeouts and network errors are temporary; everything else (a bad number,
+ * a recipient who replied STOP) is permanent and must not be retried.
+ */
+export async function twilioSendSms({ to, body, credentials, fetcher = globalThis.fetch, timeoutMs = 10000 }) {
+  const { accountSid, authToken, fromNumber } = credentials || {};
+  const params = new URLSearchParams({ To: to, From: fromNumber, Body: body });
+  const auth = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
   try {
-    const response = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+    const response = await fetcher(
+      `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`,
       {
         method: 'POST',
         headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
+        signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined,
       },
     );
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
+      const code = payload?.code ? `:${payload.code}` : '';
+      const prefix = Number(payload?.code) === 21610 ? 'RECIPIENT_UNSUBSCRIBED ' : '';
       return {
-        phone: recipient.phone,
-        name: recipient.name,
         ok: false,
-        error: payload.message || `Twilio rejected the message (${response.status}).`,
+        retryable: response.status === 429 || response.status >= 500,
+        error: `${prefix}TWILIO_${response.status}${code}: ${String(payload?.message || 'Twilio rejected the message.').slice(0, 200)}`,
+        message: payload?.message || `Twilio rejected the message (${response.status}).`,
       };
     }
-    return {
-      phone: recipient.phone,
-      name: recipient.name,
-      ok: true,
-      sid: payload.sid || null,
-      status: payload.status || 'queued',
-    };
+    return { ok: true, sid: payload?.sid || null, status: payload?.status || 'queued' };
   } catch (error) {
-    return { phone: recipient.phone, name: recipient.name, ok: false, error: error.message };
+    const detail = String(error?.message || error).slice(0, 200);
+    // Only a request that provably never reached Twilio (no connection was
+    // made) is safe to send again. A timeout or a dropped connection may
+    // come after Twilio accepted the text, so it is not retried: a second
+    // attempt could text the coach twice. Same rule as roster push
+    // ('uncertain' is never resent).
+    if (smsNeverLeft(error)) return { ok: false, retryable: true, error: `NETWORK: ${detail}`, message: error?.message || String(error) };
+    const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
+    return { ok: false, retryable: false, error: `UNCONFIRMED ${timedOut ? 'TIMEOUT' : 'NETWORK'}: ${detail}`, message: error?.message || String(error) };
   }
+}
+
+// Connection errors that happen before any byte of the request is sent.
+const SMS_NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE']);
+
+/** True when a fetch failure means the request never reached the provider. */
+export function smsNeverLeft(error) {
+  for (let cause = error, depth = 0; cause && depth < 4; cause = cause.cause, depth += 1) {
+    if (SMS_NOT_SENT_CODES.has(cause.code)) return true;
+  }
+  return false;
+}
+
+async function sendOneSms(recipient, message) {
+  const result = await twilioSendSms({
+    to: recipient.phone,
+    body: message,
+    credentials: { accountSid: TWILIO_ACCOUNT_SID, authToken: TWILIO_AUTH_TOKEN, fromNumber: TWILIO_FROM_NUMBER },
+  });
+  if (!result.ok) return { phone: recipient.phone, name: recipient.name, ok: false, error: result.message };
+  return { phone: recipient.phone, name: recipient.name, ok: true, sid: result.sid, status: result.status };
 }
 
 async function sendSmsCampaign(body) {
@@ -151,6 +185,120 @@ async function sendSmsCampaign(body) {
   }
   const sent = results.filter(result => result.ok).length;
   return { sent, failed: results.length - sent, total: results.length, results };
+}
+
+
+// ─── Roster texts (action: 'send_roster_sms') ────────────────────────────────
+// The database queues one text per coach when a roster is published
+// (supabase/migrations/20261002050000_staff_roster_sms.sql). This sends what
+// is due: lease a batch (service role only), build each text with the shared
+// wording (src/lib/staffRoster/sms.js), send through Twilio, record each
+// outcome against its lease. Temporary failures go back to the queue and are
+// tried again in this run after a short wait, at most 3 attempts in all.
+const ROSTER_SMS_BATCH = 25;
+const ROSTER_SMS_MAX_ROUNDS = 8;
+const ROSTER_SMS_TIME_BUDGET_MS = 40000;
+
+export function twilioCredentialsFromEnv(env = process.env) {
+  const credentials = { accountSid: env.TWILIO_ACCOUNT_SID, authToken: env.TWILIO_AUTH_TOKEN, fromNumber: env.TWILIO_FROM_NUMBER };
+  return credentials.accountSid && credentials.authToken && credentials.fromNumber ? credentials : null;
+}
+
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function recordRosterSms(admin, row, outcome) {
+  const params = {
+    p_id: row.id,
+    p_lease_token: row.lease_token,
+    p_ok: outcome.ok,
+    p_provider_id: outcome.sid || null,
+    p_error: outcome.ok ? null : outcome.error,
+    p_retryable: !outcome.ok && Boolean(outcome.retryable),
+    p_body: outcome.body || null,
+  };
+  // One retry: a send that is not recorded would be sent again once its lease expires.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { data, error } = await admin.rpc('staff_roster_sms_record', params);
+    if (!error) return data || { recorded: false };
+  }
+  return { recorded: false, error: true };
+}
+
+async function sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl, timeoutMs = 10000 }) {
+  let body;
+  try {
+    body = buildRosterSms(row, { baseUrl });
+  } catch {
+    return recordRosterSms(admin, row, { ok: false, retryable: false, error: 'MESSAGE_INVALID' });
+  }
+  if (!row.phone || e164AUMobile(row.phone) !== row.phone) {
+    return recordRosterSms(admin, row, { ok: false, retryable: false, error: 'MOBILE_INVALID', body });
+  }
+  const result = await twilioSendSms({ to: row.phone, body, credentials, fetcher, timeoutMs });
+  return recordRosterSms(admin, row, { ...result, body });
+}
+
+// Twilio's own wait per text; the run's time budget below keeps every
+// started send (and its record) inside the function's 60 s limit.
+const ROSTER_SMS_SEND_TIMEOUT_MS = 10000;
+
+/**
+ * Sends the roster texts that are due. Returns counts for this run:
+ * `sent`, `failed` (permanent, or out of attempts), `retrying` (still queued
+ * for a later attempt), `unrecorded` (sent or failed but the result could not
+ * be saved). Without Twilio credentials it claims nothing.
+ */
+export async function sendRosterSms(admin, {
+  credentials = twilioCredentialsFromEnv(),
+  fetcher = globalThis.fetch,
+  baseUrl = process.env.APP_BASE_URL || '',
+  worker = `api-${randomUUID().slice(0, 8)}`,
+  sleep = wait,
+  now = Date.now,
+} = {}) {
+  const totals = { configured: Boolean(credentials), attempted: 0, sent: 0, failed: 0, retrying: 0, unrecorded: 0 };
+  if (!credentials) return totals;
+  // Last outcome per text: a text retried and then sent counts once, as sent.
+  const final = new Map();
+  const started = now();
+  let retryWait = 0;
+  for (let round = 0; round < ROSTER_SMS_MAX_ROUNDS && now() - started < ROSTER_SMS_TIME_BUDGET_MS; round += 1) {
+    if (retryWait) await sleep(retryWait);
+    const { data, error } = await admin.rpc('staff_roster_sms_claim', { p_limit: ROSTER_SMS_BATCH, p_worker: worker });
+    if (error) throw new Error('ROSTER_SMS_CLAIM_FAILED', { cause: error });
+    const rows = Array.isArray(data) ? data : [];
+    if (rows.length === 0) break;
+    retryWait = 0;
+    for (let index = 0; index < rows.length; index += SMS_SEND_CONCURRENCY) {
+      const batch = rows.slice(index, index + SMS_SEND_CONCURRENCY);
+      // Out of time: hand the rest back unsent instead of starting a send the
+      // platform might cut off after Twilio accepted it (that text would be
+      // unrecorded, then sent again when its lease ran out).
+      if (now() - started >= ROSTER_SMS_TIME_BUDGET_MS) {
+        for (const row of rows.slice(index)) {
+          const outcome = await recordRosterSms(admin, row, { ok: false, retryable: true, error: 'NOT_SENT:OUT_OF_TIME' });
+          final.set(row.id, outcome?.recorded ? outcome.status : 'unrecorded');
+        }
+        break;
+      }
+      const outcomes = await Promise.all(batch.map(row => sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl, timeoutMs: ROSTER_SMS_SEND_TIMEOUT_MS })));
+      outcomes.forEach((outcome, offset) => {
+        totals.attempted += 1;
+        const status = outcome?.recorded ? outcome.status : 'unrecorded';
+        final.set(batch[offset].id, status);
+        // The database waits 2 s × attempts before a retry is due.
+        if (status === 'pending') retryWait = Math.max(retryWait, 2000 * Number(batch[offset].attempt || 1) + 500);
+      });
+    }
+    if (!retryWait && rows.length < ROSTER_SMS_BATCH) break;
+  }
+  for (const status of final.values()) {
+    if (status === 'sent') totals.sent += 1;
+    else if (status === 'pending') totals.retrying += 1;
+    else if (status === 'unrecorded') totals.unrecorded += 1;
+    else totals.failed += 1;
+  }
+  return totals;
 }
 
 const SMS_ERROR_STATUS = {
@@ -309,6 +457,14 @@ export default async function handler(request, response) {
       return json(await sendSmsCampaign(body));
     }
 
+    if (body?.action === 'send_roster_sms') {
+      try {
+        return json(await sendRosterSms(admin));
+      } catch (error) {
+        throw new Error('ROSTER_SMS_FAILED', { cause: error });
+      }
+    }
+
     if (body?.action === 'notify_class_cancellation') {
       try {
         return json(await notifyClassCancellation(admin, String(body?.session_id || '').trim()));
@@ -379,6 +535,7 @@ export default async function handler(request, response) {
     if (error.message?.startsWith('ANNOUNCEMENT_')) return json({ error: 'Announcement details are invalid.' }, 400);
     if (error.message?.startsWith('CLASS_NOTICE_')) return json({ error: 'The cancellation notice was saved, but push delivery could not be completed.' }, 500);
     if (error.message?.startsWith('TARGETED_NOTICE_')) return json({ error: 'The private notice was saved, but push delivery could not be completed.' }, 500);
+    if (error.message === 'ROSTER_SMS_FAILED') return json({ error: 'Roster texts could not be sent just now. They stay queued and go when the roster is next opened.' }, 500);
     if (error.message === 'PUSH_SMOKE_TEST_FAILED') return json({ error: 'The owner push test could not be completed.' }, 500);
     return json({ error: 'Announcement could not be published.' }, 500);
   }

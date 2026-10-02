@@ -24,6 +24,8 @@ export const ROSTER_ERROR_MESSAGES = Object.freeze({
   PERIOD_NOT_FOUND: 'Availability has not been opened for this month.',
   PERIOD_EXISTS: 'Availability is already open for this month.',
   NO_BACKDATING: 'Dates cannot be set in the past.',
+  STARTS_ON_INVALID: 'Choose a start day later in the month, after today.',
+  ASSIGNMENTS_BEFORE_START: 'Some coaches are already rostered on classes before that start day. Remove them on the Roster tab, or choose an earlier start day.',
   DEADLINE_PASSED: 'The deadline has passed. Ask the manager to reopen your availability.',
   AVAILABILITY_INVALID: 'Some answers need fixing before you can submit.',
   NO_DRAFT: 'There is no draft to change.',
@@ -88,6 +90,10 @@ export const ROSTER_ERROR_MESSAGES = Object.freeze({
   SESSION_NOT_FOUND: 'That class no longer exists.',
   NOTE_TOO_LONG: 'Session notes can be up to 4,000 characters.',
   PREFERENCES_INVALID: 'Choose on or off for each notice type.',
+  SMS_DISABLED: 'Texting coaches is switched off. Turn on “Text coaches when you publish” in Settings first.',
+  // Not database codes: set by rosterError below for errors that carry none.
+  NOT_INSTALLED: 'This part of the coach roster isn’t installed on the database yet. Ask whoever looks after the website to apply the latest roster update.',
+  ID_INVALID: 'That item couldn’t be found. Refresh the page and try again.',
 });
 
 const CODE_PATTERN = /\b([A-Z][A-Z0-9_]{3,})\b/;
@@ -99,15 +105,34 @@ function parseDetail(detail) {
 
 // Table rules the database enforces directly (no roster error code of their own).
 const CONSTRAINT_MESSAGES = Object.freeze({
-  staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month starts, and the publish-by date must be on or after the due date.',
+  staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month (or its roster) starts, and the publish-by date must be on or after the due date.',
+  staff_roster_periods_starts_on: 'Check the dates: the roster must start on a later day of the same month, after the publish-by date.',
+  // Re-assigning a coach to the position they already hold (see the 060000 proposal).
+  staff_assignments_slot: 'That position already has a coach in the draft. Refresh to see the latest roster.',
+  staff_assignments_person: 'That coach already has a position in this class.',
 });
-const CONSTRAINT_PATTERN = /violates check constraint "([a-z0-9_]+)"/;
+const CONSTRAINT_PATTERN = /violates (?:check|unique) constraint "([a-z0-9_]+)"/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Errors with no roster code of their own. PostgREST answers PGRST202 when an
+ * entry point does not exist (its migration is not applied yet), and Postgres
+ * 22P02 when a malformed id reaches a uuid parameter.
+ */
+function uncodedProblem(error, raw) {
+  const sqlState = String(error?.code || '');
+  if (sqlState === 'PGRST202' || /Could not find the function/i.test(raw)) return 'NOT_INSTALLED';
+  if (sqlState === '22P02' || /invalid input syntax for type uuid/i.test(raw)) return 'ID_INVALID';
+  return null;
+}
 
 /** Turns a PostgREST/Postgres error into a readable Error with `code` and `detail`. */
 export function rosterError(error) {
   const raw = String(error?.message || error || '');
   const constraint = raw.match(CONSTRAINT_PATTERN)?.[1] || null;
-  const code = constraint ? null : raw.match(CODE_PATTERN)?.[1] || null;
+  const uncoded = constraint ? null : uncodedProblem(error, raw);
+  const matched = constraint || uncoded ? null : raw.match(CODE_PATTERN)?.[1] || null;
+  const code = uncoded || matched;
   const detail = parseDetail(error?.details || error?.detail);
   let message = (code && ROSTER_ERROR_MESSAGES[code]) || (constraint && CONSTRAINT_MESSAGES[constraint]) || null;
   if (code === 'ASSIGNMENT_BLOCKED' && detail?.problems?.length) {
@@ -130,14 +155,18 @@ export function monthParam(monthKey) {
  * @param [options.notifyPush] called, fire-and-forget, after an action that
  * creates roster notices, so the server can also push them to phones. The
  * in-app notice is already saved; a push failure never fails the action.
+ * `options.sendTexts`, when given, asks the server to send roster texts that
+ * are due (managers only); it resolves to the server's counts or
+ * `{ requested: false }`.
  */
-export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
+export function createStaffRosterClient(rpc, { notifyPush = null, sendTexts = null } = {}) {
   const call = async (name, params = {}) => {
     const { data, error } = await rpc(`staff_roster_${name}`, params);
     if (error) throw rosterError(error);
     return data;
   };
   const rid = () => newRequestId();
+  const refuse = code => Promise.reject(rosterError({ message: code }));
   const nudge = () => {
     if (!notifyPush) return;
     try { Promise.resolve(notifyPush()).catch(() => {}); } catch { /* best effort */ }
@@ -168,6 +197,10 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     openPeriod: (month, { opensOn, dueOn, publishTargetOn, shortened }) => call('open_period', {
       p_month: monthParam(month), p_opens_on: opensOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_shortened: Boolean(shortened), p_request_id: rid(),
     }),
+    // Part of a month that has started: classes from `startsOn`, coaches asked today.
+    openPartMonth: (month, { startsOn, dueOn, publishTargetOn }) => call('open_part_month', {
+      p_month: monthParam(month), p_starts_on: startsOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_request_id: rid(),
+    }),
     updatePeriod: (month, { dueOn, publishTargetOn }, version) => call('update_period', { p_month: monthParam(month), p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_expected_version: version }),
     reopenSubmission: (month, staffId, reason) => pushing(call('reopen_submission', { p_month: monthParam(month), p_staff_id: staffId, p_reason: reason, p_request_id: rid() })),
     setStaffing: (scope, key, staffing, version) => call('set_staffing', { p_scope: scope, p_key: key, p_staffing: staffing, p_expected_version: version ?? null, p_request_id: rid() }),
@@ -179,7 +212,9 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     }),
     decideAbsence: (absenceId, decision, version) => pushing(call('decide_absence', { p_absence_id: absenceId, p_decision: decision, p_expected_version: version, p_request_id: rid() })),
     recordAbsence: (staffId, startsAt, endsAt, reason) => call('record_absence', { p_staff_id: staffId, p_starts: startsAt, p_ends: endsAt, p_reason: reason || null, p_request_id: rid() }),
-    approveCover: (coverId, offerId, version) => pushing(call('approve_cover', { p_cover_id: coverId, p_offer_id: offerId, p_expected_version: version, p_request_id: rid() })),
+    // Approved cover publishes a new version, which can queue texts for the two coaches.
+    approveCover: (coverId, offerId, version) => pushing(call('approve_cover', { p_cover_id: coverId, p_offer_id: offerId, p_expected_version: version, p_request_id: rid() }))
+      .then(result => { if (result?.ok !== false && sendTexts) { try { Promise.resolve(sendTexts()).catch(() => {}); } catch { /* best effort */ } } return result; }),
     rejectCover: (coverId, version) => pushing(call('reject_cover', { p_cover_id: coverId, p_expected_version: version, p_request_id: rid() })),
     notificationLog: (month, limit = 100) => call('notification_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
     auditLog: (month, limit = 100) => call('audit_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
@@ -195,6 +230,11 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     createInvite: (staffId, email) => call('invite_create', { p_staff_id: staffId, p_email: email || null }),
     revokeInvite: inviteId => call('invite_revoke', { p_invite_id: inviteId }),
     listInvites: () => call('invite_list'),
+    // Roster texts. Queued by the database when a roster is published; sent by the server.
+    smsStatus: month => call('sms_status', { p_month: month ? monthParam(month) : null }),
+    setSmsEnabled: (enabled, version) => call('sms_set_enabled', { p_enabled: Boolean(enabled), p_expected_version: version }),
+    retryTexts: month => call('sms_retry', { p_month: monthParam(month) }),
+    sendTexts: async () => (sendTexts ? sendTexts() : { requested: false }),
 
     // ── Joining (any signed-in account holding an invite link) ──
     // Token problems come back as { ok: false, code }, not as errors.
@@ -224,12 +264,17 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     myProfile: () => call('my_profile'),
     saveProfile: (profile, submit, version) => (submit ? pushing : value => value)(call('save_profile', { p_profile: profile, p_submit: Boolean(submit), p_expected_version: version ?? null })),
     myCertificates: () => call('my_certificates'),
-    saveCertificate: certificate => call('save_certificate', { p_certificate: certificate }),
-    removeCertificate: certificateId => call('remove_certificate', { p_certificate_id: certificateId }),
-    classDetail: sessionId => call('class_detail', { p_session_id: sessionId }),
+    // A malformed id (an old link, a tampered form) is refused here in plain
+    // words; the database would answer with a raw uuid parse error.
+    saveCertificate: certificate => (certificate?.id && !UUID_PATTERN.test(String(certificate.id))
+      ? refuse('CERTIFICATE_NOT_FOUND') : call('save_certificate', { p_certificate: certificate })),
+    removeCertificate: certificateId => (!UUID_PATTERN.test(String(certificateId ?? ''))
+      ? refuse('CERTIFICATE_NOT_FOUND') : call('remove_certificate', { p_certificate_id: certificateId })),
+    classDetail: sessionId => (!UUID_PATTERN.test(String(sessionId ?? '')) ? refuse('SESSION_NOT_FOUND') : call('class_detail', { p_session_id: sessionId })),
     saveSessionNote: (sessionId, body, expectedNoteId) => call('save_session_note', { p_session_id: sessionId, p_body: body, p_expected_note_id: expectedNoteId ?? null }),
     myNoticePreferences: () => call('my_notice_preferences'),
     setNoticePreferences: (email, push) => call('set_notice_preferences', { p_email: Boolean(email), p_push: Boolean(push) }),
+    setSmsPreference: sms => call('set_sms_preference', { p_sms: Boolean(sms) }),
   };
 }
 
@@ -241,6 +286,7 @@ export async function staffRoster() {
     const { supabase } = await import('./supabase.js');
     defaultClient = createStaffRosterClient((name, params) => supabase.rpc(name, params), {
       notifyPush: () => requestRosterPush(() => supabase.auth.getSession()),
+      sendTexts: () => requestRosterTexts(() => supabase.auth.getSession()),
     });
   }
   return defaultClient;
@@ -265,5 +311,29 @@ export async function requestRosterPush(getSession, fetcher = globalThis.fetch) 
     return { requested: true, ok: Boolean(response?.ok), status: response?.status ?? null };
   } catch {
     return { requested: false };
+  }
+}
+
+/**
+ * Asks the server to send the roster texts that are due (managers only).
+ * Never throws: resolves to `{ requested: true, ok, ...counts }` or
+ * `{ requested: false }`, with `error` in plain words when it did not work.
+ * The server checks the session and holds the Twilio credentials.
+ */
+export async function requestRosterTexts(getSession, fetcher = globalThis.fetch) {
+  try {
+    const { data } = await getSession();
+    const token = data?.session?.access_token;
+    if (!token || typeof fetcher !== 'function') return { requested: false, error: 'Please sign in again.' };
+    const response = await fetcher('/api/admin-publish-announcement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ action: 'send_roster_sms' }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) return { requested: true, ok: false, error: payload?.error || 'Texts could not be sent just now.' };
+    return { requested: true, ok: true, ...payload };
+  } catch {
+    return { requested: false, error: 'Texts could not be sent just now. Check the connection.' };
   }
 }

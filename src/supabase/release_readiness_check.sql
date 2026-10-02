@@ -73,7 +73,10 @@ with required (capability, migration) as (
     ('staff_roster', 'supabase/migrations/20261001010000_staff_roster.sql'),
     ('staff_roster_push_reliability', 'supabase/migrations/20261002010000_staff_roster_push_reliability.sql'),
     ('staff_roster_coach_dashboard', 'supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql'),
-    ('pt_booking', 'supabase/migrations/20261002030000_pt_booking.sql')
+    ('pt_booking', 'supabase/migrations/20261002030000_pt_booking.sql'),
+    ('staff_roster_part_month', 'supabase/migrations/20261002040000_staff_roster_part_month.sql'),
+    ('staff_roster_sms', 'supabase/migrations/20261002050000_staff_roster_sms.sql'),
+    ('staff_roster_fixes', 'supabase/migrations/20261002060000_staff_roster_fixes.sql')
 ), readiness as (
   select
     required.capability,
