@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { addDays, gymDateOf, toMs } from '@/lib/staffRoster/time';
 import { at, Banner, BUTTON, dateName, GHOST, INPUT, LABEL, monthName, Pill, Sheet } from './coachingUi';
+import CoachClassDetail from './CoachClassDetail';
 
 const ROLE = { lead: 'Lead', assistant: 'Assistant', shadow: 'Shadow' };
 
@@ -11,6 +12,7 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
   const [coverFor, setCoverFor] = useState(null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [detailFor, setDetailFor] = useState(null);
 
   const load = useCallback(async () => {
     try { setData(await client.myRoster(today, addDays(today, 62))); setError(null); } catch (failure) { setError(failure); }
@@ -60,6 +62,7 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
                     It was {at(item.published_start)}–{at(item.published_end)} on {dateName(gymDateOf(toMs(item.published_start)))}. {item.availability && !['PREFERRED', 'AVAILABLE', 'IF_NEEDED'].includes(item.availability) ? 'Your availability doesn’t cover the new time yet.' : ''}
                   </Banner>
                 )}
+                {!cancelled && <button type="button" className={GHOST} onClick={() => setDetailFor(item)} aria-label={`Who’s booked and session plan: ${item.title}, ${dateName(date)} ${at(item.start)}`}>Who’s booked &amp; plan</button>}
                 {!cancelled && toMs(item.start) > Date.now() && (
                   <div className="flex flex-wrap gap-2">
                     {item.changed_since_publish && <>
@@ -76,6 +79,7 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
         </section>
       ))}
 
+      {detailFor && <CoachClassDetail client={client} item={detailFor} notify={notify} onClose={() => setDetailFor(null)} />}
       <Sheet open={Boolean(coverFor)} title="Ask for cover" onClose={() => setCoverFor(null)}
         footer={<>
           <button type="button" className={BUTTON} disabled={busy} onClick={async () => { if (await act(() => client.requestCover(coverFor.assignment_id, reason), 'Cover requested. Other coaches can offer; the manager approves.')) setCoverFor(null); }}>Ask for cover</button>

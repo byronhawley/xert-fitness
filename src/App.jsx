@@ -29,6 +29,7 @@ const Events = lazy(() => import('./pages/Events'));
 const Booking = lazy(() => import('./pages/Booking'));
 const Account = lazy(() => import('./pages/Account'));
 const Coaching = lazy(() => import('./pages/Coaching'));
+const CoachInvite = lazy(() => import('./pages/CoachInvite'));
 const PTBooking = lazy(() => import('./pages/PTBooking'));
 const PTBookingManage = lazy(() => import('./pages/PTBookingManage'));
 const Login = lazy(() => import('./pages/Login'));
@@ -67,6 +68,8 @@ const AppRoutes = () => (
       <Route path="/booking" element={<Booking />} />
       <Route path="/account" element={<Account />} />
       <Route path="/coaching" element={<Coaching />} />
+      {/* Coach invite links: the token is in the #fragment, never sent to a server. */}
+      <Route path="/coach-invite" element={<CoachInvite />} />
       <Route path="/pt" element={<PTBooking />} />
       <Route path="/pt/booking" element={<PTBookingManage />} />
       <Route path="/login" element={<Login />} />

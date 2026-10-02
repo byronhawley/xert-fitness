@@ -57,3 +57,30 @@
 .staff-roster-diff-added { color: var(--state-success); }
 .staff-roster-diff-removed { color: var(--state-danger-text); text-decoration: line-through; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* "This month" step tracker. Status is always written out; colour only repeats it. */
+.staff-roster-guide { border: var(--nav-line-width) solid var(--border-strong); border-radius: var(--nav-radius-card); background: var(--surface-raised); padding: var(--space-control) var(--space-group); }
+.staff-roster-guide-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-inline); min-height: var(--control-height); cursor: pointer; list-style: none; }
+.staff-roster-guide-summary::-webkit-details-marker { display: none; }
+.staff-roster-guide-summary:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); border-radius: var(--radius-control); }
+.staff-roster-steps { display: grid; gap: var(--space-control); grid-template-columns: minmax(0, 1fr); margin-top: var(--space-control); }
+@media (min-width: 900px) { .staff-roster-steps { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.staff-roster-step { display: grid; align-content: start; gap: var(--space-inline); padding: var(--space-control); border: var(--nav-line-width) solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-overlay); min-width: 0; }
+.staff-roster-step > button { justify-self: start; max-width: 100%; white-space: normal; text-align: start; }
+.staff-roster-step[data-status="current"] { border-color: var(--accent-default); border-width: 2px; }
+.staff-roster-step[data-status="todo"] { opacity: 0.85; }
+.staff-roster-step-number { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 999px; border: var(--nav-line-width) solid var(--border-strong); font-size: var(--font-size-label); font-weight: 700; color: var(--text-primary); }
+.staff-roster-step[data-status="done"] .staff-roster-step-number { background: var(--state-success); border-color: var(--state-success); color: var(--text-inverse); }
+.staff-roster-step[data-status="current"] .staff-roster-step-number { background: var(--accent-default); border-color: var(--accent-default); color: var(--text-inverse); }
+.staff-roster-step-status { display: block; font-size: var(--font-size-label); color: var(--text-secondary); }
+.staff-roster-step[data-status="done"] .staff-roster-step-status { color: var(--state-success); }
+.staff-roster-step[data-attention="true"] .staff-roster-step-status { color: var(--state-warning); }
+
+/* Collapsed "More settings" groups. */
+.staff-roster-more { border: var(--nav-line-width) solid var(--border-hairline); border-radius: var(--nav-radius-card); background: var(--surface-raised); padding: 0 var(--space-group); }
+.staff-roster-more > summary { min-height: var(--control-height); padding-block: var(--space-control); cursor: pointer; display: flex; flex-direction: column; justify-content: center; }
+.staff-roster-more > summary:focus-visible { outline: var(--focus-width) solid var(--focus-ring); outline-offset: var(--focus-offset); }
+.staff-roster-more[open] > summary { border-bottom: var(--nav-line-width) solid var(--border-hairline); margin-bottom: var(--space-group); }
+.staff-roster-more[open] { padding-bottom: var(--space-group); }
+/* On a phone, finished steps shrink to their title so the next step is on screen. */
+@media (max-width: 899px) { .staff-roster-step[data-status="done"] > p, .staff-roster-step[data-status="done"] > button { display: none; } }

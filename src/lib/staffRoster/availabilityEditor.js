@@ -75,3 +75,89 @@ export function periodPhase(period) {
   if (period.deadline_passed && !period.reopened) return 'closed';
   return 'open';
 }
+
+/**
+ * The tap grid's rows: one cell per weekday and class start time on the
+ * timetable this month (not only the configured presets), each spanning the
+ * real duty of the classes that start then. Same shape as presetShortcuts,
+ * so a cell and a preset shortcut at the same time write the same window.
+ */
+export function classTimeShortcuts(sessions, presets = []) {
+  const minutes = new Set(presets.map(item => item.minute));
+  for (const session of sessions) {
+    if (session.status !== 'cancelled') minutes.add(gymMinuteOf(session.start));
+  }
+  return presetShortcuts(sessions, [...minutes].sort((a, b) => a - b).map(minute => ({ minute })))
+    .sort((a, b) => a.weekday - b.weekday || a.start - b.start);
+}
+
+/** Applies one answer to many cells at once (a whole day); null clears them. */
+export function setShortcuts(payload, shortcuts, status) {
+  return shortcuts.reduce((next, shortcut) => setShortcut(next, shortcut, status), payload);
+}
+
+const WHOLE_DAY = item => item.start === 0 && item.end === 1440;
+
+/** Dates marked "away all day" (a whole-day UNAVAILABLE exception). */
+export function awayDates(payload) {
+  return [...new Set((payload?.exceptions || []).filter(item => item.status === 'UNAVAILABLE' && WHOLE_DAY(item)).map(item => item.date))].sort();
+}
+
+/**
+ * Toggles "I'm away" for a date. Marking a day away replaces any other answer
+ * for that date (a part-day change would contradict it); un-marking removes
+ * only the whole-day away entry.
+ */
+export function toggleAwayDate(payload, date) {
+  const exceptions = payload.exceptions || [];
+  if (awayDates(payload).includes(date)) {
+    return { ...payload, exceptions: exceptions.filter(item => !(item.date === date && item.status === 'UNAVAILABLE' && WHOLE_DAY(item))) };
+  }
+  return { ...payload, noAvailability: false, exceptions: [...exceptions.filter(item => item.date !== date), { date, start: 0, end: 1440, status: 'UNAVAILABLE' }] };
+}
+
+const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+/**
+ * The plain review: how many of the month's classes this answer covers, in
+ * the coach's words. "Can do" counts every class they could be rostered on
+ * (preferred and if-needed included); "can't" counts classes they ruled out.
+ */
+export function availabilitySummary(payload, monthKey, sessions) {
+  const review = reviewClasses(payload, monthKey, sessions);
+  const count = status => review.rows.filter(row => row.status === status).length;
+  const prefer = count('PREFERRED');
+  const canDo = prefer + count('AVAILABLE') + review.ifNeeded;
+  const away = payload?.noAvailability ? 0 : awayDates(payload).length;
+  const total = review.rows.length;
+  let sentence;
+  if (payload?.noAvailability) sentence = `You can’t coach any classes in this month.`;
+  else if (total === 0) sentence = 'There are no classes on the timetable for this month yet.';
+  else {
+    const parts = [`You can do ${plural(canDo, 'class', 'classes')} of ${total}`];
+    if (prefer) parts.push(`prefer ${prefer}`);
+    if (review.unavailable) parts.push(`can’t do ${review.unavailable}`);
+    if (away) parts.push(`away ${plural(away, 'day')}`);
+    sentence = `${parts.join(', ')}.`;
+  }
+  return { ...review, total, canDo, prefer, cant: review.unavailable, away, sentence };
+}
+
+/**
+ * The coach's status for a month, always shown in words:
+ * not_open · not_started · draft · submitted · changed · reopened · missed.
+ * `editedHere` is true once the coach has changed something this visit
+ * (the autosaved draft exists even if `period.draft` is from before).
+ */
+export function availabilityStatus(period, { editedHere = false } = {}) {
+  const phase = periodPhase(period);
+  if (phase === 'none') return { key: 'none', label: 'Not asked yet', tone: 'neutral' };
+  if (phase === 'not_open') return { key: 'not_open', label: 'Not open yet', tone: 'neutral' };
+  const draft = Boolean(period.draft) || editedHere;
+  if (phase === 'closed') return period.submission ? { key: 'submitted', label: 'Submitted', tone: 'success' } : { key: 'missed', label: 'Deadline passed', tone: 'danger' };
+  if (period.reopened) return { key: 'reopened', label: draft ? 'Reopened · draft saved' : 'Reopened', tone: 'warning' };
+  if (period.submission && draft) return { key: 'changed', label: 'Changes not submitted', tone: 'warning' };
+  if (period.submission) return { key: 'submitted', label: 'Submitted', tone: 'success' };
+  if (draft) return { key: 'draft', label: 'Draft saved', tone: 'info' };
+  return { key: 'not_started', label: 'Not started', tone: 'warning' };
+}

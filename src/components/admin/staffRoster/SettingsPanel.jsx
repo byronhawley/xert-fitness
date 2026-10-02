@@ -10,7 +10,7 @@ import StaffingEditor from './StaffingEditor';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-function GeneralSettings({ settings, month, busy, onMutate }) {
+function GeneralSettings({ settings, month, busy, onMutate, children = null }) {
   const [presets, setPresets] = useState(() => (settings.class_time_presets || []).map(item => clockLabel(item.minute)));
   const [cycle, setCycle] = useState(() => normalizeCycle(settings.cycle));
   const [reminders, setReminders] = useState(() => normalizeReminders(settings.reminders || DEFAULT_REMINDERS));
@@ -19,7 +19,7 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
   const presetError = parsed.some(value => value === null || value >= 1440) ? 'Use 24-hour times like 05:15 or 17:30.'
     : new Set(parsed).size !== parsed.length ? 'Each preset must be a different time.' : null;
   let example = null;
-  try { const dates = defaultPeriodDates(month, cycle); example = `${monthLabel(month)}: opens ${dayLabel(dates.opensOn)}, due ${dayLabel(dates.dueOn)}, aim to publish by ${dayLabel(dates.publishTargetOn)}.`; } catch (error) { example = error.message; }
+  try { const dates = defaultPeriodDates(month, cycle); example = `For ${monthLabel(month)}: ask coaches ${dayLabel(dates.opensOn)}, due by ${dayLabel(dates.dueOn)}, aim to publish by ${dayLabel(dates.publishTargetOn)}.`; } catch (error) { example = error.message; }
   const save = (patch, message) => onMutate(client => client.updateSettings(patch, settings.version), message);
   const switchState = rosterSwitchState(settings);
   const cycleField = (key, label) => (
@@ -29,7 +29,7 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
   return (
     <div className="space-y-8">
       <section className="space-y-3" aria-labelledby="roster-switch">
-        <h3 id="roster-switch" className={ADMIN_TEXT.sectionHeading}>Coach roster</h3>
+        <h3 id="roster-switch" className={ADMIN_TEXT.sectionHeading}>Coach screens</h3>
         <Notice tone={settings.enabled ? 'success' : 'warning'} title={settings.enabled ? 'On — coaches can see their screens' : 'Off — only managers can see the roster'}
           action={<AdminButton variant={settings.enabled ? 'danger' : 'primary'} disabled={busy || (settings.enabled && !switchState.canSwitchOff)} aria-describedby={switchState.blockReason ? 'roster-switch-order' : undefined} onClick={() => save({ enabled: !settings.enabled }, settings.enabled ? 'Coach roster switched off' : 'Coach roster switched on')}>{settings.enabled ? 'Switch off' : 'Switch on'}</AdminButton>}>
           While it’s off, coaches can’t open availability or roster screens and class changes send no roster notices or phone pushes. Turning it off never deletes anything, and on its own it does not remove coach names from the public timetable.
@@ -42,9 +42,12 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
         )}
       </section>
 
+      <details className="staff-roster-more" open={Boolean(switchState.blockReason || switchState.namesStillShowing) || undefined}>
+        <summary><span className="font-body text-base font-semibold text-xert-offwhite">More settings</span><span className="font-body text-xs text-xert-pale/60">Usual monthly dates, reminders, rules, staffing by class type, repeating classes. Most gyms never change these.</span></summary>
+        <div className="space-y-8">
       <section className="space-y-3" aria-labelledby="roster-presets">
-        <h3 id="roster-presets" className={ADMIN_TEXT.sectionHeading}>Class-time shortcuts</h3>
-        <p className={ADMIN_TEXT.lede}>Shown to coaches as quick picks when they give availability. Each covers the real duty time of the classes at that time, so coaches can’t tick a time that falls short. Changing these never moves a class.</p>
+        <h3 id="roster-presets" className={ADMIN_TEXT.sectionHeading}>Extra class-time shortcuts (optional)</h3>
+        <p className={ADMIN_TEXT.lede}>Coaches already see every class time on the timetable when they give availability, so you don’t need these. They’re kept for older versions of the app. Changing them never moves a class.</p>
         <div className="flex flex-wrap gap-2">
           {presets.map((value, index) => (
             <span key={`${value}-${index}`} className="inline-flex items-center gap-1">
@@ -63,27 +66,27 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
       </section>
 
       <section className="space-y-3" aria-labelledby="roster-cycle">
-        <h3 id="roster-cycle" className={ADMIN_TEXT.sectionHeading}>Planning cycle</h3>
-        <p className={ADMIN_TEXT.lede}>Months before the roster month, and the day of that month.</p>
+        <h3 id="roster-cycle" className={ADMIN_TEXT.sectionHeading}>Usual monthly dates</h3>
+        <p className={ADMIN_TEXT.lede}>The dates offered when you ask coaches for a month’s availability, counted in months before that month. You can always change them when you ask.</p>
         <div className="grid gap-3 sm:grid-cols-3">
-          {cycleField('openMonthsBefore', 'Open: months before')}{cycleField('dueMonthsBefore', 'Due: months before')}{cycleField('publishMonthsBefore', 'Publish target: months before')}
-          {cycleField('openDay', 'Open: day')}{cycleField('dueDay', 'Due: day')}{cycleField('publishDay', 'Publish target: day')}
+          {cycleField('openMonthsBefore', 'Ask coaches: months before')}{cycleField('dueMonthsBefore', 'Due by: months before')}{cycleField('publishMonthsBefore', 'Aim to publish by: months before')}
+          {cycleField('openDay', 'Ask coaches: on day')}{cycleField('dueDay', 'Due by: on day')}{cycleField('publishDay', 'Aim to publish by: on day')}
         </div>
         <p className="font-body text-sm text-xert-pale/70">{example}</p>
-        <AdminButton disabled={busy} onClick={() => save({ cycle }, 'Planning cycle saved')}>Save cycle</AdminButton>
+        <AdminButton disabled={busy} onClick={() => save({ cycle }, 'Usual dates saved')}>Save usual dates</AdminButton>
       </section>
 
       <section className="space-y-3" aria-labelledby="roster-reminders">
         <h3 id="roster-reminders" className={ADMIN_TEXT.sectionHeading}>Reminders</h3>
         <div className="grid gap-2">
-          {[['onOpen', 'When availability opens'], ['onDue', 'On the due date'], ['overdueSummary', 'Tell managers who is overdue']].map(([key, label]) => (
+          {[['onOpen', 'Tell coaches when you ask them'], ['onDue', 'Remind coaches on the due date'], ['overdueSummary', 'Tell managers who hasn’t answered after the due date']].map(([key, label]) => (
             <label key={key} className="flex items-center gap-2 font-body text-sm text-xert-pale min-h-11">
               <input type="checkbox" checked={Boolean(reminders[key])} onChange={event => setReminders(current => ({ ...current, [key]: event.target.checked }))} /> {label}
             </label>
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <AdminFormField label="Days before due" helper="Comma separated, e.g. 3, 1"><input value={reminders.daysBeforeDue.join(', ')} onChange={event => setReminders(current => ({ ...current, daysBeforeDue: event.target.value.split(',').map(item => Number(item.trim())).filter(Number.isInteger) }))} /></AdminFormField>
+          <AdminFormField label="Also remind this many days before it’s due" helper="Comma separated, e.g. 3, 1"><input value={reminders.daysBeforeDue.join(', ')} onChange={event => setReminders(current => ({ ...current, daysBeforeDue: event.target.value.split(',').map(item => Number(item.trim())).filter(Number.isInteger) }))} /></AdminFormField>
           <AdminFormField label="Send at" helper="Gym time, between 06:00 and 20:00"><input value={clockLabel(reminders.sendMinute)} onChange={event => { const minute = parseClock(event.target.value); if (minute !== null) setReminders(current => ({ ...current, sendMinute: minute })); }} /></AdminFormField>
         </div>
         <AdminButton disabled={busy} onClick={() => save({ reminders: normalizeReminders(reminders) }, 'Reminders saved')}>Save reminders</AdminButton>
@@ -93,7 +96,7 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
         <h3 id="roster-rules" className={ADMIN_TEXT.sectionHeading}>Rules and notices</h3>
         <label className="flex items-center gap-2 font-body text-sm text-xert-pale min-h-11">
           <input type="checkbox" checked={settings.allow_if_needed_fallback !== false} disabled={busy} onChange={event => save({ allow_if_needed_fallback: event.target.checked }, 'Saved')} />
-          Allow “if needed” coaches to be assigned
+          Let Suggest use coaches who said “if needed” when nobody else is free
         </label>
         <label className="flex items-center gap-2 font-body text-sm text-xert-pale min-h-11">
           <input type="checkbox" checked={Boolean(settings.email_notices_enabled)} disabled={busy} onChange={event => save({ email_notices_enabled: event.target.checked }, 'Saved')} />
@@ -108,6 +111,9 @@ function GeneralSettings({ settings, month, busy, onMutate }) {
         </label>
         <p className="font-body text-xs text-xert-pale/55">Only coaches linked to a published Coaches page profile are named, using that profile’s name, from the published roster. A coach name typed or edited on a class by hand is never replaced or removed. Turning this off removes only the names the roster put on upcoming classes; past classes keep theirs.</p>
       </section>
+      {children}
+        </div>
+      </details>
     </div>
   );
 }
@@ -118,8 +124,8 @@ function ClassTypeStaffing({ snapshot, busy, onSaveStaffing }) {
   const [editing, setEditing] = useState(null);
   return (
     <section className="space-y-3" aria-labelledby="roster-type-staffing">
-      <h3 id="roster-type-staffing" className={ADMIN_TEXT.sectionHeading}>Staffing by class type</h3>
-      <p className={ADMIN_TEXT.lede}>Applies to every class of that type unless a class has its own. Without a setting, a class needs one lead coach.</p>
+      <h3 id="roster-type-staffing" className={ADMIN_TEXT.sectionHeading}>Coaches needed by class type</h3>
+      <p className={ADMIN_TEXT.lede}>How many coaches each kind of class needs, and setup or pack-down time. Applies to every class of that type unless a class has its own. Without a setting, a class needs one lead coach.</p>
       <ul className="staff-roster-list">
         {types.map(type => {
           const row = rows.find(item => item.class_type === type);
@@ -232,9 +238,10 @@ export default function SettingsPanel({ data, month, today, onMutate, onSaveStaf
   const { snapshot, busy } = data;
   return (
     <div className="space-y-10">
-      <GeneralSettings key={snapshot.settings.version} settings={snapshot.settings} month={month} busy={busy} onMutate={onMutate} />
-      <ClassTypeStaffing snapshot={snapshot} busy={busy} onSaveStaffing={onSaveStaffing} />
-      <SeriesPanel snapshot={snapshot} month={month} today={today} busy={busy} onMutate={onMutate} />
+      <GeneralSettings key={snapshot.settings.version} settings={snapshot.settings} month={month} busy={busy} onMutate={onMutate}>
+        <ClassTypeStaffing snapshot={snapshot} busy={busy} onSaveStaffing={onSaveStaffing} />
+        <SeriesPanel snapshot={snapshot} month={month} today={today} busy={busy} onMutate={onMutate} />
+      </GeneralSettings>
     </div>
   );
 }

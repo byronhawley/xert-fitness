@@ -15,6 +15,7 @@ import RequestsPanel from './RequestsPanel';
 import CoachesPanel from './CoachesPanel';
 import SettingsPanel from './SettingsPanel';
 import ActivityPanel from './ActivityPanel';
+import MonthGuide from './MonthGuide';
 import './staffRoster.css';
 
 const TABS = [
@@ -48,6 +49,10 @@ export default function StaffRosterWorkspace({ client = null }) {
 
   const data = useRosterMonth(month, { client });
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // A one-shot request from the month guide ("open Suggest", "open Add a
+  // coach"), handed to the panel it opens and cleared once it has acted.
+  const [intent, setIntent] = useState(null);
+  const clearIntent = useCallback(() => setIntent(null), []);
 
   const { mutate, client: rpcClient, reload: reloadMonth } = data;
   const onMutate = useCallback(async (action, message, { reload = true } = {}) => {
@@ -95,9 +100,19 @@ export default function StaffRosterWorkspace({ client = null }) {
 
   const snapshot = data.snapshot;
   const ready = snapshot && data.draftCtx;
+  const onGuideAction = useCallback(kind => {
+    const go = (nextTab, nextIntent = null) => { setFilters({ tab: nextTab, focus: '' }); setIntent(nextIntent); };
+    if (kind === 'add-coach') go('coaches', 'add-coach');
+    else if (kind === 'coaches') go('coaches');
+    else if (kind === 'availability') go('availability');
+    else if (kind === 'roster') go('roster');
+    else if (kind === 'suggest') go('roster', 'suggest');
+    else if (kind === 'publish') go('roster', 'publish');
+    else if (kind === 'switch-on') onMutate(rpc => rpc.updateSettings({ enabled: true }, snapshot.settings.version), 'Coach screens switched on. Coaches can now sign in and see their roster pages.');
+  }, [setFilters, onMutate, snapshot]);
   return (
     <div className={`${ADMIN_PAGE} space-y-5`}>
-      <AdminPageHeader eyebrow="Classes" title="Coach roster" description="Who is coaching each class. Coaches give availability; you build and publish the roster.">
+      <AdminPageHeader eyebrow="Classes" title="Coach roster" description="Who coaches each class. Coaches tell you when they can work, you build the roster, then publish it so they can see it. Follow the steps below.">
         <div className="flex items-center gap-1" role="group" aria-label="Roster month">
           <AdminButton variant="ghost" aria-label="Previous month" onClick={() => setFilters({ month: addMonths(month, -1), date: '', session: '' })}>‹</AdminButton>
           <span className="font-body text-sm font-semibold text-xert-offwhite min-w-[9rem] text-center" aria-live="polite">{monthLabel(month)}</span>
@@ -105,23 +120,20 @@ export default function StaffRosterWorkspace({ client = null }) {
         </div>
       </AdminPageHeader>
 
+      {ready && <MonthGuide snapshot={snapshot} ctx={data.draftCtx} today={today} month={month} busy={data.busy} onAction={onGuideAction} />}
+
       <AdminSegmented label="Roster sections" value={tab} onValueChange={value => setFilters({ tab: value, focus: '' })} options={TABS} />
 
-      {snapshot && !snapshot.settings?.enabled && (
-        <Notice tone="warning" title="Coaches can’t see the roster yet" action={tab !== 'settings' ? <AdminButton variant="ghost" onClick={() => setFilters({ tab: 'settings' })}>Settings</AdminButton> : null}>
-          You can set things up and plan. Switch it on in Settings when you’re ready for coaches to give availability.
-        </Notice>
-      )}
       {data.error && !snapshot && <AdminLoadError message={data.error.message} onRetry={data.reload} />}
       {data.error && snapshot && <Notice tone="danger" title="Couldn’t refresh" action={<AdminButton variant="ghost" onClick={data.reload}>Try again</AdminButton>}>{data.error.message} Showing the last loaded version.</Notice>}
       {!ready && !data.error && <div className="space-y-3"><AdminSkeleton variant="metric" label="Loading roster" /><AdminSkeleton variant="editor" decorative /></div>}
 
       {ready && tab === 'roster' && <RosterBoard month={month} today={today} data={data} settings={snapshot.settings} filters={{ ...filters, date: isDateKey(filters.date) ? filters.date : '' }} setFilters={setFilters}
-        onApply={onApply} onSaveStaffing={onSaveStaffing} onPublish={onPublish} onDiscard={() => setConfirmDiscard(true)} onNavigateTarget={navigateTarget} />}
-      {ready && tab === 'availability' && <AvailabilityPanel month={month} today={today} data={data} settings={snapshot.settings} focusStaffId={filters.focus} onMutate={onMutate} />}
+        onApply={onApply} onSaveStaffing={onSaveStaffing} onPublish={onPublish} onDiscard={() => setConfirmDiscard(true)} onNavigateTarget={navigateTarget} intent={intent} onIntentDone={clearIntent} />}
+      {ready && tab === 'availability' && <AvailabilityPanel month={month} today={today} data={data} settings={snapshot.settings} focusStaffId={filters.focus} onMutate={onMutate} onAddCoach={() => onGuideAction('add-coach')} />}
       {ready && tab === 'requests' && <RequestsPanel data={data} focus={filters.focus} onMutate={onMutate}
         onShowSession={session => navigateTarget({ type: 'session', id: session.id }, session.start)} />}
-      {ready && tab === 'coaches' && <CoachesPanel data={data} focusStaffId={filters.focus} onMutate={onMutate} />}
+      {ready && tab === 'coaches' && <CoachesPanel data={data} focusStaffId={filters.focus} onMutate={onMutate} intent={intent} onIntentDone={clearIntent} />}
       {ready && tab === 'settings' && <SettingsPanel data={data} month={month} today={today} onMutate={onMutate} onSaveStaffing={onSaveStaffing} />}
       {ready && tab === 'activity' && <ActivityPanel month={month} data={data} onMutate={onMutate} />}
 

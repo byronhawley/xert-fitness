@@ -7,6 +7,7 @@ import { normalizeStaffing } from '@/lib/staffRoster/duty';
 import { ROLE_LABELS, sessionLabel, staffName, timeLabel } from './rosterFormat';
 import { AvailabilityBadge, ProblemList, Tone } from './rosterBits';
 import StaffingEditor from './StaffingEditor';
+import { SessionPlanPeek } from './CoachRecords';
 
 function workload(ctx, staffId, session) {
   const date = gymDateOf(session.start);
@@ -47,7 +48,7 @@ function Candidate({ ctx, session, entry, onAssign = null, busy = false, actionL
  * Everything about one staffing position: who holds it, who else could, and
  * why everyone else can't. Assigning re-checks on the server.
  */
-export default function AssignmentDrawer({ open, onOpenChange, ctx, session, slotKey, readOnly, busy, onApply, onStartMove, staffingVersion, onSaveStaffing }) {
+export default function AssignmentDrawer({ open, onOpenChange, ctx, session, slotKey, readOnly, busy, onApply, onStartMove, staffingVersion, onSaveStaffing, client = null }) {
   const [showIneligible, setShowIneligible] = useState(false);
   const [editingStaffing, setEditingStaffing] = useState(false);
   const staffing = session ? normalizeStaffing(session.staffing) : null;
@@ -108,6 +109,8 @@ export default function AssignmentDrawer({ open, onOpenChange, ctx, session, slo
             </section>
           </>
         )}
+
+        <SessionPlanPeek client={client} sessionId={session.id} />
 
         {!readOnly && onSaveStaffing && (
           <section aria-labelledby="roster-staffing">

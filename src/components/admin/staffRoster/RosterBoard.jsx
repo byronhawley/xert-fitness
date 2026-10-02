@@ -69,6 +69,8 @@ function SessionCard({ ctx, session, coverage, shortage, focused, selected, onTo
         )}
       </div>
       {!live && <Tone tone="neutral">{session.status === 'cancelled' ? 'Cancelled' : session.status}</Tone>}
+      {live && !past && session.inMonth && coverage?.status === 'gap' && <Tone tone="danger">Needs a coach</Tone>}
+      {shortage && live && !past && <Tone tone="warning">Not enough coaches free</Tone>}
       {session.addedSinceSubmission?.size > 0 && live && !past && <Tone tone="warning">Added after availability was given</Tone>}
       {live && staffing.slots.map(slot => (
         <SlotRow key={slot.key} ctx={ctx} session={session} slot={slot} assignment={filled.find(item => item.slotKey === slot.key) || null}
@@ -82,7 +84,7 @@ function SessionCard({ ctx, session, coverage, shortage, focused, selected, onTo
  * The manager's roster: week (default), month or day, with coverage drawn on
  * every class, Needs Attention alongside, and every edit going to the draft.
  */
-export default function RosterBoard({ month, today, data, settings, filters, setFilters, onApply, onSaveStaffing, onPublish, onDiscard, onNavigateTarget }) {
+export default function RosterBoard({ month, today, data, settings, filters, setFilters, onApply, onSaveStaffing, onPublish, onDiscard, onNavigateTarget, intent = null, onIntentDone = () => {} }) {
   const { snapshot, draftCtx: ctx, busy } = data;
   const view = filters.view || 'week';
   const anchor = filters.date && filters.date.slice(0, 7) === month ? filters.date
@@ -91,6 +93,8 @@ export default function RosterBoard({ month, today, data, settings, filters, set
   const [moving, setMoving] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [suggestOpen, setSuggestOpen] = useState(false);
+  // The month guide's "Fill open spots" suggests for the whole month, whatever view is showing.
+  const [suggestWholeMonth, setSuggestWholeMonth] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [copyPreview, setCopyPreview] = useState(null);
 
@@ -123,7 +127,15 @@ export default function RosterBoard({ month, today, data, settings, filters, set
   const attention = useMemo(() => needsAttention(snapshot, { today, now: ctx.now }), [snapshot, today, ctx.now]);
   const plannable = session => session.inMonth && session.start > ctx.now && LIVE_SESSION_STATUSES.includes(session.status);
   const viewSessionIds = dates.flatMap(date => sessionsByDate.get(date) || []).filter(plannable).map(session => session.id);
-  const suggestIds = selected.size ? [...selected] : viewSessionIds;
+  const monthPlannableIds = useMemo(() => [...ctx.sessions.values()].filter(session => session.inMonth && session.start > ctx.now && LIVE_SESSION_STATUSES.includes(session.status)).map(session => session.id), [ctx]);
+  const suggestIds = suggestWholeMonth ? monthPlannableIds : selected.size ? [...selected] : viewSessionIds;
+
+  useEffect(() => {
+    if (!intent) return;
+    if (intent === 'suggest' && monthPlannableIds.length) { setSuggestWholeMonth(true); setSuggestOpen(true); }
+    if (intent === 'publish' && snapshot.draft) setPublishOpen(true);
+    onIntentDone();
+  }, [intent, monthPlannableIds.length, snapshot.draft, onIntentDone]);
 
   const open = (session, slot) => setDrawer({ sessionId: session.id, slotKey: slot.key });
   const drop = (assignmentId, session, slot) => {
@@ -156,13 +168,13 @@ export default function RosterBoard({ month, today, data, settings, filters, set
   return (
     <div className="space-y-4">
       <Notice tone={draft ? 'warning' : published ? 'success' : 'info'}
-        title={draft ? `Draft ${draft.number} — coaches can’t see these changes yet` : published ? `Published version ${published.number} is live` : 'Nothing published for this month yet'}
+        title={draft ? 'Draft — coaches can’t see these changes yet' : published ? 'Published — coaches can see this roster' : 'Nothing published for this month yet'}
         action={<div className="flex flex-wrap gap-2">
           {draft && <AdminButton variant="ghost" disabled={busy} onClick={onDiscard}>Discard draft</AdminButton>}
-          <AdminButton disabled={busy || !draft} onClick={() => setPublishOpen(true)}>Review & publish</AdminButton>
+          <AdminButton disabled={busy || !draft} onClick={() => setPublishOpen(true)} aria-describedby={!draft ? 'roster-publish-why' : undefined}>Review & publish</AdminButton>
         </div>}>
-        {draft ? (published ? `Version ${published.number} stays live until you publish.` : 'Assign coaches, then publish when ready.') : published ? 'Any change starts a new draft. The published roster stays as it is until you publish again.' : 'Start by assigning a coach, or use Suggest draft.'}
-        {published?.gap_count > 0 && <span className="block text-status-warning-200">Published with {published.gap_count} open {published.gap_count === 1 ? 'position' : 'positions'}{published.gap_reason ? `: “${published.gap_reason}”` : ''}.</span>}
+        <span id="roster-publish-why">{draft ? (published ? 'Coaches still see the last published roster until you publish these changes.' : 'Choose coaches for each class (or use Suggest coaches), then publish so coaches can see it.') : published ? 'Any change you make is kept as a draft. Coaches keep seeing this roster until you publish again.' : 'Click “Choose coach” on a class, or use Suggest coaches to fill the month from coaches’ answers.'}</span>
+        {published?.gap_count > 0 && <span className="block text-status-warning-200">Published with {published.gap_count} empty {published.gap_count === 1 ? 'spot' : 'spots'}{published.gap_reason ? `: “${published.gap_reason}”` : ''}.</span>}
       </Notice>
 
       <div className="staff-roster-toolbar">
@@ -183,22 +195,22 @@ export default function RosterBoard({ month, today, data, settings, filters, set
         </label>
         <div className="flex flex-wrap gap-2 ms-auto">
           {view === 'week' && <AdminButton variant="ghost" disabled={busy} onClick={runCopyWeek}>Copy last week</AdminButton>}
-          <AdminButton variant="ghost" disabled={busy || suggestIds.length === 0} onClick={() => setSuggestOpen(true)}>Suggest draft{selected.size ? ` (${selected.size} selected)` : ''}</AdminButton>
+          <AdminButton variant="ghost" disabled={busy || suggestIds.length === 0} onClick={() => { setSuggestWholeMonth(false); setSuggestOpen(true); }}>Suggest coaches{selected.size ? ` (${selected.size} selected)` : ''}</AdminButton>
           {selected.size > 0 && <AdminButton variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</AdminButton>}
         </div>
       </div>
 
-      {moving && <Notice tone="info" title={`Moving ${staffName(ctx, moving.staffId)}`} action={<AdminButton variant="ghost" onClick={() => setMoving(null)}>Cancel move</AdminButton>}>Choose “Place here” on any open position, or press Escape to cancel. Rules are checked when you place them.</Notice>}
+      {moving && <Notice tone="info" title={`Moving ${staffName(ctx, moving.staffId)}`} action={<AdminButton variant="ghost" onClick={() => setMoving(null)}>Cancel move</AdminButton>}>Choose “Place here” on any empty spot, or press Escape to cancel. Rules are checked when you place them.</Notice>}
 
       <div className="staff-roster-layout">
         <div className="min-w-0 space-y-3">
           <p className={ADMIN_TEXT.lede} aria-live="polite">
-            {coverage.totals.filledPositions} of {coverage.totals.requiredPositions} required positions filled across {coverage.totals.sessions} classes in {monthLabel(month)}.
-            {coverage.dependencies.length > 0 && ` ${coverage.dependencies.length} depend on a single coach.`}
+            {coverage.totals.filledPositions} of {coverage.totals.requiredPositions} coaching spots filled across {coverage.totals.sessions} classes in {monthLabel(month)}.
+            {coverage.dependencies.length > 0 && ` ${coverage.dependencies.length} ${coverage.dependencies.length === 1 ? 'class has' : 'classes have'} only one coach who can take ${coverage.dependencies.length === 1 ? 'it' : 'them'}.`}
           </p>
           {coverage.shortages.length > 0 && (
             <Notice tone="warning" title={`${coverage.shortages.length} time${coverage.shortages.length === 1 ? '' : 's'} with more classes than available coaches`}>
-              <ul>{coverage.shortages.slice(0, 5).map(item => <li key={item.sessionIds.join(',')}>{dayLabel(gymDateOf(item.start))} {timeLabel(item.start)}: {item.demand} positions, at most {item.possible} can be covered by the coaches available.</li>)}</ul>
+              <ul>{coverage.shortages.slice(0, 5).map(item => <li key={item.sessionIds.join(',')}>{dayLabel(gymDateOf(item.start))} {timeLabel(item.start)}: {item.demand} spots, but only {item.possible} can be filled by the coaches who said they’re free.</li>)}</ul>
             </Notice>
           )}
 
@@ -249,7 +261,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
 
         <aside aria-labelledby="roster-attention" className="space-y-2">
           <h3 id="roster-attention" className={ADMIN_TEXT.sectionHeading}>Needs attention ({attention.length})</h3>
-          {attention.length === 0 && <p className="font-body text-sm text-xert-pale/60">Nothing needs you for {monthLabel(month)}.</p>}
+          {attention.length === 0 && <p className="font-body text-sm text-xert-pale/60">Nothing needs you for {monthLabel(month)}. Requests, gaps and missing answers show here.</p>}
           <ul className="space-y-2">
             {attention.slice(0, 40).map((item, index) => (
               <li key={`${item.kind}-${item.target.id}-${index}`}>
@@ -265,15 +277,15 @@ export default function RosterBoard({ month, today, data, settings, filters, set
       </div>
 
       <AssignmentDrawer open={Boolean(drawerSession)} onOpenChange={value => { if (!value) setDrawer(null); }} ctx={ctx} session={drawerSession} slotKey={drawer?.slotKey}
-        readOnly={drawerReadOnly} busy={busy}
+        readOnly={drawerReadOnly} busy={busy} client={data.client}
         staffingVersion={drawerSession ? snapshot.session_staffing_versions?.[drawerSession.id] ?? 0 : 0}
         onApply={async (changes, message) => { if (await onApply(changes, message)) setDrawer(null); }}
         onStartMove={assignment => { setMoving(assignment); setDrawer(null); }}
         onSaveStaffing={onSaveStaffing} />
-      <SuggestDialog open={suggestOpen} onOpenChange={setSuggestOpen} ctx={ctx} sessionIds={suggestIds}
-        scopeLabel={selected.size ? `${selected.size} selected classes` : view === 'month' ? monthLabel(month) : view === 'week' ? `the week of ${dayLabel(weekStartOf(anchor))}` : dayLabel(anchor)}
+      <SuggestDialog open={suggestOpen} onOpenChange={value => { setSuggestOpen(value); if (!value) setSuggestWholeMonth(false); }} ctx={ctx} sessionIds={suggestIds}
+        scopeLabel={suggestWholeMonth ? `all of ${monthLabel(month)}` : selected.size ? `${selected.size} selected classes` : view === 'month' ? monthLabel(month) : view === 'week' ? `the week of ${dayLabel(weekStartOf(anchor))}` : dayLabel(anchor)}
         allowIfNeeded={settings?.allow_if_needed_fallback !== false} busy={busy}
-        onApply={async changes => { if (await onApply(changes, 'Suggestion added to the draft')) { setSuggestOpen(false); setSelected(new Set()); } }} />
+        onApply={async changes => { if (await onApply(changes, 'Suggested coaches added to the draft. Check them, then publish.')) { setSuggestOpen(false); setSuggestWholeMonth(false); setSelected(new Set()); } }} />
       {publishOpen && <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} month={month} snapshot={snapshot} ctx={ctx} busy={busy}
         onPublish={async reason => { const result = await onPublish(reason); if (result?.ok) setPublishOpen(false); return result; }} />}
       {copyPreview && (

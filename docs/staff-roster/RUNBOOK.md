@@ -10,11 +10,13 @@ separate go-ahead.
 | Piece | Where |
 | --- | --- |
 | Schema, rules, permissions | `supabase/migrations/20261001010000_staff_roster.sql` (additive; **applied in production 2026-10-01, never edit**) |
-| Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; not yet applied) |
+| Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; applied in production 2026-10-02 01:46 UTC) |
+| Coach invite links + coach dashboard | `supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql` (forward migration, additive, idempotent; not yet applied) |
 | Push scheduler (not a migration) | `docs/staff-roster/push-dispatch-schedule.sql` (pg_cron + pg_net + Vault; activate only with approval) |
 | Manager screens | Command Centre → Classes → **Coach roster** (`/admin/roster`) |
-| Coach screens | `/coaching` (website and the app's web views; staff link, no membership needed) |
-| Release gate | `staff_roster` and `staff_roster_push_reliability` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
+| Coach screens | `/coaching` (website and the app's web views; staff link, no membership needed). Opens on **Home** (setup checklist, next classes, shortcuts); older `?tab=` links open the same tabs as before |
+| Coach invite page | `/coach-invite#token=…` (public route; the token is in the URL fragment, so it never reaches a server log) |
+| Release gate | `staff_roster`, `staff_roster_push_reliability` and `staff_roster_coach_dashboard` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
 | Full removal script | `docs/staff-roster/rollback.sql` (manual, not a migration) |
 
 The migration does not change bookings, waitlists, attendance, payments,
@@ -72,6 +74,27 @@ approval, switch the roster on.
 
 Until it is switched on, the feature is invisible to coaches and sends nothing.
 
+### 1b. Apply the coach invites migration (needs approval)
+
+`20261002020000_staff_roster_coach_dashboard.sql` goes on top of `20261002010000`,
+the same way: SQL editor only, whole file at once, backup first. It starts with
+`set local lock_timeout = '5s'`, is idempotent, and records
+`staff_roster_coach_dashboard` as its **last** statement. It adds empty
+tables (`staff_roster_invites`, `staff_roster_invite_attempts`,
+`staff_profile_drafts`, `staff_certificates`, `staff_session_notes`,
+`staff_notice_preferences`; RLS on, direct access revoked) and their
+`staff_roster_*` functions; a private storage bucket `staff-certificates` with
+owner/manager policies, and one insert policy on `site-images` limited to
+`staff-profiles/<the coach's own id>/`. It replaces `staff_roster_notify` with
+the same function plus the coach's email preference, and adds a before-insert
+trigger on `staff_notification_push_deliveries` that records push as
+`skipped` (`PUSH_OFF_BY_RECIPIENT`) for anyone who switched push off. It
+changes no existing row. If the storage statements are refused in the SQL
+editor (they need the usual Supabase owner rights), the whole file rolls back. Apply it **before** deploying the web release or building the app from
+it: both gates require the capability.
+Check: `select capability from public.xert_schema_capabilities where capability like 'staff_roster%';`
+returns three rows.
+
 ## 2. Set up and switch on
 
 All in **Coach roster → Settings** and **Coaches**:
@@ -99,6 +122,59 @@ All in **Coach roster → Settings** and **Coaches**:
      by hand. Turning it back on derives names from the roster published now.
    - Press **Switch on** at the top of Settings.
 3. **Availability** tab: open the month. Coaches get an inbox notice.
+
+### What coaches get on /coaching
+
+- **Home**: setup checklist (sign-in, availability, roster seen, notices,
+  first aid/CPR on file, website profile), next classes with the next class's
+  headcount, hours coached this and last month (from the published roster,
+  including set-up and pack-down; labelled as a summary, not payroll), and
+  shortcuts.
+- **My classes → Who's booked & plan**: for classes they are on in a
+  *published* roster only: booked / capacity, requests, waitlist, and booked
+  members as first name + last initial (no contact or health details); a
+  session plan that the coaches on that class and managers can read and edit,
+  with every earlier version kept. Managers see the plan in the position
+  drawer on the roster board.
+- **Profile**: website profile draft → *Send for approval* → a manager
+  approves it in **Coaches** (it is copied onto the linked website coach
+  profile, or a new published one is created and linked; an existing hidden
+  profile stays hidden). Certificates (type, number, dates, optional private
+  file). Notice settings: in-app always; email and phone push can be switched
+  off (the roster-wide email switch in Settings still wins).
+- **Certificate reminders**: coaches get a notice 60, 30 and 7 days before and
+  on expiry (once each); managers get one daily summary while anything is
+  expired or within 30 days. They run with **Send due reminders now** and, if
+  scheduled, with
+  `select cron.schedule('staff-roster-certificate-reminders', '15 * * * *', $$select public.staff_roster_run_certificate_reminders()$$);`
+  (needs approval; nothing is sent while the roster is off).
+  **Coaches** shows expiring/expired certificates and active coaches with no
+  current first aid or CPR.
+
+### Onboarding a coach with an invite link
+
+Instead of searching for their account, a manager can send the coach a link:
+
+1. **Coaches** tab → **Invite** on a coach with no sign-in (add the coach
+   first if needed). Optionally type an email address to send the link to.
+2. **Create invite link**, then **Copy link** and send it however you like.
+   The link is shown once: only its SHA-256 fingerprint is stored. If an
+   email address was given, the link is queued through `queue_email`
+   (type `staff_invite`), and the drawer says honestly whether it was queued
+   or skipped (for example when email is switched off in Email settings).
+3. The coach opens the link, logs in or creates an account (they come back to
+   the invite automatically), checks the coach name and presses **Accept
+   invite**. Their sign-in is linked to that coach and the coach dashboard
+   opens on Home.
+
+Rules: one live link per coach (making a new one cancels the old), 14-day
+expiry, single use, **Cancel invite** stops it at once. A sign-in already on
+the roster cannot take a second coach record. If the coach is linked by hand
+in the meantime the link is retired. Ten failed tries in 15 minutes pause that
+account's attempts. Accepting works while the roster is switched off; the
+coach screens still say "not switched on yet" until it is on. Coach rows show
+**Invite sent / Invite expired / Joined / Invite cancelled**, and the Activity
+log records each invite created, cancelled and accepted (never the link).
 
 ## 3. Reminders
 

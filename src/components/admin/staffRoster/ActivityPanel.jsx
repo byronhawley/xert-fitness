@@ -20,6 +20,7 @@ const ACTION_LABELS = {
   period_opened: 'Availability opened', period_updated: 'Due date changed', series_saved: 'Repeating class saved', series_generated: 'Classes generated',
   series_changed_from: 'Repeating class changed from a date', session_withdrawn: 'Request withdrawn',
   public_names_projected: 'Coach names shown on the timetable', public_names_withdrawn: 'Coach names removed from the timetable',
+  invite_created: 'Invite link created', invite_revoked: 'Invite cancelled', invite_accepted: 'Coach joined from invite',
 };
 
 // Phone push: Apple accepting a push is not proof the phone showed it, and

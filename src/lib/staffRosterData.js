@@ -67,6 +67,27 @@ export const ROSTER_ERROR_MESSAGES = Object.freeze({
   CANNOT_COVER: 'You cannot take this class.',
   VOLUNTEER_NOT_ELIGIBLE: 'This volunteer can no longer take the class.',
   SUPERSEDED: 'The roster changed after this request. It no longer applies.',
+  STAFF_ALREADY_LINKED: 'This coach already has a sign-in linked.',
+  EMAIL_INVALID: 'Enter a valid email address.',
+  INVITE_NOT_FOUND: 'That invite no longer exists.',
+  INVITE_USED: 'That invite has already been used.',
+  INVITE_INVALID: 'That invite link does not work.',
+  INVITE_EXPIRED: 'That invite has expired.',
+  INVITE_REVOKED: 'That invite was cancelled.',
+  TOO_MANY_ATTEMPTS: 'Too many tries. Wait 15 minutes and try again.',
+  PROFILE_NOT_READY: 'Your account is still being set up. Try again in a moment.',
+  PROFILE_INVALID: 'Something in the profile could not be saved. Check it and try again.',
+  PROFILE_NAME_REQUIRED: 'Add the name to show on the Coaches page before sending it for approval.',
+  PROFILE_NOT_SUBMITTED: 'That profile is not waiting for approval any more.',
+  PHOTO_INVALID: 'Upload the photo here rather than linking to another site.',
+  LINK_INVALID: 'Links must start with https://',
+  CERTIFICATE_INVALID: 'Check the certificate type and dates (expiry can’t be before issue).',
+  CERTIFICATE_NOT_FOUND: 'That certificate no longer exists.',
+  FILE_INVALID: 'That file can’t be attached. Upload it again.',
+  NOT_ON_CLASS: 'Only coaches rostered on this class can see its details.',
+  SESSION_NOT_FOUND: 'That class no longer exists.',
+  NOTE_TOO_LONG: 'Session notes can be up to 4,000 characters.',
+  PREFERENCES_INVALID: 'Choose on or off for each notice type.',
 });
 
 const CODE_PATTERN = /\b([A-Z][A-Z0-9_]{3,})\b/;
@@ -162,7 +183,23 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     rejectCover: (coverId, version) => pushing(call('reject_cover', { p_cover_id: coverId, p_expected_version: version, p_request_id: rid() })),
     notificationLog: (month, limit = 100) => call('notification_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
     auditLog: (month, limit = 100) => call('audit_log', { p_month: month ? monthParam(month) : null, p_limit: limit }),
-    runReminders: () => pushing(call('run_reminders', {})),
+    // Availability reminders, then certificate expiry reminders; the count is both.
+    runReminders: () => pushing(call('run_reminders', {}).then(async sent => {
+      const certificates = await call('run_certificate_reminders', {});
+      return typeof sent === 'number' ? sent + (Number(certificates) || 0) : sent;
+    })),
+    profileReviews: () => call('profile_reviews'),
+    reviewProfile: (staffId, decision, note, version) => pushing(call('review_profile', { p_staff_id: staffId, p_decision: decision, p_note: note || null, p_expected_version: version })),
+    certificatesOverview: () => call('certificates_overview'),
+    // Invite links. The token comes back once, from createInvite only.
+    createInvite: (staffId, email) => call('invite_create', { p_staff_id: staffId, p_email: email || null }),
+    revokeInvite: inviteId => call('invite_revoke', { p_invite_id: inviteId }),
+    listInvites: () => call('invite_list'),
+
+    // ── Joining (any signed-in account holding an invite link) ──
+    // Token problems come back as { ok: false, code }, not as errors.
+    previewInvite: token => call('invite_preview', { p_token: token }),
+    acceptInvite: token => call('invite_accept', { p_token: token }),
 
     // ── Coach ──
     me: () => call('me'),
@@ -182,6 +219,17 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     myRequests: () => call('my_requests'),
     myNotifications: (limit = 50) => call('my_notifications', { p_limit: limit }),
     markNotificationsRead: ids => call('mark_notifications_read', { p_ids: ids }),
+    myDashboard: () => call('my_dashboard'),
+    myHours: () => call('my_hours'),
+    myProfile: () => call('my_profile'),
+    saveProfile: (profile, submit, version) => (submit ? pushing : value => value)(call('save_profile', { p_profile: profile, p_submit: Boolean(submit), p_expected_version: version ?? null })),
+    myCertificates: () => call('my_certificates'),
+    saveCertificate: certificate => call('save_certificate', { p_certificate: certificate }),
+    removeCertificate: certificateId => call('remove_certificate', { p_certificate_id: certificateId }),
+    classDetail: sessionId => call('class_detail', { p_session_id: sessionId }),
+    saveSessionNote: (sessionId, body, expectedNoteId) => call('save_session_note', { p_session_id: sessionId, p_body: body, p_expected_note_id: expectedNoteId ?? null }),
+    myNoticePreferences: () => call('my_notice_preferences'),
+    setNoticePreferences: (email, push) => call('set_notice_preferences', { p_email: Boolean(email), p_push: Boolean(push) }),
   };
 }
 
