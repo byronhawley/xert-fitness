@@ -13,11 +13,13 @@ separate go-ahead.
 | Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; applied in production 2026-10-02 01:46 UTC) |
 | Coach invite links + coach dashboard | `supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql` (forward migration, additive, idempotent; not yet applied) |
 | Part-month roster periods | `supabase/migrations/20261002040000_staff_roster_part_month.sql` (forward migration, additive, idempotent; not yet applied) |
+| Roster texts | `supabase/migrations/20261002050000_staff_roster_sms.sql` (forward migration, additive, idempotent; not yet applied) |
+| Roster fixes | `supabase/migrations/20261002060000_staff_roster_fixes.sql` (forward migration, additive, idempotent; not yet applied; after 040000 and 050000) |
 | Push scheduler (not a migration) | `docs/staff-roster/push-dispatch-schedule.sql` (pg_cron + pg_net + Vault; activate only with approval) |
 | Manager screens | Command Centre → Classes → **Coach roster** (`/admin/roster`) |
 | Coach screens | `/coaching` (website and the app's web views; staff link, no membership needed). Opens on **Home** (setup checklist, next classes, shortcuts); older `?tab=` links open the same tabs as before |
 | Coach invite page | `/coach-invite#token=…` (public route; the token is in the URL fragment, so it never reaches a server log) |
-| Release gate | `staff_roster`, `staff_roster_push_reliability`, `staff_roster_coach_dashboard` and `staff_roster_part_month` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
+| Release gate | `staff_roster`, `staff_roster_push_reliability`, `staff_roster_coach_dashboard`, `staff_roster_part_month`, `staff_roster_sms` and `staff_roster_fixes` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
 | Full removal script | `docs/staff-roster/rollback.sql` (manual, not a migration) |
 
 The migration does not change bookings, waitlists, attendance, payments,
@@ -154,6 +156,42 @@ approving cover, and whenever the roster opens with texts still waiting.
 Temporary Twilio failures are retried (3 attempts in all). Switching texting
 off cancels texts still waiting. Coaches can turn texts off under
 Profile → How you get notices.
+
+If a publish's commit is cancelled while texts are being queued (a statement
+timeout, or the texts lock held for more than 2 s), the publish still goes
+through; texts it did not queue are queued by **Resend failed texts**, which
+first queues anything the current published version never queued.
+
+### 1e. Apply the roster fixes migration (needs approval)
+
+Apply order for the unapplied roster migrations, one at a time, each only
+after the one before has succeeded:
+
+1. `20261002040000_staff_roster_part_month.sql`
+2. `20261002050000_staff_roster_sms.sql`
+3. `20261002060000_staff_roster_fixes.sql`
+
+`20261002060000_staff_roster_fixes.sql` goes on top of `20261002050000`, the
+same way: SQL editor only, whole file at once, backup first. It starts with
+`set local lock_timeout = '5s'`, is idempotent, and records
+`staff_roster_fixes` as its **last** statement. It changes no row. It
+replaces `staff_roster_apply_changes` (from `20261001010000`) and
+`staff_roster_class_detail` (from `20261002020000`) with the same functions
+plus lines marked `-- fix`, and adds a before-update trigger
+(`staff_notification_push_preferences_update`, function
+`staff_roster_push_preference_on_update`, no client access) on
+`staff_notification_push_deliveries`:
+
+- Editing a published month with no draft: the manager screen's published
+  assignment ids now work for unassign, move and pin (the draft's copy is
+  used). Re-assigning a coach to a position they already hold is a no-op;
+  moving onto an occupied position is refused as `SLOT_TAKEN`.
+- A coach's class detail counts public sign-up requests as requests.
+- A coach who switches phone notifications off gets no further push, even one
+  already claimed by the dispatcher.
+
+Check `staff_roster_fixes` is in `xert_schema_capabilities`, then run
+`src/supabase/release_readiness_check.sql`.
 
 ## 2. Set up and switch on
 

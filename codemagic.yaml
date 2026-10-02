@@ -366,6 +366,7 @@ workflows:
               "pt_booking",
               "staff_roster_part_month",
               "staff_roster_sms",
+              "staff_roster_fixes",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

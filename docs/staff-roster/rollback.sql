@@ -32,6 +32,12 @@
 -- staff_roster_revisions_sms trigger go with the loop and the revisions table,
 -- and the sms_enabled / sms columns go with their tables.
 --
+-- Also covers 20261002060000_staff_roster_fixes.sql (roster fixes): the two
+-- functions it replaced and its staff_roster_push_preference_on_update
+-- function are dropped by the loop below, and its
+-- staff_notification_push_preferences_update trigger goes with the
+-- staff_notification_push_deliveries table.
+--
 -- Refuses to run while PT booking (capability `pt_booking`) is installed: its
 -- tables reference staff_members and would be broken by the cascade.
 --
@@ -42,7 +48,7 @@
 --
 -- After running it, also revert the app release that lists `staff_roster`,
 -- `staff_roster_push_reliability`, `staff_roster_coach_dashboard`,
--- `staff_roster_part_month` and `staff_roster_sms` as required capabilities, or the release gate will
+-- `staff_roster_part_month`, `staff_roster_sms` and `staff_roster_fixes` as required capabilities, or the release gate will
 -- report them missing.
 
 begin;
@@ -103,6 +109,6 @@ drop table if exists
   public.staff_members, public.staff_roster_settings
 cascade;
 
-delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard', 'staff_roster_part_month', 'staff_roster_sms');
+delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard', 'staff_roster_part_month', 'staff_roster_sms', 'staff_roster_fixes');
 
 commit;

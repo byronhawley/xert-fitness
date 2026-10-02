@@ -6,7 +6,7 @@ import { summarizeSchemaCapabilities } from '../src/lib/schemaCapabilities.js';
 test('reports the exact missing production database capabilities', () => {
   assert.deepEqual(summarizeSchemaCapabilities([{ capability: 'admin_role_safety' }]), {
     installed: ['admin_role_safety'],
-    missing: ['audited_credit_grants', 'booking_waitlist_withdrawal', 'member_cancellation_receipt', 'member_booking_switch_guard', 'member_onboarding_foundation', 'member_activation_cockpit', 'member_waitlist_join', 'waitlist_fifo_promotion', 'attendance_roll_call', 'attendance_request_resolution_guard', 'class_session_update_guard', 'product_update_guard', 'stripe_refund_reconciliation', 'checkout_reconciliation', 'stripe_payment_fulfillment', 'guarded_payment_activation', 'payment_activation_drift_guard', 'admin_settings_singleton', 'stripe_pending_order_guard', 'stripe_order_terms_snapshot', 'stripe_webhook_ledger', 'member_announcements', 'announcement_receipts', 'announcement_actions', 'announcement_archival', 'booking_time_conflict_guard', 'admin_member_notes', 'schedule_blackout_guard', 'database_security_hardening', 'rls_policy_performance', 'request_status_audit', 'member_push_notifications', 'credit_expiry_follow_up', 'member_pt_request_tracking', 'public_form_integrity', 'lead_pipeline_audit', 'schedule_change_audit', 'content_change_audit', 'booking_lifecycle_audit', 'class_cancellation_notifications', 'admin_daily_operations', 'schedule_optimistic_locking', 'shared_admin_optimistic_locking', 'catalog_optimistic_locking', 'product_commercial_terms_guard', 'targeted_member_notices', 'waitlist_promotion_notifications', 'booking_decision_notifications', 'staff_assisted_booking', 'owner_stripe_price_provisioning', 'forms_surveys_builder', 'form_response_snapshots', 'fitbox_zapier_bridge', 'fitbox_get_user_refresh', 'fitbox_live_mirror', 'email_notifications', 'form_prerequisites', 'casual_visit_payments', 'three_day_visitor_pass', 'three_month_membership', 'visitor_pass_pricing', 'class_attendee_search', 'signed_document_copies', 'booking_integrity_overhaul', 'booking_overhaul_repair', 'booking_repair_followups', 'staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard', 'pt_booking', 'staff_roster_part_month', 'staff_roster_sms'],
+    missing: ['audited_credit_grants', 'booking_waitlist_withdrawal', 'member_cancellation_receipt', 'member_booking_switch_guard', 'member_onboarding_foundation', 'member_activation_cockpit', 'member_waitlist_join', 'waitlist_fifo_promotion', 'attendance_roll_call', 'attendance_request_resolution_guard', 'class_session_update_guard', 'product_update_guard', 'stripe_refund_reconciliation', 'checkout_reconciliation', 'stripe_payment_fulfillment', 'guarded_payment_activation', 'payment_activation_drift_guard', 'admin_settings_singleton', 'stripe_pending_order_guard', 'stripe_order_terms_snapshot', 'stripe_webhook_ledger', 'member_announcements', 'announcement_receipts', 'announcement_actions', 'announcement_archival', 'booking_time_conflict_guard', 'admin_member_notes', 'schedule_blackout_guard', 'database_security_hardening', 'rls_policy_performance', 'request_status_audit', 'member_push_notifications', 'credit_expiry_follow_up', 'member_pt_request_tracking', 'public_form_integrity', 'lead_pipeline_audit', 'schedule_change_audit', 'content_change_audit', 'booking_lifecycle_audit', 'class_cancellation_notifications', 'admin_daily_operations', 'schedule_optimistic_locking', 'shared_admin_optimistic_locking', 'catalog_optimistic_locking', 'product_commercial_terms_guard', 'targeted_member_notices', 'waitlist_promotion_notifications', 'booking_decision_notifications', 'staff_assisted_booking', 'owner_stripe_price_provisioning', 'forms_surveys_builder', 'form_response_snapshots', 'fitbox_zapier_bridge', 'fitbox_get_user_refresh', 'fitbox_live_mirror', 'email_notifications', 'form_prerequisites', 'casual_visit_payments', 'three_day_visitor_pass', 'three_month_membership', 'visitor_pass_pricing', 'class_attendee_search', 'signed_document_copies', 'booking_integrity_overhaul', 'booking_overhaul_repair', 'booking_repair_followups', 'staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard', 'pt_booking', 'staff_roster_part_month', 'staff_roster_sms', 'staff_roster_fixes'],
     ready: false,
     actions: [
       'Apply supabase/migrations/20260714005500_credit_grant_audit.sql in Supabase.',
@@ -81,6 +81,7 @@ test('reports the exact missing production database capabilities', () => {
       'Apply supabase/migrations/20261002030000_pt_booking.sql in Supabase (after the staff roster migrations).',
       'Apply supabase/migrations/20261002040000_staff_roster_part_month.sql in Supabase (after 20261002020000_staff_roster_coach_dashboard.sql).',
       'Apply supabase/migrations/20261002050000_staff_roster_sms.sql in Supabase (after 20261002040000_staff_roster_part_month.sql).',
+      'Apply supabase/migrations/20261002060000_staff_roster_fixes.sql in Supabase (after 20261002050000_staff_roster_sms.sql).',
     ],
   });
   assert.equal(summarizeSchemaCapabilities([
@@ -156,6 +157,7 @@ test('reports the exact missing production database capabilities', () => {
     { capability: 'pt_booking' },
     { capability: 'staff_roster_part_month' },
     { capability: 'staff_roster_sms' },
+    { capability: 'staff_roster_fixes' },
     { capability: 'admin_role_safety' },
   ]).ready, true);
 });
@@ -278,6 +280,7 @@ test('fresh and upgrade SQL paths register the same capability contract', () => 
     ['../supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql', 'staff_roster_coach_dashboard'],
     ['../supabase/migrations/20261002040000_staff_roster_part_month.sql', 'staff_roster_part_month'],
     ['../supabase/migrations/20261002050000_staff_roster_sms.sql', 'staff_roster_sms'],
+    ['../supabase/migrations/20261002060000_staff_roster_fixes.sql', 'staff_roster_fixes'],
   ];
   for (const [path, capability] of pairs) {
     const sql = readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -350,6 +353,7 @@ test('Codemagic TestFlight preflight enforces every production capability', () =
   assert.match(yaml, /staff_roster_coach_dashboard/);
   assert.match(yaml, /staff_roster_part_month/);
   assert.match(yaml, /staff_roster_sms/);
+  assert.match(yaml, /staff_roster_fixes/);
   assert.match(yaml, /\/api\/checkout/);
   assert.match(yaml, /expected HTTP 401/);
   assert.match(yaml, /STRIPE_SECRET_KEY, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY/);
@@ -426,6 +430,7 @@ test('read-only production check reports every release capability and migration'
     'staff_roster_coach_dashboard',
     'staff_roster_part_month',
     'staff_roster_sms',
+    'staff_roster_fixes',
   ];
 
   for (const capability of capabilities) {

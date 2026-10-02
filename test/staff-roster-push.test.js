@@ -169,6 +169,8 @@ test('only the server can lease; a nudge needs a manager or active coach; nothin
     // Trigger function from the coach-dashboard migration (switching phone pushes off closes pending ones); nobody calls it directly.
     ['staff_roster_push_off_closes_pending', false, false, false],
     ['staff_roster_push_policy', false, false, false],
+    // Trigger function from the roster fixes migration (push off stops leased and retried pushes); nobody calls it directly.
+    ['staff_roster_push_preference_on_update', false, false, false],
     ['staff_roster_push_record', false, false, true],
     ['staff_roster_push_stale_reason', false, false, false],
     ['staff_roster_record_push_results', false, false, true],

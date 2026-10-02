@@ -81,6 +81,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   staff_roster_part_month: 'Apply supabase/migrations/20261002040000_staff_roster_part_month.sql in Supabase (after 20261002020000_staff_roster_coach_dashboard.sql).',
   // Roster text messages to coaches on publish. Installs switched off.
   staff_roster_sms: 'Apply supabase/migrations/20261002050000_staff_roster_sms.sql in Supabase (after 20261002040000_staff_roster_part_month.sql).',
+  // Roster editing from the published month, class detail requests, push stops when switched off.
+  staff_roster_fixes: 'Apply supabase/migrations/20261002060000_staff_roster_fixes.sql in Supabase (after 20261002050000_staff_roster_sms.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

@@ -211,9 +211,11 @@ $$;
 -- ─── Queueing on publish ────────────────────────────────────────────────────
 
 -- Queues the texts for one published revision. Never sends. Idempotent: a
--- coach who already has a row for this revision is left alone.
+-- coach who already has a row for this revision is left alone. Waits at most
+-- 2 s for the texts lock (it runs at the publish's commit); a lock timeout is
+-- caught by staff_roster_sms_on_publish.
 create or replace function public.staff_roster_sms_queue(p_revision uuid)
-returns integer language plpgsql security definer set search_path = public as $$
+returns integer language plpgsql security definer set search_path = public set lock_timeout = '2s' as $$
 declare
   v_rev public.staff_roster_revisions;
   v_settings public.staff_roster_settings;
@@ -294,14 +296,17 @@ end;
 $$;
 
 -- Runs at commit (deferred), after the publish or cover approval has written
--- the revision's assignments. A problem here never undoes the publish.
+-- the revision's assignments. A problem here never undoes the publish: a
+-- cancel or statement timeout that lands while texts are queued is caught too
+-- (`others` does not cover query_canceled). Texts it never queued are queued
+-- by "Resend failed texts" (staff_roster_sms_retry).
 create or replace function public.staff_roster_sms_on_publish()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   begin
     perform public.staff_roster_sms_queue(new.id);
-  exception when others then
-    raise warning 'roster texts for revision % not queued: %', new.id, sqlerrm;
+  exception when query_canceled or others then
+    raise warning 'roster texts for revision % not queued: % (%)', new.id, sqlerrm, sqlstate;
   end;
   return null;
 end;
@@ -320,8 +325,9 @@ create constraint trigger staff_roster_revisions_sms
 -- Leases up to `p_limit` texts that are due. Before leasing it (1) returns
 -- expired leases to pending (or failed after the last attempt), (2) re-checks
 -- each pending coach (opted out since, deactivated, mobile removed) and
--- refreshes the number. A coach's later text waits until their earlier one is
--- done, so texts arrive in order. Returns [] while texting is switched off.
+-- refreshes the number, and closes texts a later published version has made
+-- out of date. A coach's later text waits until their earlier one is done, so
+-- texts arrive in order. Returns [] while texting is switched off.
 create or replace function public.staff_roster_sms_claim(p_limit integer default 20, p_worker text default 'api')
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -357,6 +363,16 @@ begin
       where id = v_row.id and phone is distinct from public.staff_roster_sms_staff_phone(v_row.staff_id);
     end if;
   end loop;
+  -- (2b) A text for a version that a later published version has replaced,
+  -- where the later one queued nothing for that coach (it was published while
+  -- texts could not be queued, e.g. coach screens off) and their classes
+  -- differ: its list is out of date, so it is never sent.
+  update public.staff_roster_sms_messages m set status = 'skipped', reason = 'REPLACED_BY_NEWER', lease_token = null,
+    next_attempt_at = null, updated_at = now()
+  from public.staff_roster_revisions r
+  where m.status = 'pending' and r.month = m.month and r.state = 'published' and r.id <> m.revision_id
+    and not exists (select 1 from public.staff_roster_sms_messages n where n.revision_id = r.id and n.staff_id = m.staff_id)
+    and public.staff_roster_sms_changes(m.staff_id, m.revision_id, r.id, now()) <> '[]'::jsonb;
   update public.staff_roster_sms_messages set status = 'failed', reason = left('RETRIES_EXHAUSTED:' || coalesce(reason, 'UNKNOWN'), 300),
     lease_token = null, next_attempt_at = null, updated_at = now()
   where status = 'pending' and attempts >= 3;
@@ -486,12 +502,15 @@ begin
 end;
 $$;
 
--- "Resend failed texts": for each coach's latest text this month that failed,
--- or was skipped for a missing or wrong mobile, check the coach again (with
--- their number as it is now) and queue it. Sending happens on the next run.
+-- "Resend failed texts": first queue any text the month's published version
+-- never queued (its queueing was cancelled at commit), then for each coach's
+-- latest text this month that failed, or was skipped for a missing or wrong
+-- mobile, check the coach again (with their number as it is now) and queue
+-- it. Sending happens on the next run.
 create or replace function public.staff_roster_sms_retry(p_month date)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
+  v_rev uuid;
   v_row record;
   v_reason text;
   v_queued integer := 0;
@@ -502,6 +521,8 @@ begin
   perform public.staff_roster_month_param(p_month);
   if not coalesce((select sms_enabled and enabled from public.staff_roster_settings where id = 1), false) then raise exception 'SMS_DISABLED'; end if;
   perform pg_advisory_xact_lock(hashtextextended('xert_staff_roster_sms', 0));
+  select id into v_rev from public.staff_roster_revisions where month = p_month and state = 'published';
+  if v_rev is not null then v_queued := public.staff_roster_sms_queue(v_rev); end if;
   for v_row in
     select m.id, m.staff_id from public.staff_roster_sms_messages m
     where m.month = p_month and (m.status = 'failed' or (m.status = 'skipped' and m.reason in ('NO_MOBILE', 'MOBILE_INVALID', 'NO_ACCOUNT')))
