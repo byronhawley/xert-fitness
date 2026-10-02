@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRosterSms, rosterSmsLine, rosterSmsLink, rosterSmsSummary, smsSafeText, smsWhen } from '../src/lib/staffRoster/sms.js';
+import { buildRosterSms, rosterSmsLine, rosterSmsLink, rosterSmsReason, rosterSmsSummary, smsSafeText, smsWhen } from '../src/lib/staffRoster/sms.js';
 import { smsSegments } from '../src/lib/smsCampaigns.js';
 import { gymInstantIso } from '../src/lib/staffRoster/time.js';
 
@@ -165,14 +165,48 @@ test('a temporary failure (Twilio 503) is recorded as retryable and tried again 
   assert.equal(admin.records[1].p_ok, true);
 });
 
-test('network errors and rate limits are temporary; a text still waiting after the run is reported as retrying', async () => {
+test('a connection that never reached Twilio and rate limits are temporary; a text still waiting after the run is reported as retrying', async () => {
   const admin = fakeAdmin([[message()]]);
-  const twilio = fakeTwilio([new TypeError('fetch failed')]);
+  const twilio = fakeTwilio([new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) })]);
   const result = await sendRosterSms(admin, { credentials: CREDENTIALS, fetcher: twilio.fetcher, sleep: async () => {} });
   assert.deepEqual(result, { configured: true, attempted: 1, sent: 0, failed: 0, retrying: 1, unrecorded: 0 });
   assert.match(admin.records[0].p_error, /^NETWORK: fetch failed$/);
   const limited = await twilioSendSms({ to: '+61400000001', body: 'x', credentials: CREDENTIALS, fetcher: fakeTwilio([{ status: 429, body: { code: 20429, message: 'Too many' } }]).fetcher });
   assert.deepEqual([limited.ok, limited.retryable], [false, true]);
+});
+
+test('no answer from Twilio (timeout, dropped connection) may mean it was sent: recorded once as unconfirmed, never sent again', async () => {
+  for (const failure of [
+    Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+    new TypeError('fetch failed', { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) }),
+    new TypeError('fetch failed'),
+  ]) {
+    const admin = fakeAdmin([[message()], [message({ attempt: 2 })]]);
+    const twilio = fakeTwilio([failure, { body: { sid: 'SM-second' } }]);
+    const result = await sendRosterSms(admin, { credentials: CREDENTIALS, fetcher: twilio.fetcher, sleep: async () => { throw new Error('no retry wait'); } });
+    assert.deepEqual(result, { configured: true, attempted: 1, sent: 0, failed: 1, retrying: 0, unrecorded: 0 }, failure.message);
+    assert.equal(twilio.calls.length, 1, 'Twilio is asked once');
+    assert.equal(admin.records[0].p_retryable, false);
+    assert.match(admin.records[0].p_error, /^UNCONFIRMED (TIMEOUT|NETWORK): /);
+  }
+  assert.equal(rosterSmsReason('UNCONFIRMED TIMEOUT: aborted'), 'may have gone, no answer from the SMS service');
+});
+
+test('a run that is out of time hands unsent texts back instead of starting sends the platform could cut off', async () => {
+  const rows = Array.from({ length: 12 }, (_, index) => message({ id: `20000000-0000-4000-8000-0000000001${String(index).padStart(2, '0')}`, phone: `+614000001${String(index).padStart(2, '0')}` }));
+  const admin = fakeAdmin([rows]);
+  const twilio = fakeTwilio([{ body: { sid: 'SM' } }]);
+  // Five sends at a time, each adding 4 s to this clock, so a group takes 20 s; the budget is 40 s.
+  let clock = 0;
+  const slow = async (url, init) => { clock += 4000; return twilio.fetcher(url, init); };
+  const result = await sendRosterSms(admin, { credentials: CREDENTIALS, fetcher: slow, sleep: async () => {}, now: () => clock });
+  // Groups start at 0 s and 20 s; the last two texts are due at 40 s and are not started.
+  assert.equal(twilio.calls.length, 10);
+  const handedBack = admin.records.filter(record => record.p_error === 'NOT_SENT:OUT_OF_TIME');
+  assert.equal(handedBack.length, 2);
+  assert.ok(handedBack.every(record => record.p_retryable && !record.p_ok && record.p_body === null));
+  assert.deepEqual(result, { configured: true, attempted: 10, sent: 10, failed: 0, retrying: 2, unrecorded: 0 });
+  assert.equal(admin.claims.length, 1, 'no new batch is claimed once out of time');
 });
 
 test('a permanent failure (bad number, STOP) is recorded once and never retried', async () => {

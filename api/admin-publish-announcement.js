@@ -140,9 +140,27 @@ export async function twilioSendSms({ to, body, credentials, fetcher = globalThi
     }
     return { ok: true, sid: payload?.sid || null, status: payload?.status || 'queued' };
   } catch (error) {
+    const detail = String(error?.message || error).slice(0, 200);
+    // Only a request that provably never reached Twilio (no connection was
+    // made) is safe to send again. A timeout or a dropped connection may
+    // come after Twilio accepted the text, so it is not retried: a second
+    // attempt could text the coach twice. Same rule as roster push
+    // ('uncertain' is never resent).
+    if (smsNeverLeft(error)) return { ok: false, retryable: true, error: `NETWORK: ${detail}`, message: error?.message || String(error) };
     const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError';
-    return { ok: false, retryable: true, error: `${timedOut ? 'TIMEOUT' : 'NETWORK'}: ${String(error?.message || error).slice(0, 200)}`, message: error?.message || String(error) };
+    return { ok: false, retryable: false, error: `UNCONFIRMED ${timedOut ? 'TIMEOUT' : 'NETWORK'}: ${detail}`, message: error?.message || String(error) };
   }
+}
+
+// Connection errors that happen before any byte of the request is sent.
+const SMS_NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE']);
+
+/** True when a fetch failure means the request never reached the provider. */
+export function smsNeverLeft(error) {
+  for (let cause = error, depth = 0; cause && depth < 4; cause = cause.cause, depth += 1) {
+    if (SMS_NOT_SENT_CODES.has(cause.code)) return true;
+  }
+  return false;
 }
 
 async function sendOneSms(recipient, message) {
@@ -206,7 +224,7 @@ async function recordRosterSms(admin, row, outcome) {
   return { recorded: false, error: true };
 }
 
-async function sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl }) {
+async function sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl, timeoutMs = 10000 }) {
   let body;
   try {
     body = buildRosterSms(row, { baseUrl });
@@ -216,9 +234,13 @@ async function sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl }) {
   if (!row.phone || e164AUMobile(row.phone) !== row.phone) {
     return recordRosterSms(admin, row, { ok: false, retryable: false, error: 'MOBILE_INVALID', body });
   }
-  const result = await twilioSendSms({ to: row.phone, body, credentials, fetcher });
+  const result = await twilioSendSms({ to: row.phone, body, credentials, fetcher, timeoutMs });
   return recordRosterSms(admin, row, { ...result, body });
 }
+
+// Twilio's own wait per text; the run's time budget below keeps every
+// started send (and its record) inside the function's 60 s limit.
+const ROSTER_SMS_SEND_TIMEOUT_MS = 10000;
 
 /**
  * Sends the roster texts that are due. Returns counts for this run:
@@ -249,7 +271,17 @@ export async function sendRosterSms(admin, {
     retryWait = 0;
     for (let index = 0; index < rows.length; index += SMS_SEND_CONCURRENCY) {
       const batch = rows.slice(index, index + SMS_SEND_CONCURRENCY);
-      const outcomes = await Promise.all(batch.map(row => sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl })));
+      // Out of time: hand the rest back unsent instead of starting a send the
+      // platform might cut off after Twilio accepted it (that text would be
+      // unrecorded, then sent again when its lease ran out).
+      if (now() - started >= ROSTER_SMS_TIME_BUDGET_MS) {
+        for (const row of rows.slice(index)) {
+          const outcome = await recordRosterSms(admin, row, { ok: false, retryable: true, error: 'NOT_SENT:OUT_OF_TIME' });
+          final.set(row.id, outcome?.recorded ? outcome.status : 'unrecorded');
+        }
+        break;
+      }
+      const outcomes = await Promise.all(batch.map(row => sendOneRosterSms(admin, row, { credentials, fetcher, baseUrl, timeoutMs: ROSTER_SMS_SEND_TIMEOUT_MS })));
       outcomes.forEach((outcome, offset) => {
         totals.attempted += 1;
         const status = outcome?.recorded ? outcome.status : 'unrecorded';

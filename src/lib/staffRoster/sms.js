@@ -141,6 +141,8 @@ export function rosterSmsReason(reason) {
   if (ROSTER_SMS_REASONS[reason]) return ROSTER_SMS_REASONS[reason];
   if (/^RETRIES_EXHAUSTED/.test(reason)) return 'failed after 3 tries';
   if (/RECIPIENT_UNSUBSCRIBED/.test(reason)) return 'replied STOP to texts';
+  // No answer from Twilio: it may have gone, so it is never resent by itself.
+  if (/^UNCONFIRMED/.test(reason)) return 'may have gone, no answer from the SMS service';
   return 'not delivered';
 }
 
