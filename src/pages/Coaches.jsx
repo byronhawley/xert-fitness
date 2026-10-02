@@ -5,7 +5,9 @@ import PublicFooter from '@/components/public/PublicFooter';
 import StickyMobileCTA from '@/components/public/StickyMobileCTA';
 import PageHeader from '@/components/public/PageHeader';
 import Skeleton from '@/components/public/Skeleton';
+import { Link } from 'react-router-dom';
 import { getCoaches } from '@/lib/bookingData';
+import { ptLinkForCoach, usePtAvailability } from '@/lib/usePtAvailability';
 
 const CATEGORY_LABELS = {
   coach: 'Coaching Team',
@@ -24,7 +26,7 @@ function initials(name) {
     .join('');
 }
 
-function CoachCard({ coach }) {
+function CoachCard({ coach, ptLink = null }) {
   return (
     <article className="xert-card p-3 flex flex-col">
       <div className="aspect-[4/5] rounded-2xl overflow-hidden relative bg-xert-navy/70">
@@ -67,6 +69,12 @@ function CoachCard({ coach }) {
           )}
         </div>
 
+        {ptLink && (
+          <Link to={ptLink} className="xert-btn-primary inline-flex min-h-11 items-center justify-center self-start mt-5 px-4 font-display text-sm uppercase tracking-wide">
+            Book PT with {(coach.name || '').split(' ')[0] || 'this coach'}
+          </Link>
+        )}
+
         {coach.social_url && (
           <a
             href={coach.social_url}
@@ -87,6 +95,7 @@ export default function Coaches() {
   const [coaches, setCoaches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const pt = usePtAvailability();
 
   useEffect(() => {
     getCoaches()
@@ -159,7 +168,7 @@ export default function Coaches() {
                   </h2>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {section.coaches.map(c => <CoachCard key={c.id} coach={c} />)}
+                  {section.coaches.map(c => <CoachCard key={c.id} coach={c} ptLink={ptLinkForCoach(pt, c.id)} />)}
                 </div>
               </section>
             ))}
@@ -167,6 +176,15 @@ export default function Coaches() {
 
           <div className="mt-8">
             <div className="xert-divider mb-8" />
+            {pt.enabled && pt.coaches.length > 0 && (
+              <div className="xert-card p-5 sm:p-6 mb-6 flex flex-wrap items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="font-display text-2xl uppercase text-xert-offwhite">Personal training</h2>
+                  <p className="font-body text-sm text-xert-pale/65 mt-1">One-on-one sessions with your coach. See their prices and book a time online.</p>
+                </div>
+                <Link to="/pt" className="xert-btn-primary inline-flex min-h-11 items-center justify-center px-5 font-display text-sm uppercase tracking-wide">Book PT</Link>
+              </div>
+            )}
             <a
               href="/booking"
               className="xert-btn-primary inline-flex min-h-[52px] w-full sm:w-auto items-center justify-center px-8 font-display text-lg uppercase tracking-wide"

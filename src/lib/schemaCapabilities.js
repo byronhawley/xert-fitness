@@ -77,6 +77,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   staff_roster_coach_dashboard: 'Apply supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql in Supabase (after 20261002010000_staff_roster_push_reliability.sql).',
   // Installs switched off; the PT page and coach PT tab stay hidden until the owner turns it on.
   pt_booking: 'Apply supabase/migrations/20261002030000_pt_booking.sql in Supabase (after the staff roster migrations).',
+  // PT exact start times and members' own PT sessions.
+  pt_start_times: 'Apply supabase/migrations/20261002080000_pt_start_times_and_members.sql in Supabase (after 20261002030000_pt_booking.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

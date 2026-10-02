@@ -4,6 +4,7 @@ import { Instagram, Mail, MapPin, ShieldCheck } from 'lucide-react';
 import { useSiteContent } from '@/lib/siteContent';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { CONTACT_DEFAULTS } from '@/lib/contentDefaults';
+import { usePtAvailability } from '@/lib/usePtAvailability';
 
 const LOGO = '/assets/xert-logo-stacked-light.png';
 
@@ -29,6 +30,8 @@ const CONTACT_ROW =
 export default function PublicFooter() {
   const contact = useSiteContent('contact', CONTACT_DEFAULTS);
   const { isAdmin } = useSupabaseAuth();
+  const pt = usePtAvailability();
+  const links = pt.enabled ? NAV_LINKS.flatMap(link => link.to === '/coaches' ? [link, { to: '/pt', label: 'Personal Training' }] : [link]) : NAV_LINKS;
 
   return (
     <footer
@@ -53,7 +56,7 @@ export default function PublicFooter() {
           <div>
             <p className="mb-2 font-display text-xs uppercase tracking-widest text-xert-steel">Navigate</p>
             <div className="grid grid-cols-2 gap-x-6">
-              {NAV_LINKS.map(l => (
+              {links.map(l => (
                 <Link key={l.to} to={l.to}
                   className="flex min-h-11 items-center font-body text-sm text-xert-pale/70 transition-colors hover:text-xert-steel">
                   {l.label}

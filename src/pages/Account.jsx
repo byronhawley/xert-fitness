@@ -18,6 +18,8 @@ import {
   webCheckoutSettlement,
 } from '@/lib/webCheckoutRecovery';
 import { useToast } from '@/components/ui/use-toast';
+import MemberPT from '@/components/public/MemberPT';
+import { usePtAvailability } from '@/lib/usePtAvailability';
 import { deleteMyAccount } from '@/lib/accountData';
 import { authPathWithNext } from '@/lib/authRedirect';
 import { getSoftLaunchSettings } from '@/lib/adminData';
@@ -90,6 +92,7 @@ export default function Account() {
   const [orders, setOrders] = useState([]);
   const [eventGoals, setEventGoals] = useState([]);
   const [privateSessionRequests, setPrivateSessionRequests] = useState([]);
+  const ptBooking = usePtAvailability();
   const [announcements, setAnnouncements] = useState([]);
   const [dismissingAnnouncementId, setDismissingAnnouncementId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1171,8 +1174,10 @@ export default function Account() {
           )}
         </section>
 
-        {/* Personal training requests */}
-        <section className="mb-10">
+        <MemberPT />
+
+        {/* Personal training requests (the older enquiry form; hidden once PT booking is on and there are none) */}
+        {(!ptBooking.enabled || privateSessionRequests.length > 0) && <section className="mb-10">
           <div className="flex items-center justify-between gap-4 mb-4">
             <h2 className="font-display text-2xl uppercase text-xert-pale/85">
               PT Requests
@@ -1216,7 +1221,7 @@ export default function Account() {
               ))}
             </div>
           )}
-        </section>
+        </section>}
 
         {/* Pending booking requests */}
         {accountReady && pending.length > 0 && (

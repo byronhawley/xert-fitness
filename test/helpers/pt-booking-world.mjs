@@ -11,6 +11,13 @@ import { gymDateKey } from '../../src/lib/gymTime.js';
 export { ids, rid, rpc, rejects };
 
 export const PT_MIGRATION_URL = new URL('../../supabase/migrations/20261002030000_pt_booking.sql', import.meta.url);
+export const PT_MIGRATION_URLS = [PT_MIGRATION_URL,
+  new URL('../../supabase/migrations/20261002080000_pt_start_times_and_members.sql', import.meta.url)];
+
+/** Every PT migration, in order. */
+export async function ptMigrationsSql() {
+  return (await Promise.all(PT_MIGRATION_URLS.map(url => readFile(url, 'utf8')))).join('\n');
+}
 
 export const BLACKOUTS = `
   create table if not exists public.blackout_periods (
@@ -31,7 +38,7 @@ export const DIANA = '00000000-0000-4000-8000-0000000000d1';
 export async function ptWorld({ enabled = true, rosterEnabled = true } = {}) {
   const { db, staff } = await rosterWorld({ enabled: rosterEnabled });
   await db.exec(BLACKOUTS);
-  await db.exec(await readFile(PT_MIGRATION_URL, 'utf8'));
+  await db.exec(await ptMigrationsSql());
   await db.exec(`
     insert into public.profiles (id, full_name, email, role) values ('${DIANA}', 'Diana Synthetic', 'diana@example.test', 'member');
     update public.pt_settings set enabled = ${enabled}, max_days_ahead = 120;
