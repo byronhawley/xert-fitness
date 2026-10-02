@@ -13,7 +13,7 @@ import { monthSteps, openSpots } from '../src/lib/staffRoster/monthSteps.js';
 import { needsAttention, planningContext } from '../src/lib/staffRoster/snapshot.js';
 import { coverageReport } from '../src/lib/staffRoster/coverage.js';
 import { checkAssignment, PROBLEM_MESSAGES } from '../src/lib/staffRoster/validate.js';
-import { createStaffRosterClient, rosterError } from '../src/lib/staffRosterData.js';
+import { createStaffRosterClient, ROSTER_ERROR_MESSAGES, rosterError } from '../src/lib/staffRosterData.js';
 import { gymInstant, gymInstantIso } from '../src/lib/staffRoster/time.js';
 
 const MONTH = '2026-10';
@@ -149,6 +149,37 @@ test('client: openPartMonth sends what the database expects; its refusals read a
   assert.match(order.message, /before the month \(or its roster\) starts/);
   const blocked = rosterError({ message: 'ASSIGNMENT_BLOCKED', details: JSON.stringify({ problems: ['SESSION_BEFORE_ROSTER_START'] }) });
   assert.equal(blocked.message, PROBLEM_MESSAGES.SESSION_BEFORE_ROSTER_START);
+});
+
+test('client: errors with no roster code still read as plain words, never raw database text', async () => {
+  // The part-month (or texts) migration not applied yet: PostgREST has no such function.
+  const missing = rosterError({ code: 'PGRST202', message: 'Could not find the function public.staff_roster_open_part_month(p_due_on, p_month, p_publish_target_on, p_request_id, p_starts_on) in the schema cache' });
+  assert.equal(missing.code, 'NOT_INSTALLED');
+  assert.match(missing.message, /isn’t installed on the database yet/);
+  assert.doesNotMatch(missing.message, /schema cache|staff_roster_/);
+  // A malformed id reaching a uuid parameter.
+  const badId = rosterError({ code: '22P02', message: 'invalid input syntax for type uuid: "not-a-cert"' });
+  assert.equal(badId.code, 'ID_INVALID');
+  assert.doesNotMatch(badId.message, /syntax|uuid/);
+  // Every code the part-month and texts migrations raise to a person has words.
+  for (const code of ['STARTS_ON_INVALID', 'ASSIGNMENTS_BEFORE_START', 'PERIOD_EXISTS', 'NO_BACKDATING', 'MONTH_INVALID', 'SMS_DISABLED', 'PREFERENCES_INVALID', 'STALE_VERSION', 'MANAGER_ONLY']) {
+    assert.ok(ROSTER_ERROR_MESSAGES[code], code);
+    assert.equal(rosterError({ code: 'P0001', message: code }).message, ROSTER_ERROR_MESSAGES[code]);
+  }
+});
+
+test('client: a malformed certificate or class id is refused before it reaches the database', async () => {
+  const calls = [];
+  const client = createStaffRosterClient(async (name, params) => { calls.push(name); return { data: { id: params.p_certificate_id }, error: null }; });
+  await assert.rejects(() => client.removeCertificate('not-a-cert'), error => error.code === 'CERTIFICATE_NOT_FOUND' && error.message === ROSTER_ERROR_MESSAGES.CERTIFICATE_NOT_FOUND);
+  await assert.rejects(() => client.removeCertificate(undefined), { code: 'CERTIFICATE_NOT_FOUND' });
+  await assert.rejects(() => client.saveCertificate({ id: '1; drop table', kind: 'cpr' }), { code: 'CERTIFICATE_NOT_FOUND' });
+  await assert.rejects(() => client.classDetail('42'), { code: 'SESSION_NOT_FOUND' });
+  assert.deepEqual(calls, [], 'nothing was sent');
+  await client.removeCertificate('20000000-0000-4000-8000-000000000001');
+  await client.saveCertificate({ id: null, kind: 'cpr' });
+  await client.saveCertificate({ id: '', kind: 'cpr' });
+  assert.deepEqual(calls, ['staff_roster_remove_certificate', 'staff_roster_save_certificate', 'staff_roster_save_certificate']);
 });
 
 // ── Manager screens ────────────────────────────────────────────────────────

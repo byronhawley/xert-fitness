@@ -91,6 +91,9 @@ export const ROSTER_ERROR_MESSAGES = Object.freeze({
   NOTE_TOO_LONG: 'Session notes can be up to 4,000 characters.',
   PREFERENCES_INVALID: 'Choose on or off for each notice type.',
   SMS_DISABLED: 'Texting coaches is switched off. Turn on “Text coaches when you publish” in Settings first.',
+  // Not database codes: set by rosterError below for errors that carry none.
+  NOT_INSTALLED: 'This part of the coach roster isn’t installed on the database yet. Ask whoever looks after the website to apply the latest roster update.',
+  ID_INVALID: 'That item couldn’t be found. Refresh the page and try again.',
 });
 
 const CODE_PATTERN = /\b([A-Z][A-Z0-9_]{3,})\b/;
@@ -106,12 +109,27 @@ const CONSTRAINT_MESSAGES = Object.freeze({
   staff_roster_periods_starts_on: 'Check the dates: the roster must start on a later day of the same month, after the publish-by date.',
 });
 const CONSTRAINT_PATTERN = /violates check constraint "([a-z0-9_]+)"/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Errors with no roster code of their own. PostgREST answers PGRST202 when an
+ * entry point does not exist (its migration is not applied yet), and Postgres
+ * 22P02 when a malformed id reaches a uuid parameter.
+ */
+function uncodedProblem(error, raw) {
+  const sqlState = String(error?.code || '');
+  if (sqlState === 'PGRST202' || /Could not find the function/i.test(raw)) return 'NOT_INSTALLED';
+  if (sqlState === '22P02' || /invalid input syntax for type uuid/i.test(raw)) return 'ID_INVALID';
+  return null;
+}
 
 /** Turns a PostgREST/Postgres error into a readable Error with `code` and `detail`. */
 export function rosterError(error) {
   const raw = String(error?.message || error || '');
   const constraint = raw.match(CONSTRAINT_PATTERN)?.[1] || null;
-  const code = constraint ? null : raw.match(CODE_PATTERN)?.[1] || null;
+  const uncoded = constraint ? null : uncodedProblem(error, raw);
+  const matched = constraint || uncoded ? null : raw.match(CODE_PATTERN)?.[1] || null;
+  const code = uncoded || matched;
   const detail = parseDetail(error?.details || error?.detail);
   let message = (code && ROSTER_ERROR_MESSAGES[code]) || (constraint && CONSTRAINT_MESSAGES[constraint]) || null;
   if (code === 'ASSIGNMENT_BLOCKED' && detail?.problems?.length) {
@@ -145,6 +163,7 @@ export function createStaffRosterClient(rpc, { notifyPush = null, sendTexts = nu
     return data;
   };
   const rid = () => newRequestId();
+  const refuse = code => Promise.reject(rosterError({ message: code }));
   const nudge = () => {
     if (!notifyPush) return;
     try { Promise.resolve(notifyPush()).catch(() => {}); } catch { /* best effort */ }
@@ -242,9 +261,13 @@ export function createStaffRosterClient(rpc, { notifyPush = null, sendTexts = nu
     myProfile: () => call('my_profile'),
     saveProfile: (profile, submit, version) => (submit ? pushing : value => value)(call('save_profile', { p_profile: profile, p_submit: Boolean(submit), p_expected_version: version ?? null })),
     myCertificates: () => call('my_certificates'),
-    saveCertificate: certificate => call('save_certificate', { p_certificate: certificate }),
-    removeCertificate: certificateId => call('remove_certificate', { p_certificate_id: certificateId }),
-    classDetail: sessionId => call('class_detail', { p_session_id: sessionId }),
+    // A malformed id (an old link, a tampered form) is refused here in plain
+    // words; the database would answer with a raw uuid parse error.
+    saveCertificate: certificate => (certificate?.id && !UUID_PATTERN.test(String(certificate.id))
+      ? refuse('CERTIFICATE_NOT_FOUND') : call('save_certificate', { p_certificate: certificate })),
+    removeCertificate: certificateId => (!UUID_PATTERN.test(String(certificateId ?? ''))
+      ? refuse('CERTIFICATE_NOT_FOUND') : call('remove_certificate', { p_certificate_id: certificateId })),
+    classDetail: sessionId => (!UUID_PATTERN.test(String(sessionId ?? '')) ? refuse('SESSION_NOT_FOUND') : call('class_detail', { p_session_id: sessionId })),
     saveSessionNote: (sessionId, body, expectedNoteId) => call('save_session_note', { p_session_id: sessionId, p_body: body, p_expected_note_id: expectedNoteId ?? null }),
     myNoticePreferences: () => call('my_notice_preferences'),
     setNoticePreferences: (email, push) => call('set_notice_preferences', { p_email: Boolean(email), p_push: Boolean(push) }),
