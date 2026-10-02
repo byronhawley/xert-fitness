@@ -39,7 +39,7 @@ let counter = 0;
 const rid = () => `30000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
 const service = await rpcAs(db, riley.profileId, 'pt_coach_save_service', { p_service: { name: 'One-on-one strength', description: 'Technique, a plan and accountability.', duration_minutes: 60, price_cents: 9000, booking_mode: 'request' }, p_request_id: rid() });
 await rpcAs(db, riley.profileId, 'pt_coach_save_package', { p_package: { service_id: service.id, name: '10-session pack', sessions_count: 10, price_cents: 80000, valid_days: 120 }, p_request_id: rid() });
-await rpcAs(db, riley.profileId, 'pt_coach_save_hours', { p_hours: [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start: 360, end: 600 })), p_buffer_minutes: 15, p_expected_version: 0 });
+await rpcAs(db, riley.profileId, 'pt_coach_save_hours', { p_hours: [0, 1, 2, 3, 4, 5, 6].map(weekday => ({ weekday, start: 300, end: 720 })), p_buffer_minutes: 15, p_expected_version: 0 });
 
 async function ptContext(browser, origin, uid, viewport, { signedIn = true } = {}) {
   const context = await browser.newContext({ viewport, serviceWorkers: 'block', deviceScaleFactor: viewport.width < 600 ? 2 : 1, timezoneId: 'Australia/Brisbane' });
@@ -127,7 +127,16 @@ try {
     await page.getByText('10-session pack · 10 sessions · $800 · 120 days').waitFor();
     await shot(page, '07-coach-pt-prices-phone');
     await page.getByRole('tab', { name: 'Hours' }).click();
-    await page.getByRole('heading', { name: 'Time off from PT' }).or(page.getByText('Time off from PT')).first().waitFor();
+    await page.getByRole('heading', { name: 'When can people book you?' }).waitFor();
+    await page.getByText('Every day 5 am–12 pm').waitFor();
+    const evening = page.getByRole('button', { name: /^Saturday evening/ });
+    assert.equal(await evening.getAttribute('aria-pressed'), 'false');
+    await evening.click();
+    await page.getByText('Not saved yet').waitFor();
+    await page.getByRole('button', { name: 'Save my hours' }).click();
+    await page.getByText('Not saved yet').waitFor({ state: 'detached' });
+    assert.equal(await evening.getAttribute('aria-pressed'), 'true');
+    await page.getByRole('heading', { name: 'Going away?' }).waitFor();
     await shot(page, '08-coach-pt-hours-phone');
   });
 

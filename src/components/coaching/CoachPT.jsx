@@ -4,6 +4,7 @@ import { clockLabel, gymInstantIso, parseClock } from '@/lib/staffRoster/time';
 import {
   BOOKING_STATUS_WORDS, PAYMENT_WORDS, formatDuration, formatPrice, parsePrice, ptClient,
 } from '@/lib/ptBookingData';
+import { DAY_PARTS, WEEK_ORDER as PT_WEEK_ORDER, describeHours, gridFromHours, hoursFromGrid, normalizeHours } from '@/lib/ptHours';
 import { Banner, BUTTON, GHOST, INPUT, LABEL, Pill, Sheet, WEEKDAYS, dateName, when, at } from './coachingUi';
 
 const SECTIONS = [
@@ -359,64 +360,143 @@ export function hoursFromDays(days) {
 
 function HoursSection({ overview, client, today, notify, reload }) {
   const { busy, act } = useAct(notify, reload);
-  const [days, setDays] = useState(() => hoursByDay(overview.hours.hours));
+  const saved = overview.hours.hours || [];
+  const [grid, setGrid] = useState(() => gridFromHours(saved).grid);
+  const [exact, setExact] = useState(() => !gridFromHours(saved).exact);
+  const [days, setDays] = useState(() => hoursByDay(saved));
   const [buffer, setBuffer] = useState(overview.hours.buffer_minutes || 0);
-  const [away, setAway] = useState({ from: today, fromTime: '', until: today, untilTime: '', note: '' });
-  useEffect(() => { setDays(hoursByDay(overview.hours.hours)); setBuffer(overview.hours.buffer_minutes || 0); }, [overview.hours]);
-  const hours = hoursFromDays(days);
+  const [away, setAway] = useState({ from: today, until: today, partDay: false, fromTime: '09:00', untilTime: '12:00', note: '' });
+  useEffect(() => {
+    const next = gridFromHours(overview.hours.hours || []);
+    setGrid(next.grid); setExact(!next.exact); setDays(hoursByDay(overview.hours.hours)); setBuffer(overview.hours.buffer_minutes || 0);
+  }, [overview.hours]);
+  const hours = exact ? hoursFromDays(days) : hoursFromGrid(grid);
+  const dirty = hours !== null && (JSON.stringify(normalizeHours(hours)) !== JSON.stringify(normalizeHours(saved)) || buffer !== (overview.hours.buffer_minutes || 0));
+  const toggle = (day, part) => setGrid(current => {
+    const next = new Set(current[day]);
+    if (next.has(part)) next.delete(part); else next.add(part);
+    return { ...current, [day]: next };
+  });
+  const copyMondayToWeekdays = () => setGrid(current => ({ ...current, ...Object.fromEntries([2, 3, 4, 5].map(day => [day, new Set(current[1])])) }));
+  const switchToExact = () => { setDays(hoursByDay(hoursFromGrid(grid))); setExact(true); };
   const setBlock = (day, index, patch) => setDays(current => ({ ...current, [day]: current[day].map((block, i) => i === index ? { ...block, ...patch } : block) }));
-  const awayStart = away.from ? gymInstantIso(away.from, parseClock(away.fromTime) ?? 0) : null;
-  const awayEnd = away.until ? gymInstantIso(away.until, parseClock(away.untilTime) ?? 1440) : null;
+  const awayStart = away.from ? gymInstantIso(away.from, away.partDay ? parseClock(away.fromTime) ?? 0 : 0) : null;
+  const awayEnd = away.until ? gymInstantIso(away.partDay ? away.from : away.until, away.partDay ? parseClock(away.untilTime) ?? 1440 : 1440) : null;
+  const summary = hours ? describeHours(hours) : '';
   return (
     <div className="space-y-6">
-      <section className="space-y-3">
-        <p className="font-body text-sm text-xert-pale/70">When can the public book you? Times that clash with your classes, time away or other PT are never offered.</p>
-        {WEEK_ORDER.map(day => (
-          <div key={day} className="coaching-card space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <p className="font-body text-sm font-semibold text-xert-offwhite">{WEEKDAYS[day]}</p>
-              <button type="button" className={GHOST} onClick={() => setDays(current => ({ ...current, [day]: [...current[day], { start: '06:00', end: '10:00' }] }))}>Add hours</button>
+      <section className="space-y-3" aria-labelledby="pt-hours-title">
+        <div>
+          <h3 id="pt-hours-title" className="font-display text-2xl uppercase text-xert-offwhite">When can people book you?</h3>
+          <p className="font-body text-sm text-xert-pale/70">{exact ? 'Set exact times for each day.' : 'Tap the times of day you’re happy to train clients.'} We never offer a time that clashes with your classes, time off or other PT.</p>
+        </div>
+
+        {!exact && (
+          <div className="coaching-card">
+            <table className="w-full border-separate" style={{ borderSpacing: '4px' }}>
+              <thead>
+                <tr>
+                  <th scope="col" className="sr-only">Day</th>
+                  {DAY_PARTS.map(part => (
+                    <th key={part.key} scope="col" className="font-body text-[0.7rem] font-semibold text-xert-pale/70 text-center leading-tight pb-1">
+                      {part.label}<span className="block font-normal text-xert-pale/50">{part.detail}</span>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {PT_WEEK_ORDER.map(day => (
+                  <tr key={day}>
+                    <th scope="row" className="font-body text-sm font-semibold text-xert-offwhite text-left pr-1 w-12">{WEEKDAYS[day].slice(0, 3)}</th>
+                    {DAY_PARTS.map(part => {
+                      const on = grid[day].has(part.key);
+                      return (
+                        <td key={part.key} className="p-0">
+                          <button type="button" aria-pressed={on} aria-label={`${WEEKDAYS[day]} ${part.label.toLowerCase()} (${part.detail})`} onClick={() => toggle(day, part.key)}
+                            className={`w-full min-h-11 rounded-lg border font-body text-sm ${on ? 'bg-xert-steel text-xert-navy border-xert-steel font-semibold' : 'border-xert-steel/25 text-xert-pale/40'}`}>
+                            {on ? '✓' : ''}
+                          </button>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button type="button" className={GHOST} onClick={copyMondayToWeekdays} disabled={!grid[1].size}>Copy Monday to Tue–Fri</button>
+              <button type="button" className={GHOST} onClick={switchToExact}>Set exact times instead</button>
             </div>
-            {days[day].length === 0 && <p className="font-body text-xs text-xert-pale/50">Not taking bookings</p>}
-            {days[day].map((block, index) => (
-              <div key={index} className="flex flex-wrap items-center gap-2">
-                <input type="time" step={300} aria-label={`${WEEKDAYS[day]} from`} className={`${INPUT} w-auto`} value={block.start} onChange={event => setBlock(day, index, { start: event.target.value })} />
-                <span className="font-body text-xs text-xert-pale/60">to</span>
-                <input type="time" step={300} aria-label={`${WEEKDAYS[day]} until`} className={`${INPUT} w-auto`} value={block.end === '24:00' ? '23:55' : block.end} onChange={event => setBlock(day, index, { end: event.target.value })} />
-                <button type="button" className={GHOST} aria-label={`Remove ${WEEKDAYS[day]} ${block.start}`} onClick={() => setDays(current => ({ ...current, [day]: current[day].filter((_, i) => i !== index) }))}>Remove</button>
+          </div>
+        )}
+
+        {exact && (
+          <div className="space-y-2">
+            {PT_WEEK_ORDER.map(day => (
+              <div key={day} className="coaching-card space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-body text-sm font-semibold text-xert-offwhite">{WEEKDAYS[day]}</p>
+                  <button type="button" className={GHOST} onClick={() => setDays(current => ({ ...current, [day]: [...current[day], { start: '06:00', end: '10:00' }] }))}>Add times</button>
+                </div>
+                {days[day].length === 0 && <p className="font-body text-xs text-xert-pale/50">Not taking bookings</p>}
+                {days[day].map((block, index) => (
+                  <div key={index} className="flex flex-wrap items-center gap-2">
+                    <input type="time" step={300} aria-label={`${WEEKDAYS[day]} from`} className={`${INPUT} w-auto`} value={block.start} onChange={event => setBlock(day, index, { start: event.target.value })} />
+                    <span className="font-body text-xs text-xert-pale/60">to</span>
+                    <input type="time" step={300} aria-label={`${WEEKDAYS[day]} until`} className={`${INPUT} w-auto`} value={block.end === '24:00' ? '23:55' : block.end} onChange={event => setBlock(day, index, { end: event.target.value })} />
+                    <button type="button" className={GHOST} aria-label={`Remove ${WEEKDAYS[day]} ${block.start}`} onClick={() => setDays(current => ({ ...current, [day]: current[day].filter((_, i) => i !== index) }))}>Remove</button>
+                  </div>
+                ))}
               </div>
             ))}
+            <button type="button" className={GHOST} onClick={() => { const next = hoursFromDays(days); setGrid(gridFromHours(next || []).grid); setExact(false); }}>Back to simple view</button>
+            {!hours && <p className="font-body text-xs text-status-danger-200">Each time needs a start before its end.</p>}
           </div>
-        ))}
-        <div className="max-w-xs"><label className={LABEL} htmlFor="pt-buffer">Gap between PT sessions</label>
+        )}
+
+        <div className="coaching-card space-y-1" role="status">
+          <p className={LABEL}>What people will see</p>
+          <p className="font-body text-sm text-xert-offwhite">{summary || 'No times yet, so nobody can book you.'}</p>
+        </div>
+
+        <div className="max-w-xs"><label className={LABEL} htmlFor="pt-buffer">Break between PT clients</label>
           <select id="pt-buffer" className={INPUT} value={buffer} onChange={event => setBuffer(Number(event.target.value))}>
-            {[0, 5, 10, 15, 30, 45, 60].map(value => <option key={value} value={value}>{value ? `${value} min` : 'No gap'}</option>)}
+            {[0, 5, 10, 15, 30, 45, 60].map(value => <option key={value} value={value}>{value ? `${value} min` : 'No break'}</option>)}
           </select></div>
-        {!hours && <p className="font-body text-xs text-status-danger-200">Each block needs a start before its end.</p>}
-        <button type="button" className={BUTTON} disabled={busy || !hours} onClick={() => act(() => client.saveHours(hours, buffer, overview.hours.version), 'Hours saved. Bookings you already have stay as they are.')}>Save hours</button>
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" className={BUTTON} disabled={busy || !hours || !dirty} onClick={() => act(() => client.saveHours(hours, buffer, overview.hours.version), 'Saved. Bookings you already have stay as they are.')}>Save my hours</button>
+          {dirty && <span className="coaching-save-state">Not saved yet</span>}
+        </div>
       </section>
 
-      <section className="space-y-3">
-        <h3 className={LABEL}>Time off from PT</h3>
+      <section className="space-y-3" aria-labelledby="pt-away-title">
+        <h3 id="pt-away-title" className="font-display text-2xl uppercase text-xert-offwhite">Going away?</h3>
+        <p className="font-body text-sm text-xert-pale/70">Block out days so nobody can book PT with you. Class time off is under Requests.</p>
         {(overview.time_off || []).map(item => (
           <div key={item.id} className="coaching-card flex flex-wrap items-center justify-between gap-2">
             <p className="font-body text-sm text-xert-offwhite">{when(item.starts_at)} to {when(item.ends_at)}{item.note ? ` · ${item.note}` : ''}</p>
-            <button type="button" className={GHOST} disabled={busy} onClick={() => act(() => client.removeTimeOff(item.id), 'Removed.')}>Remove</button>
+            <button type="button" className={GHOST} disabled={busy} onClick={() => act(() => client.removeTimeOff(item.id), 'Removed. Those times can be booked again.')}>Remove</button>
           </div>
         ))}
         <div className="coaching-card space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className={LABEL} htmlFor="off-from">From</label><input id="off-from" type="date" min={today} className={INPUT} value={away.from} onChange={event => setAway({ ...away, from: event.target.value, until: away.until < event.target.value ? event.target.value : away.until })} /></div>
-            <div><label className={LABEL} htmlFor="off-from-time">Time</label><input id="off-from-time" type="time" className={INPUT} placeholder="Start of day" value={away.fromTime} onChange={event => setAway({ ...away, fromTime: event.target.value })} /></div>
-            <div><label className={LABEL} htmlFor="off-until">Until</label><input id="off-until" type="date" min={away.from} className={INPUT} value={away.until} onChange={event => setAway({ ...away, until: event.target.value })} /></div>
-            <div><label className={LABEL} htmlFor="off-until-time">Time</label><input id="off-until-time" type="time" className={INPUT} placeholder="End of day" value={away.untilTime} onChange={event => setAway({ ...away, untilTime: event.target.value })} /></div>
-          </div>
-          <input className={INPUT} maxLength={200} placeholder="Note (optional, only you see it)" aria-label="Note" value={away.note} onChange={event => setAway({ ...away, note: event.target.value })} />
-          <p className="font-body text-xs text-xert-pale/60">This only stops PT bookings. Time off from classes is under Requests.</p>
+          <label className="flex items-center gap-2 font-body text-sm text-xert-offwhite"><input type="checkbox" checked={away.partDay} onChange={event => setAway({ ...away, partDay: event.target.checked })} />Just part of one day</label>
+          {away.partDay ? (
+            <div className="grid grid-cols-3 gap-3">
+              <div><label className={LABEL} htmlFor="off-day">Day</label><input id="off-day" type="date" min={today} className={INPUT} value={away.from} onChange={event => setAway({ ...away, from: event.target.value })} /></div>
+              <div><label className={LABEL} htmlFor="off-from-time">From</label><input id="off-from-time" type="time" className={INPUT} value={away.fromTime} onChange={event => setAway({ ...away, fromTime: event.target.value })} /></div>
+              <div><label className={LABEL} htmlFor="off-until-time">Until</label><input id="off-until-time" type="time" className={INPUT} value={away.untilTime} onChange={event => setAway({ ...away, untilTime: event.target.value })} /></div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className={LABEL} htmlFor="off-from">First day away</label><input id="off-from" type="date" min={today} className={INPUT} value={away.from} onChange={event => setAway({ ...away, from: event.target.value, until: away.until < event.target.value ? event.target.value : away.until })} /></div>
+              <div><label className={LABEL} htmlFor="off-until">Last day away</label><input id="off-until" type="date" min={away.from} className={INPUT} value={away.until} onChange={event => setAway({ ...away, until: event.target.value })} /></div>
+            </div>
+          )}
+          <input className={INPUT} maxLength={200} placeholder="Note to yourself (optional)" aria-label="Note" value={away.note} onChange={event => setAway({ ...away, note: event.target.value })} />
           <button type="button" className={GHOST} disabled={busy || !awayStart || !awayEnd || awayEnd <= awayStart} onClick={async () => {
-            const result = await act(() => client.addTimeOff(awayStart, awayEnd, away.note), out => out.clashes?.length ? `Saved. You still have ${out.clashes.length} booking${out.clashes.length === 1 ? '' : 's'} in that time; cancel them under Bookings if needed.` : 'Time off saved.');
-            if (result) setAway({ from: today, fromTime: '', until: today, untilTime: '', note: '' });
-          }}>Add time off</button>
+            const result = await act(() => client.addTimeOff(awayStart, awayEnd, away.note), out => out.clashes?.length ? `Saved. You still have ${out.clashes.length} booking${out.clashes.length === 1 ? '' : 's'} then; cancel them under Bookings if you need to.` : 'Saved. Nobody can book you then.');
+            if (result) setAway({ from: today, until: today, partDay: false, fromTime: '09:00', untilTime: '12:00', note: '' });
+          }}>Block out this time</button>
         </div>
       </section>
     </div>
@@ -457,7 +537,7 @@ export default function CoachPT({ client: injected = null, today = gymDateKey(ne
     <div className="space-y-4">
       {setupNeeded && (
         <Banner tone="info" title="Set up your PT">
-          Add a session type with your price under Prices, then your bookable hours under Hours. You’ll then appear at xertfitness.com.au/pt as {overview.staff.public_name}.
+          Two steps: add a session and your price under Prices, then tap the times you can train people under Hours. You’ll then appear at xertfitness.com.au/pt as {overview.staff.public_name}.
         </Banner>
       )}
       <div role="tablist" aria-label="PT sections" className="coaching-tabs">
