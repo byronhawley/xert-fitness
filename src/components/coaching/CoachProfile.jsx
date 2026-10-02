@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { staffFiles } from '@/lib/staffFiles';
+import { fileProblem, staffFiles } from '@/lib/staffFiles';
+import PhotoCropper from './PhotoCropper';
 import { Banner, BUTTON, dateName, GHOST, INPUT, LABEL, Pill, Sheet } from './coachingUi';
 
 /** @type {Array<[string, string, string, number]>} */
@@ -35,6 +36,7 @@ function ProfileSection({ client, files, uid, notify }) {
   const [form, setForm] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [cropping, setCropping] = useState(null);
   const load = useCallback(async () => {
     try {
       const result = await client.myProfile();
@@ -57,11 +59,21 @@ function ProfileSection({ client, files, uid, notify }) {
       if (failure.code === 'STALE_VERSION') await load();
     } finally { setBusy(false); }
   };
-  const upload = async file => {
+  // A picked photo opens the cropper first; the framed 4:5 crop is what gets uploaded.
+  const pick = file => {
     if (!file || !files) return;
+    const problem = fileProblem(file, 'photo-pick');
+    if (problem) { notify(problem, 'error'); return; }
+    setCropping({ file });
+  };
+  const upload = async blob => {
     setBusy(true);
-    try { const url = await files.uploadProfilePhoto(uid, file); setForm(current => ({ ...current, photo_url: url })); notify('Photo uploaded. Save or send your profile to keep it.'); }
-    catch (failure) { notify(failure.message, 'error'); } finally { setBusy(false); }
+    try {
+      const url = await files.uploadProfilePhoto(uid, blob);
+      setForm(current => ({ ...current, photo_url: url }));
+      setCropping(null);
+      notify('Photo ready. Save or send your profile to keep it.');
+    } catch (failure) { notify(failure.message, 'error'); } finally { setBusy(false); }
   };
 
   if (error) return <Banner tone="danger" title="Couldn’t load your profile" action={<button type="button" className={GHOST} onClick={load}>Try again</button>}>{error.message}</Banner>;
@@ -81,11 +93,13 @@ function ProfileSection({ client, files, uid, notify }) {
           <div className="coaching-photo" aria-hidden="true">{form.photo_url ? <img src={form.photo_url} alt="" /> : <span>No photo</span>}</div>
           <div className="space-y-1">
             <label className={GHOST} htmlFor="coach-photo-upload">{form.photo_url ? 'Replace photo' : 'Upload photo'}</label>
-            <input id="coach-photo-upload" type="file" accept="image/*" className="sr-only" disabled={busy || !files} onChange={event => { upload(event.target.files?.[0]); event.target.value = ''; }} />
+            <input id="coach-photo-upload" type="file" accept="image/*" className="sr-only" disabled={busy || !files} onChange={event => { pick(event.target.files?.[0]); event.target.value = ''; }} />
+            {form.photo_url && <button type="button" className={GHOST} disabled={busy || !files} onClick={() => setCropping({ url: form.photo_url })}>Adjust position</button>}
             {form.photo_url && <button type="button" className={GHOST} onClick={() => setForm(current => ({ ...current, photo_url: '' }))}>Remove photo</button>}
-            <p className="font-body text-xs text-xert-pale/50">JPG or PNG under 5 MB. Portrait works best.</p>
+            <p className="font-body text-xs text-xert-pale/50">Any photo from your phone. You can drag and zoom it to fit the card.</p>
           </div>
         </div>
+        <PhotoCropper source={cropping} busy={busy} onCancel={() => setCropping(null)} onDone={upload} />
         {PROFILE_FIELDS.map(([key, label, kind, max]) => (
           <div key={key}>
             <label htmlFor={`coach-profile-${key}`} className={LABEL}>{label}</label>
