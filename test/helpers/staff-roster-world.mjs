@@ -44,7 +44,8 @@ export async function rejects(db, uid, sql, params, pattern) {
   await assert.rejects(() => db.query(sql, params), error => pattern.test(error.message) || pattern.test(String(error.detail)));
 }
 
-export async function world({ enabled = true } = {}) {
+// `openPeriod: false` leaves MONTH without a period, e.g. to open a part-month one.
+export async function world({ enabled = true, openPeriod = true } = {}) {
   const db = await migratedDatabase({ extraSql: STUB_CLASS_UPDATE });
   await db.exec(`
     insert into public.profiles (id, full_name, email, role) values
@@ -61,7 +62,9 @@ export async function world({ enabled = true } = {}) {
       JSON.stringify({ display_name: name, profile_id: ids[key], roles }), rid()]);
     staff[key] = row.id;
   }
-  await rpc(db, ids.owner, 'select public.staff_roster_open_period($1, $2, $3, $4, false, $5)', [MONTH_DATE, TODAY, dateInMonth(addMonths(MONTH, -1), 5), dateInMonth(addMonths(MONTH, -1), 10), rid()]);
+  if (openPeriod) {
+    await rpc(db, ids.owner, 'select public.staff_roster_open_period($1, $2, $3, $4, false, $5)', [MONTH_DATE, TODAY, dateInMonth(addMonths(MONTH, -1), 5), dateInMonth(addMonths(MONTH, -1), 10), rid()]);
+  }
   return { db, staff };
 }
 

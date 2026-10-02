@@ -24,12 +24,26 @@ export function publishPreview(snapshot, ctx) {
   return { blocked, gaps, impact: publishImpact(snapshot) };
 }
 
+/**
+ * Open required spots to show: the server's count once it has refused for
+ * gaps (it returns a number), otherwise the screen's own preview.
+ */
+export function gapCount(serverResult, preview) {
+  if (serverResult?.reason === 'GAPS_NEED_ACKNOWLEDGEMENT') {
+    const gaps = serverResult.gaps;
+    if (Array.isArray(gaps)) return gaps.length;
+    const count = Number(gaps);
+    return Number.isFinite(count) && count >= 0 ? count : preview.gaps.length;
+  }
+  return preview.gaps.length;
+}
+
 export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx, busy, onPublish }) {
   const preview = useMemo(() => (open ? publishPreview(snapshot, ctx) : null), [open, snapshot, ctx]);
   const [reason, setReason] = useState('');
   const [serverResult, setServerResult] = useState(null);
   if (!preview) return null;
-  const gaps = serverResult?.reason === 'GAPS_NEED_ACKNOWLEDGEMENT' ? serverResult.gaps.length : preview.gaps.length;
+  const gaps = gapCount(serverResult, preview);
   const blocked = preview.blocked.length > 0 || serverResult?.reason === 'HARD_CONFLICTS';
   const ready = !blocked && (gaps === 0 || reason.trim().length >= 3);
   const first = !snapshot.published;

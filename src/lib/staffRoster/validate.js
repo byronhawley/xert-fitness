@@ -17,6 +17,8 @@ export const PROBLEM_MESSAGES = Object.freeze({
   SESSION_NOT_FOUND: 'This class no longer exists.',
   SESSION_NOT_LIVE: 'This class is cancelled or finished, so it needs no coach.',
   SESSION_STARTED: 'This class has already started. Past assignments are kept as history.',
+  SESSION_OUTSIDE_MONTH: 'This class belongs to another month’s roster.',
+  SESSION_BEFORE_ROSTER_START: 'Before this month’s roster starts; this class stays with its current coach.',
   SLOT_UNKNOWN: 'This class has no such staffing position.',
   SLOT_TAKEN: 'Someone else already fills this position.',
   STAFF_UNKNOWN: 'This coach is not on the roster.',
@@ -94,6 +96,7 @@ export function checkAssignment(ctx, { sessionId, slotKey, staffId }, { ignoreAs
 
   if (!LIVE_SESSION_STATUSES.includes(session.status)) hard.push(problem('SESSION_NOT_LIVE'));
   else if (ctx.now != null && session.start <= ctx.now) hard.push(problem('SESSION_STARTED'));
+  if (session.beforeRosterStart) hard.push(problem('SESSION_BEFORE_ROSTER_START'));
   if (!slot) hard.push(problem('SLOT_UNKNOWN'));
   if (member.status !== 'active') hard.push(problem('STAFF_INACTIVE'));
   if (slot && !(member.roles || []).includes(slot.role)) hard.push(problem('ROLE_NOT_AUTHORISED'));

@@ -77,6 +77,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   staff_roster_coach_dashboard: 'Apply supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql in Supabase (after 20261002010000_staff_roster_push_reliability.sql).',
   // Installs switched off; the PT page and coach PT tab stay hidden until the owner turns it on.
   pt_booking: 'Apply supabase/migrations/20261002030000_pt_booking.sql in Supabase (after the staff roster migrations).',
+  // Part-month roster periods (roster coaches from a date inside a month that has started).
+  staff_roster_part_month: 'Apply supabase/migrations/20261002040000_staff_roster_part_month.sql in Supabase (after 20261002020000_staff_roster_coach_dashboard.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

@@ -12,11 +12,12 @@ separate go-ahead.
 | Schema, rules, permissions | `supabase/migrations/20261001010000_staff_roster.sql` (additive; **applied in production 2026-10-01, never edit**) |
 | Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; applied in production 2026-10-02 01:46 UTC) |
 | Coach invite links + coach dashboard | `supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql` (forward migration, additive, idempotent; not yet applied) |
+| Part-month roster periods | `supabase/migrations/20261002040000_staff_roster_part_month.sql` (forward migration, additive, idempotent; not yet applied) |
 | Push scheduler (not a migration) | `docs/staff-roster/push-dispatch-schedule.sql` (pg_cron + pg_net + Vault; activate only with approval) |
 | Manager screens | Command Centre → Classes → **Coach roster** (`/admin/roster`) |
 | Coach screens | `/coaching` (website and the app's web views; staff link, no membership needed). Opens on **Home** (setup checklist, next classes, shortcuts); older `?tab=` links open the same tabs as before |
 | Coach invite page | `/coach-invite#token=…` (public route; the token is in the URL fragment, so it never reaches a server log) |
-| Release gate | `staff_roster`, `staff_roster_push_reliability` and `staff_roster_coach_dashboard` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
+| Release gate | `staff_roster`, `staff_roster_push_reliability`, `staff_roster_coach_dashboard` and `staff_roster_part_month` in `schemaCapabilities.js`, `src/supabase/release_readiness_check.sql`, `codemagic.yaml` |
 | Full removal script | `docs/staff-roster/rollback.sql` (manual, not a migration) |
 
 The migration does not change bookings, waitlists, attendance, payments,
@@ -94,6 +95,29 @@ editor (they need the usual Supabase owner rights), the whole file rolls back. A
 it: both gates require the capability.
 Check: `select capability from public.xert_schema_capabilities where capability like 'staff_roster%';`
 returns three rows.
+
+### 1c. Apply the part-month migration (needs approval)
+
+`20261002040000_staff_roster_part_month.sql` goes on top of `20261002020000`
+(and independently of `20261002030000_pt_booking.sql`), the same way: SQL
+editor only, whole file at once, backup first. It starts with
+`set local lock_timeout = '5s'`, is idempotent, and records
+`staff_roster_part_month` as its **last** statement. It adds a nullable
+`staff_roster_periods.starts_on` (null for every existing period, which keeps
+working exactly as before), re-adds the `staff_roster_periods_order` check so
+answers are due before `coalesce(starts_on, month)`, adds the
+`staff_roster_periods_starts_on` check, adds `staff_roster_open_part_month`
+(managers only), and replaces `staff_roster_gaps`, `staff_roster_month_classes`,
+`staff_roster_assignment_problems` and `staff_roster_me` with the same
+functions plus one marked `-- part-month` line each, so classes before the
+start day are not asked about, not gaps, and cannot be assigned
+(`SESSION_BEFORE_ROSTER_START`).
+
+In the app: open the month on the Availability tab. When the month has already
+started and has no period, it asks which day to roster coaches from (a week
+from today by default), due three days before it and publish-by the day
+before. Classes before that day keep whatever coach they have now; publishing
+never touches them.
 
 ## 2. Set up and switch on
 

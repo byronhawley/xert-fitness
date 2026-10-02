@@ -24,6 +24,8 @@ export const ROSTER_ERROR_MESSAGES = Object.freeze({
   PERIOD_NOT_FOUND: 'Availability has not been opened for this month.',
   PERIOD_EXISTS: 'Availability is already open for this month.',
   NO_BACKDATING: 'Dates cannot be set in the past.',
+  STARTS_ON_INVALID: 'Choose a start day later in the month, after today.',
+  ASSIGNMENTS_BEFORE_START: 'Some coaches are already rostered on classes before that start day. Remove them on the Roster tab, or choose an earlier start day.',
   DEADLINE_PASSED: 'The deadline has passed. Ask the manager to reopen your availability.',
   AVAILABILITY_INVALID: 'Some answers need fixing before you can submit.',
   NO_DRAFT: 'There is no draft to change.',
@@ -99,7 +101,8 @@ function parseDetail(detail) {
 
 // Table rules the database enforces directly (no roster error code of their own).
 const CONSTRAINT_MESSAGES = Object.freeze({
-  staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month starts, and the publish-by date must be on or after the due date.',
+  staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month (or its roster) starts, and the publish-by date must be on or after the due date.',
+  staff_roster_periods_starts_on: 'Check the dates: the roster must start on a later day of the same month, after the publish-by date.',
 });
 const CONSTRAINT_PATTERN = /violates check constraint "([a-z0-9_]+)"/;
 
@@ -167,6 +170,10 @@ export function createStaffRosterClient(rpc, { notifyPush = null } = {}) {
     linkCandidates: query => call('link_candidates', { p_query: query }),
     openPeriod: (month, { opensOn, dueOn, publishTargetOn, shortened }) => call('open_period', {
       p_month: monthParam(month), p_opens_on: opensOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_shortened: Boolean(shortened), p_request_id: rid(),
+    }),
+    // Part of a month that has started: classes from `startsOn`, coaches asked today.
+    openPartMonth: (month, { startsOn, dueOn, publishTargetOn }) => call('open_part_month', {
+      p_month: monthParam(month), p_starts_on: startsOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_request_id: rid(),
     }),
     updatePeriod: (month, { dueOn, publishTargetOn }, version) => call('update_period', { p_month: monthParam(month), p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_expected_version: version }),
     reopenSubmission: (month, staffId, reason) => pushing(call('reopen_submission', { p_month: monthParam(month), p_staff_id: staffId, p_reason: reason, p_request_id: rid() })),

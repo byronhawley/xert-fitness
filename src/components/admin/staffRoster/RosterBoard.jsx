@@ -48,12 +48,17 @@ function SlotRow({ ctx, session, slot, assignment, moving, readOnly, onOpen, onD
   );
 }
 
-function SessionCard({ ctx, session, coverage, shortage, focused, selected, onToggleSelect, moving, onOpen, onDrop, onPlace }) {
+/** Why a class before a part-month roster's first day can't be changed here. */
+function beforeStartLabel(startsOn) {
+  return `Before this roster starts on ${dayLabel(startsOn)}; it stays with the current coach.`;
+}
+
+function SessionCard({ ctx, session, coverage, shortage, focused, selected, onToggleSelect, moving, onOpen, onDrop, onPlace, startsOn = null }) {
   const staffing = normalizeStaffing(session.staffing);
   const filled = ctx.bySession.get(session.id) || [];
   const past = session.start <= ctx.now;
   const live = LIVE_SESSION_STATUSES.includes(session.status);
-  const readOnly = !session.inMonth ? `Belongs to the ${monthLabel(monthKeyOf(gymDateOf(session.start)))} roster.` : past ? 'This class has started; its roster is history.' : !live ? 'Cancelled — needs no coach.' : null;
+  const readOnly = session.beforeRosterStart && startsOn ? beforeStartLabel(startsOn) : !session.inMonth ? `Belongs to the ${monthLabel(monthKeyOf(gymDateOf(session.start)))} roster.` : past ? 'This class has started; its roster is history.' : !live ? 'Cancelled — needs no coach.' : null;
   return (
     <article className="staff-roster-session" data-coverage={coverage?.status || (live ? 'gap' : 'cancelled')} data-shortage={shortage} data-focused={focused} data-past={past}
       id={`roster-session-${session.id}`} aria-label={sessionLabel(session)}>
@@ -69,6 +74,7 @@ function SessionCard({ ctx, session, coverage, shortage, focused, selected, onTo
         )}
       </div>
       {!live && <Tone tone="neutral">{session.status === 'cancelled' ? 'Cancelled' : session.status}</Tone>}
+      {session.beforeRosterStart && startsOn && live && !past && <p className="font-body text-xs text-xert-pale/60">{beforeStartLabel(startsOn)}</p>}
       {live && !past && session.inMonth && coverage?.status === 'gap' && <Tone tone="danger">Needs a coach</Tone>}
       {shortage && live && !past && <Tone tone="warning">Not enough coaches free</Tone>}
       {session.addedSinceSubmission?.size > 0 && live && !past && <Tone tone="warning">Added after availability was given</Tone>}
@@ -161,7 +167,8 @@ export default function RosterBoard({ month, today, data, settings, filters, set
   };
   const drawerSession = drawer ? ctx.sessions.get(drawer.sessionId) : null;
   const drawerReadOnly = drawerSession && !plannable(drawerSession)
-    ? (!drawerSession.inMonth ? 'This class belongs to the neighbouring month’s roster. Open that month to change it.' : 'This class has started or is cancelled. Past rosters are kept as history.') : null;
+    ? (drawerSession.beforeRosterStart && snapshot.period?.starts_on ? beforeStartLabel(snapshot.period.starts_on)
+      : !drawerSession.inMonth ? 'This class belongs to the neighbouring month’s roster. Open that month to change it.' : 'This class has started or is cancelled. Past rosters are kept as history.') : null;
   const draft = snapshot.draft;
   const published = snapshot.published;
 
@@ -250,7 +257,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
                       <SessionCard key={session.id} ctx={ctx} session={session} coverage={coverage.bySession[session.id]} shortage={shortageIds.has(session.id)}
                         focused={filters.session === session.id} selected={selected.has(session.id)}
                         onToggleSelect={id => setSelected(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; })}
-                        moving={moving} onOpen={open} onDrop={drop} onPlace={place} />
+                        moving={moving} onOpen={open} onDrop={drop} onPlace={place} startsOn={snapshot.period?.starts_on || null} />
                     ))}
                   </section>
                 );

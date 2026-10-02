@@ -20,6 +20,12 @@
 -- (certificate files are personal records; export them first).
 -- Website coach profiles approved from coach drafts stay in public.coaches.
 --
+-- Also covers 20261002040000_staff_roster_part_month.sql (part-month periods):
+-- its staff_roster_periods.starts_on column and the staff_roster_periods_order
+-- and staff_roster_periods_starts_on checks go with the staff_roster_periods
+-- table, and its staff_roster_open_part_month function (and the four roster
+-- functions it replaced) are dropped by the loop below.
+--
 -- Refuses to run while PT booking (capability `pt_booking`) is installed: its
 -- tables reference staff_members and would be broken by the cascade.
 --
@@ -29,8 +35,9 @@
 -- otherwise the job keeps calling a function that no longer exists.
 --
 -- After running it, also revert the app release that lists `staff_roster`,
--- `staff_roster_push_reliability` and `staff_roster_coach_dashboard` as required
--- capabilities, or the release gate will report them missing.
+-- `staff_roster_push_reliability`, `staff_roster_coach_dashboard` and
+-- `staff_roster_part_month` as required capabilities, or the release gate will
+-- report them missing.
 
 begin;
 
@@ -89,6 +96,6 @@ drop table if exists
   public.staff_members, public.staff_roster_settings
 cascade;
 
-delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard');
+delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard', 'staff_roster_part_month');
 
 commit;

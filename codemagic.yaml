@@ -364,6 +364,7 @@ workflows:
               "staff_roster_push_reliability",
               "staff_roster_coach_dashboard",
               "pt_booking",
+              "staff_roster_part_month",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {
