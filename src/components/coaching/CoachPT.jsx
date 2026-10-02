@@ -149,7 +149,7 @@ function BookingsSection({ overview, clients, client, today, notify, reload }) {
       {group('Requests to answer', requests)}
       {group('Mark how it went', toMark)}
       {group('Not paid yet', unpaid)}
-      {group('Coming up', upcoming, 'Nothing booked yet. Once your prices and hours are set, the public can book you at xertfitness.com.au/pt.')}
+      {group('Coming up', upcoming, overview.services.some(item => item.active) && (overview.hours.hours || []).length ? 'Nothing coming up.' : 'Nothing booked yet. Once your prices and hours are set, the public can book you at xertfitness.com.au/pt.')}
       {group('Recent', recent)}
       <BookClientSheet open={booking} onClose={() => setBooking(false)} services={overview.services} clients={clients} today={today} busy={busy}
         onSubmit={async payload => { if (await act(() => client.coachBook(payload), 'Booked. We’ve emailed them.')) setBooking(false); }} />

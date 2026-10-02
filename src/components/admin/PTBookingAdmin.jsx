@@ -104,7 +104,7 @@ export default function PTBookingAdmin({ client: injected = null }) {
             <li key={coach.staff_id} className="py-2 flex flex-wrap items-center justify-between gap-2 font-body text-sm">
               <span className="text-xert-offwhite">{coach.name}{coach.status !== 'active' ? ' (inactive)' : ''}</span>
               <span className="text-xert-pale/60">
-                {!coach.linked ? 'Sign-in not linked' : coach.services && coach.has_hours ? `${coach.upcoming} upcoming · ${coach.clients} clients` : coach.services ? 'No hours yet' : 'No prices yet'}
+                {!coach.linked ? 'Sign-in not linked' : coach.services && coach.has_hours ? `${coach.upcoming} upcoming · ${coach.clients} client${coach.clients === 1 ? '' : 's'}` : coach.services ? 'No hours yet' : 'No prices yet'}
               </span>
             </li>
           ))}
