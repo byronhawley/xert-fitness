@@ -236,6 +236,17 @@ function InviteDrawer({ row, invite, busy, onClose, onMutate, onChanged }) {
   );
 }
 
+/**
+ * "No mobile" when a coach who signs in has no valid Australian mobile on
+ * their XERT account, so roster texts can't reach them. Null otherwise.
+ */
+export function mobileBadge(row, mobileState) {
+  if (row.status !== 'active' || !row.profile_id) return null;
+  if (mobileState === 'missing') return { label: 'No mobile', detail: 'No mobile number on their XERT account, so they won’t get roster texts. Add it in their account details.' };
+  if (mobileState === 'invalid') return { label: 'No mobile', detail: 'The phone number on their XERT account isn’t an Australian mobile (04…), so they won’t get roster texts.' };
+  return null;
+}
+
 /** One plain status per coach, in words: what they can do now, and what's next. */
 export function coachRowState(row, invite) {
   if (row.status !== 'active') return { key: 'inactive', label: 'Inactive', tone: 'neutral', detail: 'Not offered for classes. History is kept.' };
@@ -257,6 +268,17 @@ export default function CoachesPanel({ data, onMutate, focusStaffId, intent = nu
     if (Array.isArray(rows)) setInvites(Object.fromEntries(rows.map(item => [item.staff_id, item])));
   }, [onMutate]);
   useEffect(() => { loadInvites(); }, [loadInvites]);
+  // Mobile numbers for the "No mobile" badge. A read only: a failure shows no badge.
+  const [mobiles, setMobiles] = useState({});
+  const rpcClient = data.client;
+  useEffect(() => {
+    if (typeof rpcClient?.smsStatus !== 'function') return undefined;
+    let live = true;
+    rpcClient.smsStatus(null)
+      .then(status => { if (live) setMobiles(Object.fromEntries((status?.coaches || []).map(item => [item.staff_id, item.mobile]))); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [rpcClient, snapshot]);
   useEffect(() => {
     if (intent === 'add-coach') { setEditing('new'); onIntentDone(); }
   }, [intent, onIntentDone]);
@@ -284,11 +306,13 @@ export default function CoachesPanel({ data, onMutate, focusStaffId, intent = nu
         {states.map(({ row, state }) => {
           const invite = invites[row.id];
           const canInvite = !row.profile_id && row.status === 'active';
+          const mobile = mobileBadge(row, mobiles[row.id]);
           return (
             <li key={row.id} id={`roster-staff-${row.id}`} className="staff-roster-row" data-focused={focusStaffId === row.id}>
               <div className="min-w-0">
-                <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} <Tone tone={state.tone}>{state.label}</Tone></p>
+                <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} <Tone tone={state.tone}>{state.label}</Tone>{mobile && <> <Tone tone="warning">{mobile.label}</Tone></>}</p>
                 <p className="font-body text-xs text-xert-pale/60">{row.roles.map(role => ROLE_LABELS[role]).join(', ')} · {state.detail}{row.capabilities?.length ? ` · ${row.capabilities.map(item => item.capability).join(', ')}` : ''}</p>
+                {mobile && <p className="font-body text-xs text-status-warning-200">{mobile.detail}</p>}
               </div>
               <div className="flex flex-wrap gap-2">
                 {canInvite && <AdminButton variant={invite?.status === 'pending' ? 'ghost' : 'primary'} onClick={() => setInviting(row)}>{invite?.status === 'pending' ? 'Invite again' : 'Invite'}<span className="visually-hidden"> {row.display_name}</span></AdminButton>}

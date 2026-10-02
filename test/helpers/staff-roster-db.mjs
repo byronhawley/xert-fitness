@@ -1,5 +1,6 @@
 // Runs the real staff roster migrations (the applied first release, the push
-// reliability forward migration, then coach invites) inside PGlite (PostgreSQL in WASM)
+// reliability forward migration, coach invites, part-month periods, then roster
+// text messages) inside PGlite (PostgreSQL in WASM)
 // over a minimal stand-in for the XERT tables it builds on. SYNTHETIC DATA.
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
@@ -8,6 +9,8 @@ export const MIGRATION_URLS = Object.freeze([
   new URL('../../supabase/migrations/20261001010000_staff_roster.sql', import.meta.url),
   new URL('../../supabase/migrations/20261002010000_staff_roster_push_reliability.sql', import.meta.url),
   new URL('../../supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261002040000_staff_roster_part_month.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261002050000_staff_roster_sms.sql', import.meta.url),
 ]);
 
 /** Every roster migration, in order, as one SQL script. */
@@ -22,7 +25,7 @@ export const BASE_SCHEMA = `
     select nullif(current_setting('test.uid', true), '')::uuid
   $$;
   create table public.profiles (
-    id uuid primary key, full_name text, email text, role text not null default 'member',
+    id uuid primary key, full_name text, email text, phone text, role text not null default 'member',
     created_at timestamptz not null default now(), updated_at timestamptz not null default now()
   );
   create function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$

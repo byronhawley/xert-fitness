@@ -42,6 +42,18 @@ function GeneralSettings({ settings, month, busy, onMutate, children = null }) {
         )}
       </section>
 
+      {'sms_enabled' in settings && (
+        <section className="space-y-3" aria-labelledby="roster-texts">
+          <h3 id="roster-texts" className={ADMIN_TEXT.sectionHeading}>Text messages</h3>
+          <Notice tone={settings.sms_enabled ? 'success' : 'info'} title={settings.sms_enabled ? 'On — coaches get a text when you publish' : 'Off — no texts are sent'}
+            action={<AdminButton variant={settings.sms_enabled ? 'ghost' : 'primary'} disabled={busy} onClick={() => onMutate(client => client.setSmsEnabled(!settings.sms_enabled, settings.version),
+              settings.sms_enabled ? 'Texts switched off. Texts still waiting were cancelled.' : 'Texts switched on. Coaches will get a text the next time you publish.')}>
+              {settings.sms_enabled ? 'Stop texting coaches' : 'Text coaches when you publish'}</AdminButton>}>
+            When on, publishing texts each coach their classes for the month. After that, only coaches whose classes change get a text, listing just the changes. Each text uses the gym’s SMS credit (usually 1 to 3 texts per coach). Coaches need an Australian mobile on their XERT account, and each coach can turn texts off.
+          </Notice>
+        </section>
+      )}
+
       <details className="staff-roster-more" open={Boolean(switchState.blockReason || switchState.namesStillShowing) || undefined}>
         <summary><span className="font-body text-base font-semibold text-xert-offwhite">More settings</span><span className="font-body text-xs text-xert-pale/60">Usual monthly dates, reminders, rules, staffing by class type, repeating classes. Most gyms never change these.</span></summary>
         <div className="space-y-8">

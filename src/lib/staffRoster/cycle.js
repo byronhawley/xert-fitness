@@ -70,7 +70,7 @@ export function planPeriodOpening(monthKey, { today, cycle = DEFAULT_CYCLE, dueO
   const defaults = defaultPeriodDates(monthKey, cycle);
   const firstOfMonth = dateInMonth(monthKey, 1);
   if (compareDateKeys(today, firstOfMonth) >= 0) {
-    throw new Error('This roster month has already started. Plan it with a shortened cycle from the previous month instead.');
+    throw new Error('This roster month has already started. Roster coaches for the rest of the month from a later date instead.');
   }
   const shortened = compareDateKeys(today, defaults.opensOn) > 0;
   const opensOn = shortened ? today : defaults.opensOn;
@@ -88,6 +88,62 @@ export function planPeriodOpening(monthKey, { today, cycle = DEFAULT_CYCLE, dueO
   if (compareDateKeys(publishTargetOn, dueOn) < 0) publishTargetOn = dueOn;
   if (compareDateKeys(publishTargetOn, firstOfMonth) >= 0) publishTargetOn = addDays(firstOfMonth, -1);
   return { month: monthKey, opensOn, dueOn, publishTargetOn, shortened, needsDueDate: false };
+}
+
+/**
+ * The start dates a part-month period can take for `monthKey` on `today`: a
+ * later day of the same month, after both the 1st and today. `suggested` is a
+ * week from today (or the month's last day), so coaches get some notice.
+ * Null when no day is left to roster.
+ * @param {string} monthKey
+ * @param {string} today
+ * @returns {{ min: string, max: string, suggested: string } | null}
+ */
+export function partMonthStartRange(monthKey, today) {
+  parseMonthKey(monthKey);
+  if (!isDateKey(today)) throw new Error('Opening a roster month needs today’s gym date.');
+  const first = dateInMonth(monthKey, 1);
+  const last = dateInMonth(monthKey, 31);
+  const min = addDays(compareDateKeys(today, first) > 0 ? today : first, 1);
+  if (compareDateKeys(min, last) > 0) return null;
+  let suggested = addDays(today, 7);
+  if (compareDateKeys(suggested, min) < 0) suggested = min;
+  if (compareDateKeys(suggested, last) > 0) suggested = last;
+  return { min, max: last, suggested };
+}
+
+/**
+ * Dates for a part-month period: `monthKey` rostered from `startsOn`, asked
+ * from today. Same rules as `staff_roster_open_part_month` and the
+ * staff_roster_periods checks: the start is a later day of the month after
+ * the 1st and after today; answers are due from today and before the start;
+ * the publish target is on or after the due date and before the start.
+ * Defaults: due three days before the start (never before today), publish
+ * target the day before the start.
+ * @param {string} monthKey
+ * @param {{ today?: string, startsOn?: string, dueOn?: string | null, publishTargetOn?: string | null }} [options]
+ */
+export function planPartMonthOpening(monthKey, { today, startsOn, dueOn: chosenDue = null, publishTargetOn: chosenPublish = null } = {}) {
+  if (!isDateKey(today)) throw new Error('Opening a roster month needs today’s gym date.');
+  const range = partMonthStartRange(monthKey, today);
+  if (!range) throw new Error('This roster month has no days left to roster.');
+  if (!isDateKey(startsOn)) throw new Error('Choose the first day to roster coaches.');
+  if (compareDateKeys(startsOn, range.min) < 0 || compareDateKeys(startsOn, range.max) > 0) {
+    throw new Error(`Roster coaches from a day between ${range.min} and ${range.max}.`);
+  }
+  const dayBefore = addDays(startsOn, -1);
+  let dueOn = chosenDue;
+  if (!dueOn) {
+    dueOn = addDays(startsOn, -3);
+    if (compareDateKeys(dueOn, today) < 0) dueOn = today;
+  }
+  if (!isDateKey(dueOn)) throw new Error('Choose a valid due date.');
+  if (compareDateKeys(dueOn, today) < 0) throw new Error('The due date cannot be in the past.');
+  if (compareDateKeys(dueOn, startsOn) >= 0) throw new Error('Answers must be due before the roster starts.');
+  let publishTargetOn = chosenPublish || dayBefore;
+  if (compareDateKeys(publishTargetOn, dueOn) < 0) publishTargetOn = dueOn;
+  if (compareDateKeys(publishTargetOn, startsOn) >= 0) publishTargetOn = dayBefore;
+  return { month: monthKey, startsOn, opensOn: today, dueOn, publishTargetOn, shortened: true, partMonth: true, needsDueDate: false };
 }
 
 export function normalizeReminders(reminders = {}) {
