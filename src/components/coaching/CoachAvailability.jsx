@@ -180,7 +180,6 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
 
   const [payload, setPayload] = useState(null);
   const [source, setSource] = useState(null);
-  const [draftVersion, setDraftVersion] = useState(0);
   const [saveState, setSaveState] = useState('idle');
   const [classes, setClasses] = useState([]);
   const [classesReady, setClassesReady] = useState(false);
@@ -190,20 +189,90 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [changeMessage, setChangeMessage] = useState('');
-  const dirty = useRef(false);
   const timer = useRef(null);
   const topRef = useRef(null);
+  // Autosave. Drafts are versioned on the server and a save must name the
+  // version it replaces, so saves run one at a time, each with the version
+  // the previous one returned (`versions`, by month). The latest unsaved
+  // answer waits in `pending` and is saved on leaving the tab or the month
+  // too, never dropped. `answers` keeps this screen's own answer per month,
+  // so returning to a month (or a reload that only echoes our own saves)
+  // shows it rather than an older copy.
+  const versions = useRef(new Map());
+  const answers = useRef(new Map());
+  const pending = useRef(null);
+  const queue = useRef(Promise.resolve());
+  const shown = useRef(null);
+  const beforeNone = useRef(null);
+  const savedHere = useRef(false);
+  const currentMonth = useRef(month);
+  currentMonth.current = month;
+
+  const persist = useCallback((target, next) => {
+    const run = queue.current.then(async () => {
+      const here = () => currentMonth.current === target;
+      if (here()) setSaveState('saving');
+      try {
+        const result = await client.saveAvailabilityDraft(target, next, versions.current.get(target) ?? 0);
+        versions.current.set(target, result.version);
+        savedHere.current = true;
+        if (here()) setSaveState(pending.current?.month === target ? 'pending' : 'saved');
+      } catch (failure) {
+        if (here()) setSaveState('error');
+        if (failure.code === 'STALE_VERSION') {
+          answers.current.delete(target);
+          notify('Your availability was changed on another device. Showing the latest.', 'error');
+          onChanged?.();
+        }
+      }
+    });
+    queue.current = run.catch(() => {});
+    return run;
+  }, [client, notify, onChanged]);
+
+  const flush = () => {
+    clearTimeout(timer.current);
+    const item = pending.current;
+    pending.current = null;
+    return item ? persist(item.month, item.payload) : queue.current;
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
+  // Leaving the tab: save the last change, then refresh the coach's data so
+  // coming back shows the saved draft, not the copy loaded before it.
+  useEffect(() => () => {
+    flushRef.current().then(() => { if (savedHere.current) onChangedRef.current?.(); });
+  }, []);
 
   useEffect(() => {
     if (!period) return;
+    const key = period.month.slice(0, 7);
+    const submission = period.submission?.version || 0;
+    const serverDraft = period.draft?.version || 0;
+    const switching = shown.current && shown.current !== key;
+    // Leaving a month: its last answer is saved, not dropped.
+    if (switching && pending.current && pending.current.month !== key) flushRef.current();
+    const mine = answers.current.get(key);
+    if (mine && mine.submission === submission && (versions.current.get(key) ?? 0) >= serverDraft) {
+      // Only our own saves since: keep the answer on screen (and any unsaved change).
+      if (switching) { setPayload(mine.payload); setSource('draft'); setSaveState(pending.current?.month === key ? 'pending' : 'idle'); setStep('answer'); setSelected(null); beforeNone.current = null; }
+      shown.current = key;
+      return;
+    }
+    // A submit, a reopening or another device changed it: the server's copy wins.
+    if (pending.current?.month === key) { clearTimeout(timer.current); pending.current = null; }
+    answers.current.delete(key);
+    versions.current.set(key, serverDraft);
     const start = startingPoint(period, me.usual_week);
     setPayload(start.payload);
     setSource(start.source);
-    setDraftVersion(period.draft?.version || 0);
     setSaveState('idle');
     setStep('answer');
     setSelected(null);
-    dirty.current = false;
+    beforeNone.current = null;
+    shown.current = key;
   }, [period?.month, period?.draft?.version, period?.submission?.version]);
 
   useEffect(() => {
@@ -216,28 +285,15 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
     return () => { live = false; };
   }, [client, month]);
 
-  const saveDraft = useCallback(async next => {
-    setSaveState('saving');
-    try {
-      const result = await client.saveAvailabilityDraft(month, next, draftVersion);
-      setDraftVersion(result.version);
-      setSaveState('saved');
-      dirty.current = false;
-    } catch (failure) {
-      setSaveState('error');
-      if (failure.code === 'STALE_VERSION') { notify('Your availability was changed on another device. Showing the latest.', 'error'); onChanged?.(); }
-    }
-  }, [client, month, draftVersion, notify, onChanged]);
-
   const update = next => {
     if (next === payload) return;
     setPayload(next);
-    dirty.current = true;
+    answers.current.set(month, { payload: next, submission: period?.submission?.version || 0 });
+    pending.current = { month, payload: next };
     setSaveState('pending');
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => saveDraft(next), 1200);
+    timer.current = setTimeout(() => { flushRef.current(); }, 1200);
   };
-  useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => { if (step === 'review') topRef.current?.focus(); }, [step]);
 
   const states = useMemo(() => (payload && month ? dayStates(payload, month, classes, scope) : new Map()), [payload, month, classes, scope]);
@@ -274,9 +330,12 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
   };
 
   const submit = async () => {
-    clearTimeout(timer.current);
     setBusy(true);
     try {
+      // Save the latest answer as the draft first (and let any save on its
+      // way finish), so it is kept even if the submit is refused, and no
+      // draft save lands after the submission.
+      await flushRef.current();
       const result = await client.submitAvailability(month, payload);
       notify(`${monthName(month)} submitted${result?.version > 1 ? ` (version ${result.version})` : ''}. You can change it until ${dateName(period.due_on)}.`);
       onChanged?.();
@@ -314,7 +373,7 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
         {editable && (
           <p className="coaching-save-state" data-state={saveState} role="status" aria-live="polite">
             {saveState === 'saving' && 'Saving…'}{saveState === 'pending' && 'Saving soon…'}{saveState === 'saved' && 'Draft saved. Not sent to the manager until you submit.'}
-            {saveState === 'error' && <>Couldn’t save. <button type="button" className="underline" onClick={() => saveDraft(payload)}>Try again</button></>}
+            {saveState === 'error' && <>Couldn’t save. <button type="button" className="underline" onClick={() => persist(month, payload)}>Try again</button></>}
             {saveState === 'idle' && (source === 'usual_week' ? 'Started from your usual week.' : source === 'submission' ? 'Showing what you submitted.' : source === 'draft' ? 'Picking up your saved draft.' : '')}
           </p>
         )}
@@ -358,7 +417,11 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
           )}
 
           <label className="coaching-card flex items-center gap-3 font-body text-sm text-xert-offwhite min-h-11">
-            <input type="checkbox" className="h-5 w-5" checked={Boolean(payload.noAvailability)} onChange={event => update(event.target.checked ? { weekly: [], exceptions: [], noAvailability: true } : { ...payload, noAvailability: false })} />
+            <input type="checkbox" className="h-5 w-5" checked={Boolean(payload.noAvailability)} onChange={event => {
+              // Ticking clears the answers; unticking brings back what was there, so a mis-tap loses nothing.
+              if (event.target.checked) { beforeNone.current = payload; update({ weekly: [], exceptions: [], noAvailability: true }); }
+              else { update(beforeNone.current && !beforeNone.current.noAvailability ? beforeNone.current : { ...payload, noAvailability: false }); beforeNone.current = null; }
+            }} />
             I can’t coach at all in {monthName(month)}
           </label>
 
