@@ -13,6 +13,8 @@ import CoachRoster from '@/components/coaching/CoachRoster';
 import CoachAvailability from '@/components/coaching/CoachAvailability';
 import CoachRequests from '@/components/coaching/CoachRequests';
 import CoachInbox from '@/components/coaching/CoachInbox';
+import CoachPT from '@/components/coaching/CoachPT';
+import { ptClient } from '@/lib/ptBookingData';
 import '@/components/coaching/coaching.css';
 
 const TABS = [
@@ -20,6 +22,7 @@ const TABS = [
   { key: 'availability', label: 'Availability' },
   { key: 'requests', label: 'Requests' },
   { key: 'inbox', label: 'Inbox' },
+  { key: 'pt', label: 'PT', when: 'pt' },
 ];
 
 const BLOCKED = {
@@ -52,7 +55,11 @@ export default function Coaching({ client: injected = null }) {
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
   const today = gymDateKey(new Date());
-  const tab = TABS.some(item => item.key === params.get('tab')) ? params.get('tab') : 'roster';
+  // PT has its own switch; its tab only appears once PT booking is on.
+  const [ptOn, setPtOn] = useState(false);
+  useEffect(() => { ptClient().then(pt => pt.coaches()).then(result => setPtOn(Boolean(result?.enabled))).catch(() => setPtOn(false)); }, []);
+  const tabs = TABS.filter(item => !item.when || (item.when === 'pt' && ptOn));
+  const tab = tabs.some(item => item.key === params.get('tab')) ? params.get('tab') : 'roster';
 
   useEffect(() => { if (!injected) staffRoster().then(setClient); }, [injected]);
   const loadMe = useCallback(async () => {
@@ -92,7 +99,7 @@ export default function Coaching({ client: injected = null }) {
         <h1 className="font-display text-4xl uppercase text-xert-offwhite">Hi {me.staff.display_name}</h1>
       </header>
       <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5">
-        {TABS.map(item => (
+        {tabs.map(item => (
           <button key={item.key} type="button" role="tab" id={`coach-tab-${item.key}`} aria-selected={tab === item.key} aria-controls="coach-panel" onClick={() => setParam('tab', item.key)}>
             {item.label}{counts[item.key] ? <span className="coaching-count" aria-label={`, ${counts[item.key]} need you`}>{counts[item.key]}</span> : null}
           </button>
@@ -103,6 +110,7 @@ export default function Coaching({ client: injected = null }) {
         {tab === 'availability' && <CoachAvailability client={client} me={me} monthParam={params.get('month') || ''} setMonthParam={value => setParam('month', value)} notify={notify} onChanged={loadMe} />}
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'inbox' && <CoachInbox client={client} notify={notify} onChanged={loadMe} />}
+        {tab === 'pt' && <CoachPT today={today} notify={notify} />}
       </section>
     </Shell>
   );

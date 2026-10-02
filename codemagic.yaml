@@ -362,6 +362,7 @@ workflows:
               "booking_repair_followups",
               "staff_roster",
               "staff_roster_push_reliability",
+              "pt_booking",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

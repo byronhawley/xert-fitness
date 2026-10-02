@@ -71,7 +71,8 @@ with required (capability, migration) as (
     ('booking_overhaul_repair', 'supabase/migrations/20260906020000_booking_overhaul_repair.sql'),
     ('booking_repair_followups', 'supabase/migrations/20260906030000_booking_repair_followups.sql'),
     ('staff_roster', 'supabase/migrations/20261001010000_staff_roster.sql'),
-    ('staff_roster_push_reliability', 'supabase/migrations/20261002010000_staff_roster_push_reliability.sql')
+    ('staff_roster_push_reliability', 'supabase/migrations/20261002010000_staff_roster_push_reliability.sql'),
+    ('pt_booking', 'supabase/migrations/20261002030000_pt_booking.sql')
 ), readiness as (
   select
     required.capability,
