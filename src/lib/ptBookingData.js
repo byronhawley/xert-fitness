@@ -21,7 +21,7 @@ export const PT_ERROR_MESSAGES = Object.freeze({
   SERVICE_INVALID: 'Check the name, length (15 to 240 minutes, in 5s) and price.',
   PACKAGE_NOT_FOUND: 'That package is no longer available.',
   PACKAGE_INVALID: 'Check the package name, number of sessions (2 to 100) and price.',
-  HOURS_INVALID: 'Each block needs a start before its end, on 5-minute marks.',
+  HOURS_INVALID: 'Times must be on 5-minute marks, each block needs a start before its end, and there can be up to 60 times and blocks.',
   HOURS_OVERLAP: 'Two blocks on the same day overlap.',
   TIME_OFF_INVALID: 'Choose a start and an end in the future, up to 120 days apart.',
   SLOT_UNAVAILABLE: 'That time has just been taken or is no longer free. Pick another time.',
@@ -72,6 +72,8 @@ export function createPtClient(rpc) {
     book: (booking, requestId = rid()) => call('public_book', { p_booking: booking, p_request_id: requestId }),
     booking: token => call('public_booking', { p_token: token }),
     cancel: token => call('public_cancel', { p_token: token }),
+    // ── Signed-in member ──
+    memberOverview: () => call('member_overview'),
     // ── Coach ──
     overview: () => call('coach_overview'),
     saveService: service => call('coach_save_service', { p_service: service, p_request_id: rid() }),

@@ -6,15 +6,17 @@ import MobileSheet from './nav/MobileSheet';
 import NavLink from './nav/NavLink';
 import useNavScroll from './nav/useNavScroll';
 import { navDesktopMediaQuery } from './nav/navTokens';
+import { usePtAvailability } from '@/lib/usePtAvailability';
 import './nav/public-nav.css';
 
 const LOGO = '/assets/xert-logo-horizontal-light.png';
-const links = [
+const BASE_LINKS = [
   { to: '/', label: 'Home' }, { href: '/#facility', label: 'Facility' },
   { to: '/timetable', label: 'Timetable' }, { to: '/memberships', label: 'Memberships & Passes' },
   { to: '/coaches', label: 'Coaches' },
   { to: '/events', label: 'Events' }, { to: '/contact', label: 'Contact' },
 ];
+const PT_LINK = { to: '/pt', label: 'Personal Training' };
 
 export default function PublicNav() {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -23,6 +25,8 @@ export default function PublicNav() {
   const [desktopFits, setDesktopFits] = useState(false);
   const location = useLocation();
   const { session, profile } = useSupabaseAuth();
+  const pt = usePtAvailability();
+  const links = pt.enabled ? BASE_LINKS.flatMap(link => link.to === '/coaches' ? [link, PT_LINK] : [link]) : BASE_LINKS;
   const close = useCallback(() => setMenuOpen(false), []);
   useNavScroll();
   useEffect(() => { close(); }, [location, close]);

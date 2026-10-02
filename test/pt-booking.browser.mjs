@@ -7,13 +7,13 @@
 //
 // Run: PLAYWRIGHT_MODULE=/path/to/playwright-core node test/pt-booking.browser.mjs [--screenshots=DIR]
 import assert from 'node:assert/strict';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { createServer } from 'vite';
 import { installDesignFixtures } from './fixtures/design-data.mjs';
 import { DEMO_COACHES, DEMO_OWNER, demoMonth, rpcAs } from './fixtures/staff-roster-demo.mjs';
-import { BLACKOUTS, PT_MIGRATION_URL } from './helpers/pt-booking-world.mjs';
+import { BLACKOUTS, ptMigrationsSql } from './helpers/pt-booking-world.mjs';
 import { addMonths, monthKeyOf } from '../src/lib/staffRoster/time.js';
 import { gymDateKey } from '../src/lib/gymTime.js';
 
@@ -33,7 +33,7 @@ const shot = async (page, name) => { if (shots) await page.screenshot({ path: `$
 
 const { db } = await demoMonth({ month: addMonths(monthKeyOf(today), 2), today });
 await db.exec(BLACKOUTS);
-await db.exec(await readFile(PT_MIGRATION_URL, 'utf8'));
+await db.exec(await ptMigrationsSql());
 await db.exec(`update public.pt_settings set enabled = true;`);
 let counter = 0;
 const rid = () => `30000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
@@ -136,6 +136,13 @@ try {
     await page.getByRole('button', { name: 'Save my hours' }).click();
     await page.getByText('Not saved yet').waitFor({ state: 'detached' });
     assert.equal(await evening.getAttribute('aria-pressed'), 'true');
+    await page.getByLabel('Day', { exact: true }).first().selectOption({ label: 'Saturday' });
+    await page.getByLabel('Start time').fill('18:00');
+    await page.getByRole('button', { name: 'Add time' }).click();
+    await page.getByRole('button', { name: 'Remove Saturday 6 pm' }).waitFor();
+    await page.getByText(/Sat 5 am–12 pm, 4 pm–8 pm, sessions at 6 pm/).waitFor();
+    await page.getByRole('button', { name: 'Save my hours' }).click();
+    await page.getByText('Not saved yet').waitFor({ state: 'detached' });
     await page.getByRole('heading', { name: 'Going away?' }).waitFor();
     await shot(page, '08-coach-pt-hours-phone');
   });
@@ -150,7 +157,33 @@ try {
     await shot(page, '09-pt-booking-cancelled-phone');
   });
 
+  await step('the site points people to PT once it is on', async () => {
+    const { page } = visitor;
+    await page.goto(`${origin}/coaches`, { waitUntil: 'networkidle' });
+    await page.getByRole('link', { name: 'Book PT', exact: true }).waitFor();
+    assert.equal(await page.locator('footer').getByRole('link', { name: 'Personal Training' }).getAttribute('href'), '/pt');
+    await page.goto(`${origin}/timetable`, { waitUntil: 'networkidle' });
+    await page.getByRole('link', { name: 'Book PT online' }).waitFor();
+  });
+
   const owner = await ptContext(browser, origin, DEMO_OWNER, { width: 1440, height: 1000 });
+  await step('a signed-in member books PT and sees it on their account', async () => {
+    const { page } = owner;
+    await page.goto(`${origin}/pt`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: /One-on-one strength/ }).click();
+    await page.getByRole('button', { name: 'Later dates' }).click();
+    const time = page.getByRole('button', { name: /^\d{1,2}:\d{2} (am|pm)$/ }).nth(2);
+    await time.waitFor();
+    await time.click();
+    assert.equal(await page.getByLabel('Email').inputValue(), 'alex@example.invalid');
+    await page.getByRole('button', { name: 'Request this time' }).click();
+    await page.getByRole('heading', { name: 'Request sent' }).waitFor();
+    await page.goto(`${origin}/account`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: 'Personal training' }).waitFor();
+    await page.getByText('One-on-one strength with Riley Synthetic').waitFor();
+    await page.getByText('Waiting for coach').first().waitFor();
+    await shot(page, '11-member-account-pt');
+  });
   await step('the owner sees the PT switch and coaches in Personal training', async () => {
     const { page } = owner;
     await page.goto(`${origin}/admin/pt-requests`, { waitUntil: 'networkidle' });

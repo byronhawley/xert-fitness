@@ -45,7 +45,7 @@ export function designData() {
       pending: 2, spots_left: 2, bookings_open: true, can_take_spot: true, booking_mode: 'request_to_book' }],
     sessions_with_availability: [session],
     admin_daily_operations: [session],
-    my_bookings: [{ id: '33333333-3333-4333-8333-333333333333', session_id: session.id,
+    my_bookings: [{ id: '33333333-3333-4333-8333-333333333333', booking_id: '33333333-3333-4333-8333-333333333333', session_id: session.id,
       session_title: session.title, title: session.title, start_time: start, end_time: end,
       status: 'confirmed', coach_name: 'Sam' }],
     my_member_announcements: [], admin_waitlist_overview: [],
@@ -57,6 +57,7 @@ const readRPCs = new Set([
   'admin_waitlist_overview', 'admin_search_members', 'admin_members_overview',
   'public_class_availability',
   'admin_session_roster', 'admin_class_capacity', 'admin_search_class_attendees',
+  'pt_public_coaches', 'pt_member_overview',
 ]);
 
 // Network-level isolation: keep real auth/router/components, intercept only I/O.
@@ -64,6 +65,9 @@ const readRPCs = new Set([
 // Google Fonts reads pass through so typography matches the real product.
 export async function installDesignFixtures(context, { origin, signedIn = false, requests = [], failures = {}, announcement = false, commands = false, calendar = false, leads = false, forms = false, members = false, orders = false, today = false, mutations = [] }) {
   const data = designData();
+  // PT booking is installed but switched off unless a test routes pt_* itself.
+  data.pt_public_coaches = { enabled: false, coaches: [] };
+  data.pt_member_overview = { enabled: false, bookings: [], packages: [] };
   if (commands && calendar) throw new Error('Use separate contexts for command mutation and read-only calendar fixtures.');
   if (commands && forms) throw new Error('Use separate contexts for command mutation and read-only form fixtures.');
   if (commands && members) throw new Error('Use separate contexts for command mutation and read-only member fixtures.');
