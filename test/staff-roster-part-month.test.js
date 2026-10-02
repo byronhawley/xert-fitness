@@ -161,6 +161,10 @@ test('client: errors with no roster code still read as plain words, never raw da
   const badId = rosterError({ code: '22P02', message: 'invalid input syntax for type uuid: "not-a-cert"' });
   assert.equal(badId.code, 'ID_INVALID');
   assert.doesNotMatch(badId.message, /syntax|uuid/);
+  // A unique rule the database enforces directly.
+  const slot = rosterError({ code: '23505', message: 'duplicate key value violates unique constraint "staff_assignments_slot"' });
+  assert.equal(slot.code, null);
+  assert.match(slot.message, /already has a coach in the draft/);
   // Every code the part-month and texts migrations raise to a person has words.
   for (const code of ['STARTS_ON_INVALID', 'ASSIGNMENTS_BEFORE_START', 'PERIOD_EXISTS', 'NO_BACKDATING', 'MONTH_INVALID', 'SMS_DISABLED', 'PREFERENCES_INVALID', 'STALE_VERSION', 'MANAGER_ONLY']) {
     assert.ok(ROSTER_ERROR_MESSAGES[code], code);

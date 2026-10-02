@@ -107,8 +107,11 @@ function parseDetail(detail) {
 const CONSTRAINT_MESSAGES = Object.freeze({
   staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month (or its roster) starts, and the publish-by date must be on or after the due date.',
   staff_roster_periods_starts_on: 'Check the dates: the roster must start on a later day of the same month, after the publish-by date.',
+  // Re-assigning a coach to the position they already hold (see the 060000 proposal).
+  staff_assignments_slot: 'That position already has a coach in the draft. Refresh to see the latest roster.',
+  staff_assignments_person: 'That coach already has a position in this class.',
 });
-const CONSTRAINT_PATTERN = /violates check constraint "([a-z0-9_]+)"/;
+const CONSTRAINT_PATTERN = /violates (?:check|unique) constraint "([a-z0-9_]+)"/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
