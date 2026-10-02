@@ -48,6 +48,11 @@
 
 .coaching-photo { width: 72px; height: 88px; flex-shrink: 0; overflow: hidden; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: var(--text-secondary); background: var(--surface-sunken); }
 .coaching-photo img { width: 100%; height: 100%; object-fit: cover; }
+.coaching-cropper { position: relative; width: min(100%, 300px, calc((100dvh - 340px) * 0.8)); margin: 0 auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface-sunken); touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.coaching-cropper:active { cursor: grabbing; }
+.coaching-cropper:focus-visible { outline: 2px solid var(--accent-default); outline-offset: 2px; }
+.coaching-cropper img { position: absolute; max-width: none; height: auto; pointer-events: none; -webkit-user-drag: none; }
+.coaching-cropper-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--text-secondary); }
 .coaching-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 
 /* Availability: the ask header, the tap grid and the away calendar. Phone first, 44px+ targets. */
