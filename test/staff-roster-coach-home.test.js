@@ -120,3 +120,49 @@ test('Home renders the checklist, next classes and shortcuts', async () => {
   assert.match(empty, /No published classes for you in the next two weeks/);
   assert.match(empty, /No month is open for availability right now/);
 });
+
+test('dashboard rows: certificates and the website profile join the checklist; hours read as hours', async () => {
+  const { hoursLabel } = await import('../src/lib/staffRoster/coachHome.js');
+  const rows = coachChecklist(me(), { dashboard: { certificates: { first_aid_current: 0, expired: 0 }, profile: { status: null, on_website: false } } });
+  assert.deepEqual(rows.filter(row => ['certificates', 'profile'].includes(row.key)).map(row => [row.key, row.done, row.tab]), [['certificates', false, 'profile'], ['profile', false, 'profile']]);
+  const waiting = coachChecklist(me(), { dashboard: { certificates: { first_aid_current: 1, expired: 0 }, profile: { status: 'submitted' } } });
+  assert.deepEqual(waiting.filter(row => ['certificates', 'profile'].includes(row.key)).map(row => row.done), [true, null]);
+  const expired = coachChecklist(me(), { dashboard: { certificates: { first_aid_current: 1, expired: 1 }, profile: { status: 'approved' } } });
+  assert.deepEqual(expired.filter(row => ['certificates', 'profile'].includes(row.key)).map(row => row.done), [false, true]);
+  assert.equal(hoursLabel(0), '0 min');
+  assert.equal(hoursLabel(45), '45 min');
+  assert.equal(hoursLabel(150), '2 h 30 min');
+  assert.equal(hoursLabel(120), '2 h');
+});
+
+test('class details, profile and certificates screens render what coaches need and nothing private', async () => {
+  const { ClassDetailBody, headcountLine } = await server.ssrLoadModule('/src/components/coaching/CoachClassDetail.jsx');
+  assert.equal(headcountLine({ booked: 5, capacity: 8, pending: 1, waitlist: 2 }), '5 of 8 booked · 1 request · 2 waiting');
+  assert.equal(headcountLine({ booked: 0, capacity: null, pending: 0, waitlist: 0 }), '0 booked');
+  const detail = { booked: 2, capacity: 6, pending: 1, waitlist: 0, people: [{ name: 'Ava S.', status: 'confirmed', guest: false }, { name: 'Pat V.', status: 'requested', guest: true }],
+    note: { id: 'n1', body: 'Rower warm-up', at: '2026-12-01T00:00:00Z', by: 'Ava' }, note_history: [] };
+  const html = renderToStaticMarkup(React.createElement(ClassDetailBody, { detail, draft: 'Rower warm-up', setDraft: () => {}, busy: false, onSave: () => {}, showHistory: false, setShowHistory: () => {} }));
+  assert.match(html, /2 of 6 booked · 1 request/);
+  assert.match(html, /Pat V\. \(guest\) · Request/);
+  assert.match(html, /Last saved by Ava/);
+  assert.match(html, /not members/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*>Save plan/, 'nothing to save until the plan changes');
+  const { default: CoachProfile, CERTIFICATE_KINDS } = await server.ssrLoadModule('/src/components/coaching/CoachProfile.jsx');
+  assert.deepEqual(CERTIFICATE_KINDS.map(([kind]) => kind), ['first_aid', 'cpr', 'coaching', 'working_with_children', 'other']);
+  const profile = renderToStaticMarkup(React.createElement(CoachProfile, { client: {}, uid: 'u', notify: () => {}, files: {} }));
+  assert.match(profile, /Loading your profile/);
+  assert.match(profile, /Certificates/);
+  assert.match(profile, /Only you and the managers can see these/);
+});
+
+test('upload paths stay inside the coach’s own folder and files are checked first', async () => {
+  const { certificateFilePath, fileProblem, profilePhotoPath } = await import('../src/lib/staffFiles.js');
+  const uid = '00000000-0000-4000-8000-0000000000a1';
+  assert.match(certificateFilePath(uid, 'My Cert.PDF', 1), new RegExp(`^${uid}/1-[0-9a-f]{8}\\.pdf$`));
+  assert.match(certificateFilePath(uid, '../../evil', 1), new RegExp(`^${uid}/1-[0-9a-f]{8}\\.[a-z0-9]+$`));
+  assert.match(profilePhotoPath(uid, 'me.jpeg', 1), new RegExp(`^staff-profiles/${uid}/1-[0-9a-f]{8}\\.jpeg$`));
+  assert.equal(fileProblem({ type: 'application/pdf', size: 1000 }, 'certificate'), null);
+  assert.match(fileProblem({ type: 'application/zip', size: 1000 }, 'certificate'), /PDF or a photo/);
+  assert.match(fileProblem({ type: 'image/png', size: 11 * 1024 * 1024 }, 'certificate'), /10 MB/);
+  assert.match(fileProblem({ type: 'text/plain', size: 10 }, 'photo'), /image/);
+});

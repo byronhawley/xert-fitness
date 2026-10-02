@@ -1,4 +1,4 @@
-// Coach invite links (20261002020000_staff_roster_coach_invites.sql) against
+// Coach invite links (20261002020000_staff_roster_coach_dashboard.sql) against
 // the real migrations in PGlite. SYNTHETIC DATA ONLY: fictional coaches and
 // accounts; the email path is a local stub that records calls.
 import assert from 'node:assert/strict';
@@ -32,7 +32,7 @@ const statements = sql => sql.replace(/--[^\n]*/g, '').split(/;\s*\n/).map(part 
 test('the migration starts with a scoped lock timeout and records its capability last', () => {
   const parts = statements(INVITES);
   assert.equal(parts[0], "set local lock_timeout = '5s'");
-  assert.match(parts.at(-1), /^insert into public\.xert_schema_capabilities \(capability\) values \('staff_roster_coach_invites'\) on conflict \(capability\) do nothing;?$/);
+  assert.match(parts.at(-1), /^insert into public\.xert_schema_capabilities \(capability\) values \('staff_roster_coach_dashboard'\) on conflict \(capability\) do nothing;?$/);
   assert.equal(INVITES.match(/xert_schema_capabilities/g).length, 1);
   assert.match(INVITES, /set search_path = public/);
   for (const fn of INVITES.matchAll(/create or replace function public\.(\w+)[\s\S]*?\$\$;/g)) {
@@ -49,7 +49,7 @@ test('applying it twice changes nothing; a failure part-way leaves nothing and n
   const marker = 'insert into public.xert_schema_capabilities';
   await assert.rejects(() => db.exec(INVITES.replace(marker, `select 1 / 0;\n${marker}`)), /division by zero/);
   const empty = await db.query(`select (select count(*)::int from pg_tables where tablename like 'staff_roster_invite%') as tables,
-    (select count(*)::int from public.xert_schema_capabilities where capability = 'staff_roster_coach_invites') as capability`);
+    (select count(*)::int from public.xert_schema_capabilities where capability = 'staff_roster_coach_dashboard') as capability`);
   assert.deepEqual(empty.rows, [{ tables: 0, capability: 0 }]);
   await db.exec(INVITES);
   const snapshot = async () => (await db.query(`select

@@ -11,8 +11,14 @@
 -- 20261002010000_staff_roster_push_reliability.sql (its functions are named
 -- staff_roster_push_* and are dropped by the loop below; its trigger and
 -- columns go with the staff_notifications and push-delivery tables) and
--- 20261002020000_staff_roster_coach_invites.sql (staff_roster_invite_*
--- functions, dropped by the loop; its tables are listed below).
+-- 20261002020000_staff_roster_coach_dashboard.sql (invites and the coach
+-- dashboard: staff_roster_* functions, dropped by the loop; its tables are
+-- listed below). It leaves Supabase storage alone: the private
+-- `staff-certificates` bucket, its files and the storage policies
+-- staff_certificates_owner_insert / _owner_or_manager_read / _owner_delete and
+-- site_images_staff_profile_insert must be removed in the Storage dashboard if
+-- wanted (certificate files are personal records; export them first).
+-- Website coach profiles approved from coach drafts stay in public.coaches.
 --
 -- If the push dispatch schedule was ever activated
 -- (docs/staff-roster/push-dispatch-schedule.sql), unschedule it FIRST:
@@ -20,7 +26,7 @@
 -- otherwise the job keeps calling a function that no longer exists.
 --
 -- After running it, also revert the app release that lists `staff_roster`,
--- `staff_roster_push_reliability` and `staff_roster_coach_invites` as required
+-- `staff_roster_push_reliability` and `staff_roster_coach_dashboard` as required
 -- capabilities, or the release gate will report them missing.
 
 begin;
@@ -46,7 +52,8 @@ alter table public.class_sessions drop column if exists series_occurrence_date;
 alter table public.class_sessions drop column if exists series_id;
 
 drop table if exists
-  public.staff_roster_invite_attempts, public.staff_roster_invites,
+  public.staff_roster_invite_attempts, public.staff_roster_invites, public.staff_profile_drafts,
+  public.staff_certificates, public.staff_session_notes, public.staff_notice_preferences,
   public.staff_notification_push_deliveries, public.staff_roster_public_names, public.staff_roster_change_requests, public.staff_roster_requests,
   public.staff_notifications, public.staff_roster_audit_events, public.staff_roster_acknowledgements,
   public.staff_cover_offers, public.staff_cover_requests, public.staff_absences, public.staff_assignments,
@@ -57,6 +64,6 @@ drop table if exists
   public.staff_members, public.staff_roster_settings
 cascade;
 
-delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_invites');
+delete from public.xert_schema_capabilities where capability in ('staff_roster', 'staff_roster_push_reliability', 'staff_roster_coach_dashboard');
 
 commit;

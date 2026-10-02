@@ -14,6 +14,7 @@ import CoachRoster from '@/components/coaching/CoachRoster';
 import CoachAvailability from '@/components/coaching/CoachAvailability';
 import CoachRequests from '@/components/coaching/CoachRequests';
 import CoachInbox from '@/components/coaching/CoachInbox';
+import CoachProfile from '@/components/coaching/CoachProfile';
 import '@/components/coaching/coaching.css';
 
 // Home is the default. Every older link names its tab (`?tab=roster` …), so
@@ -24,6 +25,7 @@ const TABS = [
   { key: 'availability', label: 'Availability' },
   { key: 'requests', label: 'Requests' },
   { key: 'inbox', label: 'Inbox' },
+  { key: 'profile', label: 'Profile' },
 ];
 
 const BLOCKED = {
@@ -109,6 +111,7 @@ export default function Coaching({ client: injected = null }) {
         {tab === 'availability' && <CoachAvailability client={client} me={me} monthParam={params.get('month') || ''} setMonthParam={value => setParam('month', value)} notify={notify} onChanged={loadMe} />}
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'inbox' && <CoachInbox client={client} notify={notify} onChanged={loadMe} />}
+        {tab === 'profile' && <CoachProfile client={client} uid={session?.user?.id} notify={notify} />}
       </section>
     </Shell>
   );

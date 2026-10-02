@@ -265,7 +265,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
       </div>
 
       <AssignmentDrawer open={Boolean(drawerSession)} onOpenChange={value => { if (!value) setDrawer(null); }} ctx={ctx} session={drawerSession} slotKey={drawer?.slotKey}
-        readOnly={drawerReadOnly} busy={busy}
+        readOnly={drawerReadOnly} busy={busy} client={data.client}
         staffingVersion={drawerSession ? snapshot.session_staffing_versions?.[drawerSession.id] ?? 0 : 0}
         onApply={async (changes, message) => { if (await onApply(changes, message)) setDrawer(null); }}
         onStartMove={assignment => { setMoving(assignment); setDrawer(null); }}

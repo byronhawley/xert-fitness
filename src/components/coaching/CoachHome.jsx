@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { addDays, gymDateOf, toMs } from '@/lib/staffRoster/time';
-import { coachChecklist, upcomingClasses } from '@/lib/staffRoster/coachHome';
+import { coachChecklist, hoursLabel, upcomingClasses } from '@/lib/staffRoster/coachHome';
+import { headcountLine } from './CoachClassDetail';
 import { at, Banner, dateName, GHOST, monthName, Pill } from './coachingUi';
 
 const ROLE = { lead: 'Lead', assistant: 'Assistant', shadow: 'Shadow' };
@@ -10,6 +11,7 @@ const SHORTCUTS = [
   { tab: 'roster', label: 'My classes', countKey: 'roster' },
   { tab: 'requests', label: 'Time away & cover', countKey: null },
   { tab: 'inbox', label: 'Inbox', countKey: 'inbox' },
+  { tab: 'profile', label: 'Profile & certificates', countKey: null },
 ];
 
 export function tabHref(tab, month) {
@@ -19,8 +21,8 @@ export function tabHref(tab, month) {
 }
 
 /** Presentational Home tab; `upcoming` is null while loading. */
-export function CoachHomeView({ me, today, upcoming, error = null, joined = null, counts = {}, onRetry = null }) {
-  const checklist = coachChecklist(me, { monthLabel: monthName, dateLabel: date => dateName(date) });
+export function CoachHomeView({ me, today, upcoming, error = null, joined = null, counts = {}, onRetry = null, dashboard = null, nextDetail = null }) {
+  const checklist = coachChecklist(me, { monthLabel: monthName, dateLabel: date => dateName(date), dashboard });
   const left = checklist.filter(row => row.done === false).length;
   return (
     <div className="space-y-6">
@@ -63,7 +65,7 @@ export function CoachHomeView({ me, today, upcoming, error = null, joined = null
         {!error && upcoming?.map(item => {
           const date = gymDateOf(toMs(item.start));
           return (
-            <article key={item.assignment_id} className="coaching-card flex items-start justify-between gap-3">
+            <article key={item.assignment_id} className="coaching-card flex flex-wrap items-start justify-between gap-x-3">
               <div className="min-w-0">
                 <p className="font-body text-xs uppercase tracking-wider text-xert-pale/60">{date === today ? 'Today' : dateName(date)}</p>
                 <p className="font-display text-xl text-xert-offwhite">{at(item.start)} <span className="text-xert-pale/50 text-base">– {at(item.end)}</span></p>
@@ -71,10 +73,27 @@ export function CoachHomeView({ me, today, upcoming, error = null, joined = null
                 <p className="font-body text-xs text-xert-pale/60">{ROLE[item.role] || item.role}{item.colleagues?.length ? ` · with ${item.colleagues.map(colleague => colleague.display_name).join(', ')}` : ''}</p>
               </div>
               {item.changed_since_publish ? <Pill tone="warning">Changed</Pill> : item.cover ? <Pill tone="warning">Cover requested</Pill> : null}
+              {nextDetail && nextDetail.session?.id === item.session_id && <p className="font-body text-xs text-xert-pale/75 mt-1 basis-full" data-testid="next-class-headcount">{headcountLine(nextDetail)}{nextDetail.note ? ' · plan written' : ''}</p>}
             </article>
           );
         })}
       </section>
+
+      {dashboard?.hours?.length > 0 && (
+        <section aria-labelledby="coach-home-hours" className="space-y-2">
+          <h2 id="coach-home-hours" className="font-body text-xs font-semibold uppercase tracking-wider text-xert-pale/60">Hours coached</h2>
+          <div className="coaching-stats">
+            {dashboard.hours.map(row => (
+              <div key={row.month} className="coaching-card">
+                <p className="font-body text-xs text-xert-pale/60">{monthName(row.month)}</p>
+                <p className="font-display text-2xl text-xert-offwhite">{hoursLabel(row.done_duty_minutes)}</p>
+                <p className="font-body text-xs text-xert-pale/60">{row.done_classes} {row.done_classes === 1 ? 'class' : 'classes'} done{row.classes > row.done_classes ? ` · ${row.classes - row.done_classes} to come (${hoursLabel(row.duty_minutes - row.done_duty_minutes)})` : ''}</p>
+              </div>
+            ))}
+          </div>
+          <p className="font-body text-xs text-xert-pale/50">A summary from the published roster, including set-up and pack-down time. Not a timesheet or payroll record.</p>
+        </section>
+      )}
 
       <nav aria-label="Coach shortcuts" className="grid grid-cols-2 gap-2">
         {SHORTCUTS.map(item => (
@@ -87,17 +106,22 @@ export function CoachHomeView({ me, today, upcoming, error = null, joined = null
   );
 }
 
-/** Home tab: loads the next two weeks of published classes. */
+/** Home tab: next two weeks of published classes, the next class's headcount, hours and setup. */
 export default function CoachHome({ client, me, today, joined, counts }) {
   const [upcoming, setUpcoming] = useState(null);
   const [error, setError] = useState(null);
+  const [dashboard, setDashboard] = useState(null);
+  const [nextDetail, setNextDetail] = useState(null);
   const load = useCallback(async () => {
     try {
       const data = await client.myRoster(today, addDays(today, 14));
-      setUpcoming(upcomingClasses(data.assignments));
+      const next = upcomingClasses(data.assignments);
+      setUpcoming(next);
       setError(null);
+      if (next[0]) client.classDetail(next[0].session_id).then(setNextDetail).catch(() => setNextDetail(null));
     } catch (failure) { setError(failure); }
   }, [client, today]);
   useEffect(() => { load(); }, [load]);
-  return <CoachHomeView me={me} today={today} upcoming={upcoming} error={error} joined={joined} counts={counts} onRetry={load} />;
+  useEffect(() => { client.myDashboard().then(setDashboard).catch(() => setDashboard(null)); }, [client]);
+  return <CoachHomeView me={me} today={today} upcoming={upcoming} error={error} joined={joined} counts={counts} onRetry={load} dashboard={dashboard} nextDetail={nextDetail} />;
 }

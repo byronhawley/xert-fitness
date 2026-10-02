@@ -2,7 +2,7 @@
 // The app runs unmodified in Chromium; its Supabase RPC calls are answered by
 // PGlite running the roster migrations (20261001010000_staff_roster.sql,
 // 20261002010000_staff_roster_push_reliability.sql, then
-// 20261002020000_staff_roster_coach_invites.sql) over a synthetic month. Everything else uses the shared local design fixtures.
+// 20261002020000_staff_roster_coach_dashboard.sql) over a synthetic month. Everything else uses the shared local design fixtures.
 // SYNTHETIC DATA ONLY; email notices are off and no request leaves the machine.
 //
 // Run: PLAYWRIGHT_MODULE=/path/to/playwright-core node test/staff-roster.browser.mjs [--screenshots=DIR]
@@ -34,6 +34,12 @@ const step = async (name, fn) => {
 };
 
 const { db } = await demoMonth({ month: MONTH, today });
+// Stand-ins for the member booking tables the class details read (synthetic rows only).
+await db.exec(`
+  create table public.session_bookings (id uuid primary key default gen_random_uuid(), user_id uuid not null, class_session_id uuid not null,
+    status text not null default 'confirmed', created_at timestamptz not null default now());
+  create table public.class_bookings (id uuid primary key default gen_random_uuid(), class_session_id uuid not null, full_name text, email text, phone text,
+    status text not null default 'confirmed', guest_visit boolean not null default false, created_at timestamptz not null default now());`);
 const rpcLog = [];
 const pushRequests = [];
 
@@ -453,6 +459,72 @@ try {
     if (shots) await other.page.screenshot({ path: `${shots}/16-coach-invite-used-phone.png`, fullPage: true });
     await other.context.close();
     await as(db, '');
+  });
+
+  await step('a coach on a published class sees who is booked and writes the session plan', async () => {
+    const rileyStaff = (await db.query(`select id from public.staff_members where display_name = 'Riley Synthetic'`)).rows[0].id;
+    await db.query(`insert into public.class_bookings (class_session_id, full_name, email, phone, status, guest_visit)
+      select distinct a.session_id, 'Pat Visitor', 'pat@example.invalid', '0400000000', 'confirmed', true from public.staff_assignments a
+      join public.staff_roster_revisions r on r.id = a.revision_id and r.state = 'published' where a.staff_id = $1`, [rileyStaff]);
+    const phone = riley.page;
+    await phone.goto(`${origin}/coaching?tab=roster`, { waitUntil: 'networkidle' });
+    await phone.getByRole('button', { name: /^Who’s booked and session plan:/ }).first().click();
+    const sheet = phone.getByRole('dialog', { name: 'Class details' });
+    await sheet.getByText(/^1 of \d+ booked/).waitFor();
+    await sheet.getByText('Pat V. (guest)').waitFor();
+    assert.equal(await sheet.getByText(/pat@example|0400000000|Pat Visitor/).count(), 0, 'no contact details or full names');
+    await sheet.getByLabel('Session plan and notes').fill('Warm-up: 5 min rower. Main: 5x5 front squat. Finisher: 10 min engine.');
+    await sheet.getByRole('button', { name: 'Save plan' }).click();
+    await sheet.getByText(/Last saved by Riley Synthetic/).waitFor();
+    if (shots) await phone.screenshot({ path: `${shots}/17-coach-class-details-phone.png` });
+    const { rows } = await db.query('select session_id, author_staff_id from public.staff_session_notes');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].author_staff_id, rileyStaff);
+    await assert.rejects(() => rpcAs(db, coach('quinn').profileId, 'staff_roster_class_detail', { p_session_id: rows[0].session_id }), /NOT_ON_CLASS/);
+    await sheet.getByRole('button', { name: 'Close Class details' }).click();
+  });
+
+  await step('a coach drafts their website profile, adds a certificate and switches email off', async () => {
+    const phone = riley.page;
+    await phone.goto(`${origin}/coaching?tab=profile`, { waitUntil: 'networkidle' });
+    await phone.getByLabel('Name on the Coaches page', { exact: true }).fill('Riley Synthetic');
+    await phone.getByLabel('Role or title', { exact: true }).fill('Strength coach');
+    await phone.getByLabel('About you', { exact: true }).fill('Synthetic bio for a fictional coach.');
+    await phone.getByRole('button', { name: 'Send for approval' }).click();
+    await phone.getByText('Waiting for the manager').waitFor();
+    await phone.getByRole('button', { name: 'Add certificate' }).click();
+    const sheet = phone.getByRole('dialog', { name: 'Add certificate' });
+    await sheet.getByLabel('Type').selectOption('cpr');
+    await sheet.getByLabel('Expires').fill(`${Number(today.slice(0, 4)) + 1}${today.slice(4)}`);
+    await sheet.getByRole('button', { name: 'Save certificate' }).click();
+    await phone.getByText('Current', { exact: true }).waitFor();
+    await phone.getByRole('checkbox', { name: /^Email/ }).uncheck();
+    await phone.getByText('Notice settings saved.').first().waitFor();
+    if (shots) await phone.screenshot({ path: `${shots}/18-coach-profile-tab-phone.png`, fullPage: true });
+    const { rows } = await db.query(`select (select status from public.staff_profile_drafts) as profile, (select kind from public.staff_certificates) as cert,
+      (select email from public.staff_notice_preferences where profile_id = $1) as email`, [coach('riley').profileId]);
+    assert.deepEqual(rows, [{ profile: 'submitted', cert: 'cpr', email: false }]);
+    assert.equal((await db.query('select count(*)::int as n from public.coaches')).rows[0].n, 0, 'nothing on the website before approval');
+  });
+
+  await step('manager approves the profile onto the Coaches page and sees who lacks first aid', async () => {
+    await page.goto(`${origin}/admin/roster?rosterTab=coaches&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    await page.getByText('Profiles waiting for approval (1)').waitFor();
+    await page.getByText(/active coaches have no current first aid or CPR on file/).waitFor();
+    if (shots) await page.screenshot({ path: `${shots}/19-manager-profile-review.png` });
+    await page.getByRole('button', { name: 'Approve Riley Synthetic’s profile' }).click();
+    await page.getByText('Riley Synthetic’s profile is approved').first().waitFor();
+    const { rows } = await db.query(`select c.name, c.role, c.published from public.coaches c join public.staff_members m on m.coach_id = c.id where m.display_name = 'Riley Synthetic'`);
+    assert.deepEqual(rows, [{ name: 'Riley Synthetic', role: 'Strength coach', published: true }]);
+  });
+
+  await step('Home shows the next class headcount and hours coached (a summary, not payroll)', async () => {
+    const phone = riley.page;
+    await phone.goto(`${origin}/coaching`, { waitUntil: 'networkidle' });
+    await phone.getByRole('heading', { name: 'Hours coached' }).waitFor();
+    await phone.getByText(/Not a timesheet or payroll record/).waitFor();
+    await phone.getByText('Coach profile for the website').waitFor();
+    if (shots) await phone.screenshot({ path: `${shots}/20-coach-home-dashboard-phone.png`, fullPage: true });
   });
 
   await step('no page errors in any session', async () => {

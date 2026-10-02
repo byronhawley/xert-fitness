@@ -7,7 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 export const MIGRATION_URLS = Object.freeze([
   new URL('../../supabase/migrations/20261001010000_staff_roster.sql', import.meta.url),
   new URL('../../supabase/migrations/20261002010000_staff_roster_push_reliability.sql', import.meta.url),
-  new URL('../../supabase/migrations/20261002020000_staff_roster_coach_invites.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql', import.meta.url),
 ]);
 
 /** Every roster migration, in order, as one SQL script. */
@@ -28,7 +28,9 @@ export const BASE_SCHEMA = `
   create function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$
     select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin')
   $$;
-  create table public.coaches (id uuid primary key default gen_random_uuid(), name text not null, published boolean not null default true);
+  create table public.coaches (id uuid primary key default gen_random_uuid(), name text not null, published boolean not null default true,
+    role text, bio text, experience text, currently_training_for text, photo_url text, social_url text, category text default 'coach',
+    sort_order integer default 0, updated_at timestamptz not null default now());
   create table public.class_templates (id uuid primary key default gen_random_uuid(), name text, class_type text, title text,
     duration_minutes integer, capacity integer, default_start_minute integer);
   create table public.class_sessions (

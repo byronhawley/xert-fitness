@@ -362,7 +362,7 @@ workflows:
               "booking_repair_followups",
               "staff_roster",
               "staff_roster_push_reliability",
-              "staff_roster_coach_invites",
+              "staff_roster_coach_dashboard",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

@@ -5,6 +5,7 @@ import { ROLE_LABELS, STAFF_ROLES } from '@/lib/staffRoster/duty';
 import { INVITE_STATUS_LABELS, inviteLink } from '@/lib/staffRoster/invite';
 import { gymDateOf, toMs } from '@/lib/staffRoster/time';
 import { Notice, Tone } from './rosterBits';
+import { CertificateWatch, ProfileReviews } from './CoachRecords';
 
 const EMPTY = { display_name: '', legacy_label: '', roles: ['lead'], profile_id: '', coach_id: '', target_classes_per_month: '', min_classes_per_month: '',
   max_classes_per_week: '', max_duty_minutes_per_day: '', min_rest_minutes: '', manager_note: '' };
@@ -249,6 +250,8 @@ export default function CoachesPanel({ data, onMutate, focusStaffId }) {
         <AdminButton onClick={() => setEditing('new')}>Add a coach</AdminButton>
       </div>
       {notice}
+      <ProfileReviews onMutate={onMutate} />
+      <CertificateWatch onMutate={onMutate} />
       {staff.length === 0 && <p className="font-body text-sm text-xert-pale/60">No coaches yet.</p>}
       <ul className="staff-roster-list">
         {staff.map(row => {

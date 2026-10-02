@@ -74,7 +74,7 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   // Leased, retried and scheduler-driven roster push; the roster stays off.
   staff_roster_push_reliability: 'Apply supabase/migrations/20261002010000_staff_roster_push_reliability.sql in Supabase (after 20261001010000_staff_roster.sql).',
   // Coach invite links and the coach dashboard; the roster stays off.
-  staff_roster_coach_invites: 'Apply supabase/migrations/20261002020000_staff_roster_coach_invites.sql in Supabase (after 20261002010000_staff_roster_push_reliability.sql).',
+  staff_roster_coach_dashboard: 'Apply supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql in Supabase (after 20261002010000_staff_roster_push_reliability.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {
