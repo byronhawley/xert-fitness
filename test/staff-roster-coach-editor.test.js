@@ -49,6 +49,9 @@ test('client maps database errors to plain words and sends the parameters the da
   assert.equal(blocked.code, 'ASSIGNMENT_BLOCKED');
   assert.match(blocked.message, /absence/i);
   assert.match(rosterError({ message: 'STALE_VERSION' }).message, /Refresh/);
+  const order = rosterError({ message: 'new row for relation "staff_roster_periods" violates check constraint "staff_roster_periods_order"' });
+  assert.match(order.message, /publish-by date must be on or after the due date/);
+  assert.equal(order.code, null);
   assert.equal(monthParam('2026-12'), '2026-12-01');
 
   const calls = [];

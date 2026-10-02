@@ -14,6 +14,18 @@ function OpenPeriod({ month, today, cycle, busy, onOpen }) {
   const [dueOn, setDueOn] = useState(plan?.dueOn || '');
   const [publishTargetOn, setPublishTargetOn] = useState(plan?.publishTargetOn || '');
   if (problem) return <Notice tone="warning" title="This month can’t be opened for availability">{problem}</Notice>;
+  // The dates actually sent: the same rules the database enforces (opens ≤ due
+  // ≤ publish target, due before the month starts), so a stale or empty
+  // publish target can never be refused.
+  let chosen = null;
+  let dateProblem = null;
+  if (dueOn) {
+    try { chosen = planPeriodOpening(month, { today, cycle, dueOn, publishTargetOn: publishTargetOn || null }); } catch (error) { dateProblem = error.message; }
+  }
+  const changeDue = value => {
+    setDueOn(value);
+    if (value && publishTargetOn && publishTargetOn < value) setPublishTargetOn(value);
+  };
   return (
     <section className="space-y-3" aria-labelledby="roster-open-period">
       <h3 id="roster-open-period" className={ADMIN_TEXT.sectionHeading}>Ask coaches for {monthLabel(month)} availability</h3>
@@ -21,13 +33,14 @@ function OpenPeriod({ month, today, cycle, busy, onOpen }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <AdminFormField label="Opens"><input type="date" value={plan.opensOn} readOnly /></AdminFormField>
         <AdminFormField label="Due" required helper={plan.needsDueDate ? 'The usual due date has passed. Choose a new one.' : null}>
-          <input type="date" value={dueOn} min={plan.opensOn} onChange={event => setDueOn(event.target.value)} />
+          <input type="date" value={dueOn} min={plan.opensOn} onChange={event => changeDue(event.target.value)} />
         </AdminFormField>
         <AdminFormField label="Aim to publish by" helper="A reminder for you. Publishing is always your decision.">
           <input type="date" value={publishTargetOn} min={dueOn || plan.opensOn} onChange={event => setPublishTargetOn(event.target.value)} />
         </AdminFormField>
       </div>
-      <AdminButton disabled={busy || !dueOn} onClick={() => onOpen({ opensOn: plan.opensOn, dueOn, publishTargetOn: publishTargetOn || dueOn, shortened: plan.shortened })}>Open availability</AdminButton>
+      {dateProblem && <Notice tone="warning" title="Check the dates">{dateProblem}</Notice>}
+      <AdminButton disabled={busy || !chosen} onClick={() => onOpen({ opensOn: chosen.opensOn, dueOn: chosen.dueOn, publishTargetOn: chosen.publishTargetOn, shortened: chosen.shortened })}>Open availability</AdminButton>
     </section>
   );
 }
