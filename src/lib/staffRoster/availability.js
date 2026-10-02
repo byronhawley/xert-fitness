@@ -85,6 +85,9 @@ export function validateAvailability(submission = {}, monthKey) {
     if (!validWindowMinutes(item)) { errors.push(`${item.date}: a time must end after it starts, within the day.`); continue; }
     cleanExceptions.push(item);
   }
+  // The server refuses more than 200 usual-week times or 400 date times outright.
+  if (weekly.length > 200) errors.push('Too many usual-week times (over 200). Combine some of them.');
+  if (exceptions.length > 400) errors.push('Too many separate times this month (over 400). Mark fewer days, or answer whole days instead of single classes.');
   errors.push(...contradictions(cleanWeekly, window => window.weekday, window => WEEKDAY_NAMES[window.weekday]));
   errors.push(...contradictions(cleanExceptions, window => window.date, window => window.date));
   if (noAvailability && (cleanWeekly.some(item => item.status !== 'UNAVAILABLE') || cleanExceptions.some(item => item.status !== 'UNAVAILABLE'))) {

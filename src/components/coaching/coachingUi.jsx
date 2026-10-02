@@ -1,4 +1,5 @@
 import React from 'react';
+import { periodDates } from '@/lib/staffRoster/dayAvailability';
 import { gymDateOf, gymMinuteOf, minuteLabel, parseDateKey, toMs } from '@/lib/staffRoster/time';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -9,6 +10,19 @@ export { WEEKDAYS };
 export function monthName(monthKey) {
   const [year, month] = monthKey.slice(0, 7).split('-').map(Number);
   return `${MONTHS[month - 1]} ${year}`;
+}
+
+/** "November" — the month alone, for "November classes". */
+export function monthOnly(monthKey) {
+  return MONTHS[Number(monthKey.slice(5, 7)) - 1];
+}
+
+/** "1–30 Nov" — the days a roster month covers; "9–31 Oct" for a period starting part-way. */
+export function monthSpan(monthKey, startsOn = null) {
+  const key = monthKey.slice(0, 7);
+  const dates = periodDates(key, startsOn);
+  const all = dates.length ? dates : periodDates(key);
+  return `${Number(all[0].slice(8))}–${Number(all[all.length - 1].slice(8))} ${MONTHS[Number(key.slice(5, 7)) - 1].slice(0, 3)}`;
 }
 
 export function dateName(dateKey, { weekday = true } = {}) {

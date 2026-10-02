@@ -25,6 +25,8 @@ if (shots) await mkdir(shots, { recursive: true });
 const today = gymDateKey(new Date());
 const MONTH = addMonths(monthKeyOf(today), 2);
 const firstMonday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 1);
+const MONTH_WORD = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][Number(MONTH.slice(5)) - 1];
+const dayLabel = date => `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][weekdayOf(date)]} ${Number(date.slice(8))} ${MONTH_WORD.slice(0, 3)}`;
 const coach = key => DEMO_COACHES.find(item => item.key === key);
 const results = [];
 const step = async (name, fn) => {
@@ -280,46 +282,90 @@ try {
   });
 
   const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 375, height: 812 });
-  await step('coach gives availability on a 375px phone: tap grid, days away, autosave, plain review, submit', async () => {
+  await step('coach gives availability on a 375px phone: days first, then each class, free time on a day with no classes, autosave, review, submit', async () => {
     const phone = quinn.page;
     await phone.goto(`${origin}/coaching?tab=availability&month=${MONTH}`, { waitUntil: 'networkidle' });
     await phone.getByRole('heading', { name: /Hi Quinn Synthetic/ }).waitFor();
     await phone.getByText('What we need from you').waitFor();
+    await phone.getByRole('heading', { name: new RegExp(`^Your availability for ${MONTH_WORD} classes \\(1–\\d+ ${MONTH_WORD.slice(0, 3)}\\)$`) }).waitFor();
+    await phone.getByText('Send your answers by', { exact: true }).waitFor();
     await phone.getByText('Not started', { exact: true }).waitFor();
-    const cell = name => phone.getByRole('button', { name: new RegExp(`^${name}:`) });
-    await phone.getByRole('radio', { name: 'Can do' }).waitFor();
-    assert.equal(await phone.getByRole('radio', { name: 'Can do' }).getAttribute('aria-checked'), 'true', 'Can do is the starting answer');
-    await cell('Tuesday 6:15 am').click();
-    await cell('Thursday 6:15 am').click();
-    await phone.getByRole('radio', { name: 'Prefer' }).click();
-    await cell('Saturday 6:15 am').click();
-    await phone.getByRole('radio', { name: 'Can’t' }).click();
-    await cell('Wednesday 4:30 pm').click();
-    await cell('Tuesday 6:15 am').getByText('Can do').waitFor();
-    await cell('Saturday 6:15 am').getByText('Prefer').waitFor();
-    await cell('Wednesday 4:30 pm').getByText('Can’t').waitFor();
+    const calendar = phone.getByRole('group', { name: `Days in ${MONTH_WORD} ${MONTH.slice(0, 4)}` });
+    const dayButton = date => calendar.getByRole('button', { name: new RegExp(`^${dayLabel(date)},`) });
+    const panel = date => phone.getByRole('region', { name: `${dayLabel(date)} classes` });
+    await dayButton(firstMonday).and(phone.locator(':enabled')).waitFor();
+    assert.equal(await phone.getByRole('radio', { name: /I can work/ }).getAttribute('aria-checked'), 'true', 'a tap marks "can work" to start with');
+
+    // Every Tuesday and Thursday: every class on those days starts as Can do.
+    await phone.getByRole('button', { name: 'Every Tuesday' }).click();
+    await phone.getByRole('button', { name: 'Every Thursday' }).click();
+    const tuesday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2);
+    await dayButton(tuesday).getByText('Work').waitFor();
+
+    // A Saturday: prefer the 6:15 Engine.
+    const saturday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 6);
+    await dayButton(saturday).click();
+    await panel(saturday).getByRole('button', { name: 'Prefer: 6:15 am Saturday Engine' }).click();
+    await panel(saturday).getByRole('button', { name: 'Prefer: 6:15 am Saturday Engine' }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+    assert.equal(await panel(saturday).getByRole('button', { name: 'Can do: 9:30 am Saturday Strength' }).getAttribute('aria-pressed'), 'true', 'other classes default to Can do');
+
+    // A Wednesday: can't do the 4:30 pm Engine.
+    const wednesday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 3);
+    await dayButton(wednesday).click();
+    await panel(wednesday).getByRole('button', { name: 'Can’t: 4:30 pm Engine 4:30' }).click();
+    await panel(wednesday).getByRole('button', { name: 'Can’t: 4:30 pm Engine 4:30' }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+
+    // A Sunday has no classes, so it asks for free time instead.
+    const sunday = datesOfMonth(MONTH).find(date => weekdayOf(date) === 0);
+    await dayButton(sunday).click();
+    await panel(sunday).getByText('No classes on the timetable this day yet. When are you free?').waitFor();
+    await panel(sunday).getByRole('button', { name: /^All day/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+    await panel(sunday).getByRole('button', { name: /^Evening/ }).click();
+    await panel(sunday).getByRole('button', { name: /^Evening/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
+
+    // Away on one Tuesday.
     const awayDay = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2 && date > firstMonday);
-    await phone.getByRole('group', { name: /^Days away in/ }).getByRole('button').filter({ hasText: new RegExp(`^${Number(awayDay.slice(8))}$`) }).click();
-    await phone.getByText(/^Away 1 day:/).waitFor();
+    await phone.getByRole('radio', { name: /I’m away/ }).click();
+    await dayButton(awayDay).click();
+    await dayButton(awayDay).getByText('Away').waitFor();
+    await phone.getByText(/^Can work \d+ days · Away 1 day$/).waitFor();
+
     await phone.getByText('Draft saved. Not sent to the manager until you submit.').waitFor({ timeout: 10000 });
     await phone.getByText('Draft saved', { exact: true }).waitFor();
     const draft = await db.query(`select count(*)::int as n, (select payload from public.staff_availability_drafts limit 1) as payload from public.staff_availability_drafts`);
     assert.equal(draft.rows[0].n, 1, 'autosave writes a draft, not a submission');
-    assert.deepEqual(draft.rows[0].payload.exceptions, [{ date: awayDay, start: 0, end: 1440, status: 'UNAVAILABLE' }]);
+    const saved = draft.rows[0].payload;
+    assert.deepEqual(saved.weekly, [], 'day-first answers are dates only');
+    assert.deepEqual(saved.exceptions.filter(item => item.date === awayDay), [{ date: awayDay, start: 0, end: 1440, status: 'UNAVAILABLE' }]);
+    assert.deepEqual(saved.exceptions.filter(item => item.date === sunday), [{ date: sunday, start: 960, end: 1260, status: 'AVAILABLE' }]);
+    assert.equal(saved.exceptions.filter(item => item.date === firstMonday).length, 0, 'a Monday nobody tapped stays not stated');
     const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
-    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-cell, .coaching-day, .coaching-brush button')]
+    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-day, .coaching-every-day, .coaching-brush button, .coaching-day-states button, .coaching-class-choices button, .coaching-presets button')]
       .map(node => node.getBoundingClientRect()).filter(box => box.width < 44 || box.height < 44).length);
-    assert.equal(small, 0, 'every grid, calendar and answer button is at least 44px');
+    assert.equal(small, 0, 'every calendar, day and class button is at least 44px');
     if (shots) await phone.screenshot({ path: `${shots}/06-coach-availability-phone.png`, fullPage: true });
     await phone.getByRole('button', { name: 'Review and submit' }).click();
-    await phone.getByText(/^You can do \d+ classes? of \d+, prefer \d+, can’t do \d+, away 1 day\.$/).first().waitFor();
+    await phone.getByText(/^You can do \d+ classes? of \d+, prefer 1, can’t do \d+, away 1 day, free on 1 day with no classes\.$/).first().waitFor();
     if (shots) await phone.screenshot({ path: `${shots}/07-coach-availability-review-phone.png`, fullPage: true });
-    await phone.getByRole('button', { name: /^Submit / }).click();
+    await phone.getByRole('button', { name: `Submit ${MONTH_WORD} classes` }).click();
     await phone.getByText(/submitted/).first().waitFor();
     await phone.getByText('Submitted', { exact: true }).waitFor();
-    const submitted = await db.query(`select s.version from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id where m.display_name = 'Quinn Synthetic'`);
+    const submitted = await db.query(`select s.version, s.staff_id from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id where m.display_name = 'Quinn Synthetic'`);
     assert.deepEqual(submitted.rows.map(row => row.version), [1]);
+
+    // What the manager's "who can take what" matrix now shows for Quinn.
+    const matrix = await rpcAs(db, DEMO_OWNER, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` });
+    const quinnId = submitted.rows[0].staff_id;
+    const classAt = (date, minute) => matrix.sessions.find(item => item.start === gymInstantIso(date, minute) || new Date(item.start).getTime() === new Date(gymInstantIso(date, minute)).getTime());
+    const statusOf = (date, minute) => matrix.availability.find(item => item.staff_id === quinnId && item.session_id === classAt(date, minute)?.id)?.status || 'UNKNOWN';
+    assert.equal(statusOf(tuesday, 315), 'AVAILABLE');
+    assert.equal(statusOf(saturday, 375), 'PREFERRED');
+    assert.equal(statusOf(saturday, 570), 'AVAILABLE');
+    assert.equal(statusOf(wednesday, 990), 'UNAVAILABLE');
+    assert.equal(statusOf(wednesday, 315), 'AVAILABLE');
+    assert.equal(statusOf(awayDay, 315), 'UNAVAILABLE');
+    assert.equal(statusOf(firstMonday, 315), 'UNKNOWN', 'blank days are unanswered, never available');
   });
 
   const riley = await rosterContext(browser, origin, coach('riley').profileId, { width: 390, height: 844 });

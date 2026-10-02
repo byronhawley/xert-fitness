@@ -4,6 +4,7 @@
  * component so the same rules are testable without a browser.
  */
 import { expandAvailability, intervalAvailability, slotShortcuts, startFromPattern, validateAvailability } from './availability.js';
+import { dayCounts } from './dayAvailability.js';
 import { gymDateOf, gymMinuteOf, minuteLabel, toMs } from './time.js';
 
 export const EMPTY_AVAILABILITY = Object.freeze({ weekly: [], exceptions: [], noAvailability: false });
@@ -123,24 +124,31 @@ const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one :
  * the coach's words. "Can do" counts every class they could be rostered on
  * (preferred and if-needed included); "can't" counts classes they ruled out.
  */
-export function availabilitySummary(payload, monthKey, sessions) {
+export function availabilitySummary(payload, monthKey, sessions, { startsOn = null } = {}) {
   const review = reviewClasses(payload, monthKey, sessions);
   const count = status => review.rows.filter(row => row.status === status).length;
   const prefer = count('PREFERRED');
   const canDo = prefer + count('AVAILABLE') + review.ifNeeded;
-  const away = payload?.noAvailability ? 0 : awayDates(payload).length;
+  const days = dayCounts(payload, monthKey, sessions, { startsOn });
+  const away = payload?.noAvailability ? 0 : Math.max(awayDates(payload).filter(date => !startsOn || date >= startsOn).length, days.away);
   const total = review.rows.length;
+  const free = days.availableNoClasses;
   let sentence;
   if (payload?.noAvailability) sentence = `You can’t coach any classes in this month.`;
-  else if (total === 0) sentence = 'There are no classes on the timetable for this month yet.';
-  else {
+  else if (total === 0) {
+    const parts = [];
+    if (free) parts.push(`free on ${plural(free, 'day')}`);
+    if (away) parts.push(`away ${plural(away, 'day')}`);
+    sentence = `There are no classes on the timetable for this month yet.${parts.length ? ` You’re ${parts.join(', ')}.` : ''}`;
+  } else {
     const parts = [`You can do ${plural(canDo, 'class', 'classes')} of ${total}`];
     if (prefer) parts.push(`prefer ${prefer}`);
     if (review.unavailable) parts.push(`can’t do ${review.unavailable}`);
     if (away) parts.push(`away ${plural(away, 'day')}`);
+    if (free) parts.push(`free on ${plural(free, 'day')} with no classes`);
     sentence = `${parts.join(', ')}.`;
   }
-  return { ...review, total, canDo, prefer, cant: review.unavailable, away, sentence };
+  return { ...review, total, canDo, prefer, cant: review.unavailable, away, days, freeDays: free, sentence };
 }
 
 /**
