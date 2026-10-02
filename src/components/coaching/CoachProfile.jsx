@@ -190,6 +190,14 @@ function CertificatesSection({ client, files, uid, notify }) {
   );
 }
 
+/** The line under "Text messages": what the coach gets, or what's missing. */
+export function smsPreferenceHint(prefs) {
+  if (prefs.mobile_state === 'missing' || prefs.mobile_state === 'no_account') return 'Add your mobile number in Account details to get texts.';
+  if (prefs.mobile_state === 'invalid') return 'The phone number in Account details isn’t an Australian mobile (04…). Fix it to get texts.';
+  if (!prefs.sms_available) return 'The gym hasn’t switched roster texts on yet. Your choice is kept for when it does.';
+  return 'A text listing your classes when a roster is published, and when your classes change.';
+}
+
 function NoticesSection({ client, notify }) {
   const [prefs, setPrefs] = useState(null);
   const [error, setError] = useState(null);
@@ -201,11 +209,19 @@ function NoticesSection({ client, notify }) {
     const before = prefs;
     const next = { ...prefs, ...patch };
     setPrefs(next);
-    try { setPrefs(await client.setNoticePreferences(next.email, next.push)); notify('Notice settings saved.'); }
+    try {
+      setPrefs('sms' in patch ? await client.setSmsPreference(next.sms) : await client.setNoticePreferences(next.email, next.push));
+      notify('Notice settings saved.');
+    }
     catch (failure) { setPrefs(before); notify(failure.message, 'error'); }
   };
   if (error) return <Banner tone="danger" title="Couldn’t load notice settings" action={<button type="button" className={GHOST} onClick={load}>Try again</button>}>{error.message}</Banner>;
   if (!prefs) return null;
+  return <NoticeChoices prefs={prefs} onChange={change} />;
+}
+
+/** The notice switches: inbox (always on), email, phone notifications, text messages. */
+export function NoticeChoices({ prefs, onChange: change }) {
   return (
     <section aria-labelledby="coach-notices-heading" className="space-y-3">
       <h2 id="coach-notices-heading" className="font-display text-2xl uppercase text-xert-offwhite">How you get notices</h2>
@@ -223,6 +239,13 @@ function NoticesSection({ client, notify }) {
           <input type="checkbox" className="mt-1" checked={prefs.push} onChange={event => change({ push: event.target.checked })} />
           <span>Phone notifications<span className="block text-xs text-xert-pale/60">Only if you use the XERT iPhone app with notifications allowed.</span></span>
         </label>
+        {'sms' in prefs && (
+          <label className="flex items-start gap-3 font-body text-sm text-xert-offwhite min-h-11">
+            <input type="checkbox" className="mt-1" checked={prefs.sms} onChange={event => change({ sms: event.target.checked })} />
+            <span>Text messages{prefs.mobile_ending ? ` to your mobile ending ${prefs.mobile_ending}` : ''}
+              <span className="block text-xs text-xert-pale/60">{smsPreferenceHint(prefs)}</span></span>
+          </label>
+        )}
       </div>
     </section>
   );

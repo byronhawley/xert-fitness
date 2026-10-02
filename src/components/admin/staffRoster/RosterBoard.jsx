@@ -294,7 +294,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
         allowIfNeeded={settings?.allow_if_needed_fallback !== false} busy={busy}
         onApply={async changes => { if (await onApply(changes, 'Suggested coaches added to the draft. Check them, then publish.')) { setSuggestOpen(false); setSuggestWholeMonth(false); setSelected(new Set()); } }} />
       {publishOpen && <PublishDialog open={publishOpen} onOpenChange={setPublishOpen} month={month} snapshot={snapshot} ctx={ctx} busy={busy}
-        onPublish={async reason => { const result = await onPublish(reason); if (result?.ok) setPublishOpen(false); return result; }} />}
+        client={data.client} onPublish={onPublish} />}
       {copyPreview && (
         <Notice tone="info" title={`Copy last week: ${copyPreview.proposals.length} can be copied, ${copyPreview.skipped.length} can’t`}
           action={<div className="flex gap-2">

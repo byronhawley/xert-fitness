@@ -119,6 +119,42 @@ from today by default), due three days before it and publish-by the day
 before. Classes before that day keep whatever coach they have now; publishing
 never touches them.
 
+### 1d. Apply the roster texts migration (needs approval)
+
+`20261002050000_staff_roster_sms.sql` goes on top of `20261002040000`, the
+same way: SQL editor only, whole file at once, backup first. It starts with
+`set local lock_timeout = '5s'`, is idempotent, and records `staff_roster_sms`
+as its **last** statement. It adds `staff_roster_settings.sms_enabled`
+(**false**: nothing is texted until the owner turns it on),
+`staff_notice_preferences.sms` (true), the `staff_roster_sms_messages` outbox
+(RLS on, no direct access), a deferred trigger on `staff_roster_revisions`
+that queues texts when a version is published (publish and cover approval are
+not copied or changed), the service-role-only `staff_roster_sms_claim` /
+`staff_roster_sms_record`, and the manager/coach entry points
+`staff_roster_sms_status`, `staff_roster_sms_set_enabled`,
+`staff_roster_sms_retry`, `staff_roster_set_sms_preference` (and
+`staff_roster_my_notice_preferences` with the texting fields added).
+
+Going live:
+
+1. Apply the migration and check `staff_roster_sms` is in
+   `xert_schema_capabilities`.
+2. Deploy the app. Texts are sent by `api/admin-publish-announcement.js`
+   (action `send_roster_sms`) with the existing `TWILIO_ACCOUNT_SID`,
+   `TWILIO_AUTH_TOKEN` and `TWILIO_FROM_NUMBER`. No new function, secret or
+   scheduler.
+3. Coach roster → Coaches: any coach marked **No mobile** needs an Australian
+   mobile (04…) on their XERT account (Account details, or Members).
+4. Coach roster → Settings → **Text coaches when you publish**.
+5. Publish. The publish dialog shows "Texts: N sent, …" and offers **Resend
+   failed texts** when any failed or were skipped for a missing number.
+
+Texts go out when a manager's screen asks: right after publishing, after
+approving cover, and whenever the roster opens with texts still waiting.
+Temporary Twilio failures are retried (3 attempts in all). Switching texting
+off cancels texts still waiting. Coaches can turn texts off under
+Profile → How you get notices.
+
 ## 2. Set up and switch on
 
 All in **Coach roster → Settings** and **Coaches**:

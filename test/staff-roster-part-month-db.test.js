@@ -21,8 +21,8 @@ import { addDays, dateInMonth, gymInstantIso, monthKeyOf } from '../src/lib/staf
 const PART_MONTH_URL = MIGRATION_URLS.find(url => url.pathname.endsWith('20261002040000_staff_roster_part_month.sql'));
 const PART_MONTH = await readFile(PART_MONTH_URL, 'utf8');
 const FIRST = await readFile(MIGRATION_URLS[0], 'utf8');
-// Every applied migration after the first, PT booking included (it is not part of the roster harness).
-const LATER = await Promise.all([...MIGRATION_URLS.slice(1, -1), new URL('../supabase/migrations/20261002030000_pt_booking.sql', import.meta.url)]
+// Every other migration after the first (later ones too), PT booking included (it is not part of the roster harness).
+const LATER = await Promise.all([...MIGRATION_URLS.slice(1).filter(url => url !== PART_MONTH_URL), new URL('../supabase/migrations/20261002030000_pt_booking.sql', import.meta.url)]
   .map(url => readFile(url, 'utf8')));
 
 const START = day(15);
@@ -264,7 +264,7 @@ test('running the migration twice is idempotent, keeps data, and still accepts w
 test('a failure part-way leaves no column and no capability', async () => {
   const db = new PGlite();
   await db.exec(BASE_SCHEMA);
-  for (const url of MIGRATION_URLS.slice(0, -1)) await db.exec(await readFile(url, 'utf8'));
+  for (const url of MIGRATION_URLS.slice(0, MIGRATION_URLS.indexOf(PART_MONTH_URL))) await db.exec(await readFile(url, 'utf8'));
   const marker = 'insert into public.xert_schema_capabilities';
   await assert.rejects(() => db.exec(PART_MONTH.replace(marker, `select 1 / 0;\n${marker}`)), /division by zero/);
   const { rows } = await db.query(`select

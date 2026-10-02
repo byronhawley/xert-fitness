@@ -6,6 +6,7 @@ import { publishImpact } from '@/lib/staffRoster/snapshot';
 import { toMs } from '@/lib/staffRoster/time';
 import { monthLabel, sessionLabel, staffName } from './rosterFormat';
 import { Notice, ProblemList } from './rosterBits';
+import RosterTexts from './RosterTexts';
 
 /** What publishing would do, computed from the draft; the server decides. */
 export function publishPreview(snapshot, ctx) {
@@ -38,10 +39,33 @@ export function gapCount(serverResult, preview) {
   return preview.gaps.length;
 }
 
-export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx, busy, onPublish }) {
-  const preview = useMemo(() => (open ? publishPreview(snapshot, ctx) : null), [open, snapshot, ctx]);
+/** After a publish: what coaches were told, and what happened to the texts. */
+export function PublishedView({ result, month, client }) {
+  const affected = result.affected_staff?.length || 0;
+  return (
+    <div className="space-y-4">
+      <Notice tone="success" title={`Version ${result.number} of ${monthLabel(month)} is published`}>
+        {affected ? `${affected} ${affected === 1 ? 'coach has' : 'coaches have'} a notice in their app inbox.` : 'No coach’s classes changed, so nobody was notified.'}
+      </Notice>
+      {client && <RosterTexts client={client} month={month} autoSend />}
+    </div>
+  );
+}
+
+export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx, busy, onPublish, client = null }) {
+  const [published, setPublished] = useState(null);
+  const preview = useMemo(() => (open && !published ? publishPreview(snapshot, ctx) : null), [open, published, snapshot, ctx]);
   const [reason, setReason] = useState('');
   const [serverResult, setServerResult] = useState(null);
+  if (published) {
+    return (
+      <AdminDrawer open={open} onOpenChange={onOpenChange} title={`Publish ${monthLabel(month)}`} closeLabel="Close publish"
+        description="Coaches can see their classes now."
+        footer={<AdminButton onClick={() => onOpenChange(false)}>Done</AdminButton>}>
+        <PublishedView result={published} month={month} client={client} />
+      </AdminDrawer>
+    );
+  }
   if (!preview) return null;
   const gaps = gapCount(serverResult, preview);
   const blocked = preview.blocked.length > 0 || serverResult?.reason === 'HARD_CONFLICTS';
@@ -52,6 +76,7 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
   const submit = async () => {
     const result = await onPublish(reason.trim() || null);
     if (result && result.ok === false) setServerResult(result);
+    else if (result?.ok) setPublished(result);
   };
 
   return (
@@ -115,7 +140,7 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
               ))}
             </ul>
           )}
-          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.</p>
+          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.{snapshot.settings?.sms_enabled ? ' They also get a text listing their classes (each coach can turn texts off).' : ''}</p>
         </section>
       </div>
     </AdminDrawer>
