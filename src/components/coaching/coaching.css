@@ -1,5 +1,5 @@
 /* Coach screens. Phone first; colours from the shared tokens. */
-.coaching-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-sunken); }
+.coaching-tabs { display: grid; grid-template-columns: repeat(var(--coaching-tab-count, 4), minmax(0, 1fr)); gap: 4px; padding: 4px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-sunken); }
 .coaching-tabs button { min-height: 44px; border-radius: var(--radius-control); font-family: var(--font-body, inherit); font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); position: relative; }
 .coaching-tabs button[aria-selected="true"] { color: var(--text-inverse); background: var(--accent-default); }
 .coaching-tabs .coaching-count { margin-inline-start: 4px; padding: 0 6px; border-radius: 999px; background: var(--state-danger-text); color: var(--text-inverse); font-size: 0.7rem; }
@@ -33,3 +33,16 @@
 .coaching-save-state { font-size: 0.75rem; color: var(--text-secondary); }
 .coaching-save-state[data-state="error"] { color: var(--state-danger-text); }
 .coaching-save-state[data-state="saved"] { color: var(--state-success); }
+
+/* Five tabs on a phone: a row that scrolls sideways instead of squeezing labels together. */
+@media (max-width: 520px) {
+  .coaching-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
+  .coaching-tabs::-webkit-scrollbar { display: none; }
+  .coaching-tabs button { flex: 0 0 auto; padding: 0 14px; white-space: nowrap; }
+}
+
+.coaching-check { display: inline-block; width: 1.1em; text-align: center; color: var(--text-secondary); }
+.coaching-check[data-state="done"] { color: var(--state-success); }
+.coaching-check[data-state="todo"] { color: var(--state-warning); }
+.coaching-shortcut { display: flex; align-items: center; justify-content: space-between; min-height: 56px; }
+.coaching-shortcut .coaching-count { margin-inline-start: 6px; padding: 0 6px; border-radius: 999px; background: var(--state-danger-text); color: var(--text-inverse); font-size: 0.7rem; }

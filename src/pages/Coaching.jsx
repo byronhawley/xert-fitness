@@ -9,13 +9,17 @@ import { authPathWithNext } from '@/lib/authRedirect';
 import { gymDateKey } from '@/lib/gymTime';
 import { staffRoster } from '@/lib/staffRosterData';
 import { Banner, GHOST } from '@/components/coaching/coachingUi';
+import CoachHome from '@/components/coaching/CoachHome';
 import CoachRoster from '@/components/coaching/CoachRoster';
 import CoachAvailability from '@/components/coaching/CoachAvailability';
 import CoachRequests from '@/components/coaching/CoachRequests';
 import CoachInbox from '@/components/coaching/CoachInbox';
 import '@/components/coaching/coaching.css';
 
+// Home is the default. Every older link names its tab (`?tab=roster` …), so
+// those keep opening the same screen.
 const TABS = [
+  { key: 'home', label: 'Home' },
   { key: 'roster', label: 'My classes' },
   { key: 'availability', label: 'Availability' },
   { key: 'requests', label: 'Requests' },
@@ -24,7 +28,7 @@ const TABS = [
 
 const BLOCKED = {
   ROSTER_DISABLED: ['Coach roster isn’t switched on yet', 'The manager will let you know when it’s ready.'],
-  NOT_STAFF: ['This account isn’t on the coach roster', 'If you coach at XERT, ask the manager to link this sign-in to you. No membership is needed.'],
+  NOT_STAFF: ['This account isn’t on the coach roster', 'If you coach at XERT, ask the manager for an invite link, or to link this sign-in to you. No membership is needed.'],
   STAFF_INACTIVE: ['Your coach access is paused', 'Talk to the manager if this is a mistake.'],
 };
 
@@ -39,8 +43,9 @@ function Shell({ children }) {
 }
 
 /**
- * Coach screens on the website (and the app's web views): published classes,
- * monthly availability, time away and cover, and roster notices. Access is by
+ * Coach dashboard on the website (and the app's web views): a Home overview
+ * with a setup checklist and next classes, then published classes, monthly
+ * availability, time away and cover, and roster notices. Access is by
  * staff link, not membership; every call is checked on the server.
  */
 export default function Coaching({ client: injected = null }) {
@@ -52,7 +57,7 @@ export default function Coaching({ client: injected = null }) {
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
   const today = gymDateKey(new Date());
-  const tab = TABS.some(item => item.key === params.get('tab')) ? params.get('tab') : 'roster';
+  const tab = TABS.some(item => item.key === params.get('tab')) ? params.get('tab') : 'home';
 
   useEffect(() => { if (!injected) staffRoster().then(setClient); }, [injected]);
   const loadMe = useCallback(async () => {
@@ -91,7 +96,7 @@ export default function Coaching({ client: injected = null }) {
         <p className="font-body text-xs uppercase tracking-wider text-xert-pale/60">Coach</p>
         <h1 className="font-display text-4xl uppercase text-xert-offwhite">Hi {me.staff.display_name}</h1>
       </header>
-      <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5">
+      <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5" style={/** @type {React.CSSProperties} */ ({ '--coaching-tab-count': TABS.length })}>
         {TABS.map(item => (
           <button key={item.key} type="button" role="tab" id={`coach-tab-${item.key}`} aria-selected={tab === item.key} aria-controls="coach-panel" onClick={() => setParam('tab', item.key)}>
             {item.label}{counts[item.key] ? <span className="coaching-count" aria-label={`, ${counts[item.key]} need you`}>{counts[item.key]}</span> : null}
@@ -99,6 +104,7 @@ export default function Coaching({ client: injected = null }) {
         ))}
       </div>
       <section id="coach-panel" role="tabpanel" aria-labelledby={`coach-tab-${tab}`}>
+        {tab === 'home' && <CoachHome client={client} me={me} today={today} joined={location.state?.joined || null} counts={counts} />}
         {tab === 'roster' && <CoachRoster client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'availability' && <CoachAvailability client={client} me={me} monthParam={params.get('month') || ''} setMonthParam={value => setParam('month', value)} notify={notify} onChanged={loadMe} />}
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}

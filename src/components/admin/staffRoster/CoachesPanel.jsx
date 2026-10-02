@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { AdminButton, AdminDrawer, AdminFormField, ADMIN_TEXT } from '@/components/admin/ui';
 import { getAllCoaches } from '@/lib/adminData';
 import { ROLE_LABELS, STAFF_ROLES } from '@/lib/staffRoster/duty';
+import { INVITE_STATUS_LABELS, inviteLink } from '@/lib/staffRoster/invite';
+import { gymDateOf, toMs } from '@/lib/staffRoster/time';
 import { Notice, Tone } from './rosterBits';
 
 const EMPTY = { display_name: '', legacy_label: '', roles: ['lead'], profile_id: '', coach_id: '', target_classes_per_month: '', min_classes_per_month: '',
@@ -150,30 +152,123 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
   );
 }
 
+const INVITE_TONE = { pending: 'info', expired: 'warning', accepted: 'success', revoked: 'neutral' };
+const EMAIL_OUTCOME = {
+  queued: email => `Emailed to ${email}.`,
+  sent: email => `Emailed to ${email}.`,
+  skipped: () => 'Email is switched off in Email settings, so nothing was sent. Copy the link and send it yourself.',
+  failed: () => 'The email could not be queued. Copy the link and send it yourself.',
+  no_address: () => 'That address can’t receive email. Copy the link and send it yourself.',
+};
+const shortDate = value => gymDateOf(toMs(value));
+
+/** Invite link for a coach who has no sign-in yet. The link is shown once. */
+function InviteDrawer({ row, invite, busy, onClose, onMutate, onChanged }) {
+  const [email, setEmail] = useState('');
+  const [created, setCreated] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const link = created ? inviteLink(window.location.origin, created.token) : '';
+  const live = invite && (invite.status === 'pending' || invite.status === 'expired');
+
+  const create = async () => {
+    const result = await onMutate(client => client.createInvite(row.id, email.trim() || null), null, { reload: false });
+    if (!result) return;
+    setCreated(result);
+    setCopied(false);
+    onChanged();
+  };
+  const revoke = async () => {
+    const result = await onMutate(client => client.revokeInvite(invite.id), 'Invite cancelled. The link no longer works.', { reload: false });
+    if (result) { setCreated(null); onChanged(); }
+  };
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(link); setCopied(true); } catch { /** @type {HTMLInputElement | null} */ (document.getElementById('coach-invite-link'))?.select(); }
+  };
+
+  return (
+    <AdminDrawer open onOpenChange={value => { if (!value) onClose(); }} title={`Invite ${row.display_name}`} closeLabel="Close invite"
+      description="They open the link, sign in or create an account, and it connects to this coach. No membership needed."
+      footer={<AdminButton variant="ghost" onClick={onClose}>Done</AdminButton>}>
+      <div className="space-y-5">
+        <p className="font-body text-sm text-xert-pale/70">The link works once and expires after 14 days. Making a new link cancels the previous one.</p>
+        {invite && !created && (
+          <section className="space-y-2" aria-label="Current invite">
+            <h3 className={ADMIN_TEXT.sectionHeading}>Current invite</h3>
+            <p className="font-body text-sm text-xert-pale/80">
+              <Tone tone={INVITE_TONE[invite.status]}>{INVITE_STATUS_LABELS[invite.status]}</Tone>{' '}
+              Created {shortDate(invite.created_at)}{invite.created_by ? ` by ${invite.created_by}` : ''}
+              {invite.status === 'pending' ? ` · expires ${shortDate(invite.expires_at)}` : ''}
+              {invite.email ? ` · emailed to ${invite.email}` : ''}
+            </p>
+            {live && <AdminButton variant="danger" disabled={busy} onClick={revoke}>Cancel invite</AdminButton>}
+          </section>
+        )}
+        {created ? (
+          <section className="space-y-2" aria-label="Link created">
+            <h3 className={ADMIN_TEXT.sectionHeading}>Invite link</h3>
+            <AdminFormField label="Invite link" helper="Shown once. XERT keeps only a fingerprint of it, so copy it now.">
+              <input id="coach-invite-link" readOnly value={link} onFocus={event => event.target.select()} />
+            </AdminFormField>
+            <div className="flex flex-wrap gap-2">
+              <AdminButton onClick={copy}>{copied ? 'Copied' : 'Copy link'}</AdminButton>
+              <AdminButton variant="ghost" disabled={busy} onClick={() => setCreated(null)}>Make another</AdminButton>
+            </div>
+            {created.invite.email && <Notice tone={created.invite.email_status === 'queued' || created.invite.email_status === 'sent' ? 'success' : 'warning'}>
+              {(EMAIL_OUTCOME[created.invite.email_status] || EMAIL_OUTCOME.failed)(created.invite.email)}
+            </Notice>}
+          </section>
+        ) : (
+          <section className="space-y-2" aria-label="Create invite">
+            <AdminFormField label="Also email the link to (optional)" helper="Sent through the site’s email, if email is switched on.">
+              <input type="email" autoComplete="off" value={email} onChange={event => setEmail(event.target.value)} />
+            </AdminFormField>
+            <AdminButton disabled={busy} onClick={create}>{invite ? 'Create a new invite link' : 'Create invite link'}</AdminButton>
+          </section>
+        )}
+      </div>
+    </AdminDrawer>
+  );
+}
+
 export default function CoachesPanel({ data, onMutate, focusStaffId }) {
   const { snapshot, busy } = data;
   const [editing, setEditing] = useState(null);
+  const [inviting, setInviting] = useState(null);
+  const [invites, setInvites] = useState({});
   const [notice, setNotice] = useState(null);
   const staff = snapshot.staff || [];
+  const loadInvites = useCallback(async () => {
+    const rows = await onMutate(client => client.listInvites(), null, { reload: false });
+    if (Array.isArray(rows)) setInvites(Object.fromEntries(rows.map(item => [item.staff_id, item])));
+  }, [onMutate]);
+  useEffect(() => { loadInvites(); }, [loadInvites]);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={ADMIN_TEXT.lede}>Everyone who can be rostered. Linking a sign-in gives them the coach screens in the app and on the website.</p>
+        <p className={ADMIN_TEXT.lede}>Everyone who can be rostered. Linking a sign-in gives them the coach screens in the app and on the website. Send an invite link and they can link it themselves.</p>
         <AdminButton onClick={() => setEditing('new')}>Add a coach</AdminButton>
       </div>
       {notice}
       {staff.length === 0 && <p className="font-body text-sm text-xert-pale/60">No coaches yet.</p>}
       <ul className="staff-roster-list">
-        {staff.map(row => (
-          <li key={row.id} className="staff-roster-row" data-focused={focusStaffId === row.id}>
-            <div className="min-w-0">
-              <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} {row.status !== 'active' && <Tone>Inactive</Tone>}</p>
-              <p className="font-body text-xs text-xert-pale/60">{row.roles.map(role => ROLE_LABELS[role]).join(', ')} · {row.account_email ? `Signs in as ${row.account_email}` : 'No sign-in linked'}{row.capabilities?.length ? ` · ${row.capabilities.map(item => item.capability).join(', ')}` : ''}</p>
-            </div>
-            <AdminButton variant="ghost" onClick={() => setEditing(row)}>Edit</AdminButton>
-          </li>
-        ))}
+        {staff.map(row => {
+          const invite = invites[row.id];
+          const canInvite = !row.profile_id && row.status === 'active';
+          return (
+            <li key={row.id} className="staff-roster-row" data-focused={focusStaffId === row.id}>
+              <div className="min-w-0">
+                <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} {row.status !== 'active' && <Tone>Inactive</Tone>} {canInvite && invite && <Tone tone={INVITE_TONE[invite.status]}>{INVITE_STATUS_LABELS[invite.status]}</Tone>}</p>
+                <p className="font-body text-xs text-xert-pale/60">{row.roles.map(role => ROLE_LABELS[role]).join(', ')} · {row.account_email ? `Signs in as ${row.account_email}` : 'No sign-in linked'}{row.capabilities?.length ? ` · ${row.capabilities.map(item => item.capability).join(', ')}` : ''}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {canInvite && <AdminButton variant="ghost" aria-label={`Invite ${row.display_name}`} onClick={() => setInviting(row)}>{invite?.status === 'pending' ? 'Invite…' : 'Invite'}</AdminButton>}
+                <AdminButton variant="ghost" onClick={() => setEditing(row)}>Edit</AdminButton>
+              </div>
+            </li>
+          );
+        })}
       </ul>
+      {inviting && <InviteDrawer row={inviting} invite={invites[inviting.id]} busy={busy} onMutate={onMutate} onChanged={loadInvites} onClose={() => { setInviting(null); data.reload?.(); }} />}
       {editing && <CoachEditor row={editing === 'new' ? null : editing} busy={busy} onMutate={onMutate}
         onClose={review => { setEditing(null); setNotice(review ? <Notice tone="warning" title={`${review} future ${review === 1 ? 'class needs' : 'classes need'} another coach`}>They stay on those classes until you change them, and the roster can’t be published while they’re there.</Notice> : null); }} />}
     </div>

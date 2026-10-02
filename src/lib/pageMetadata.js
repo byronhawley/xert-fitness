@@ -52,6 +52,7 @@ const NOINDEX_TITLES = Object.freeze({
 const NOINDEX_PATHS = new Set([
   '/account',
   '/coaching',
+  '/coach-invite',
   '/admin',
   '/display',
   '/checkout-return',

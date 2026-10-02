@@ -17,7 +17,7 @@ test('public routes have distinct indexable search metadata', () => {
 });
 
 test('private, transactional and unknown routes are never indexed', () => {
-  for (const path of ['/account', '/coaching', '/admin/orders', '/checkout-return', '/reset-password', '/missing']) {
+  for (const path of ['/account', '/coaching', '/coach-invite', '/admin/orders', '/checkout-return', '/reset-password', '/missing']) {
     assert.equal(metadataForPath(path).indexable, false, path);
   }
 });
@@ -31,5 +31,6 @@ test('sitemap contains indexable routes and excludes private screens', async () 
   }
   assert.doesNotMatch(sitemap, /\/admin|\/account|\/checkout-return/);
   assert.match(robots, /Disallow: \/admin/);
+  assert.match(robots, /^Disallow: \/coach-invite$/m);
   assert.ok(robots.includes(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`));
 });

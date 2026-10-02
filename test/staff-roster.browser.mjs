@@ -1,7 +1,8 @@
 // End-to-end browser check of the staff roster against the REAL migration.
 // The app runs unmodified in Chromium; its Supabase RPC calls are answered by
-// PGlite running the roster migrations (20261001010000_staff_roster.sql, then
-// 20261002010000_staff_roster_push_reliability.sql) over a synthetic month. Everything else uses the shared local design fixtures.
+// PGlite running the roster migrations (20261001010000_staff_roster.sql,
+// 20261002010000_staff_roster_push_reliability.sql, then
+// 20261002020000_staff_roster_coach_invites.sql) over a synthetic month. Everything else uses the shared local design fixtures.
 // SYNTHETIC DATA ONLY; email notices are off and no request leaves the machine.
 //
 // Run: PLAYWRIGHT_MODULE=/path/to/playwright-core node test/staff-roster.browser.mjs [--screenshots=DIR]
@@ -11,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { createServer } from 'vite';
 import { fixtureSession, fixtureUser, installDesignFixtures } from './fixtures/design-data.mjs';
+import { as } from './helpers/staff-roster-db.mjs';
 import { DEMO_COACHES, DEMO_OWNER, demoMonth, rpcAs } from './fixtures/staff-roster-demo.mjs';
 import { addDays, addMonths, datesOfMonth, gymInstantIso, monthKeyOf, weekdayOf } from '../src/lib/staffRoster/time.js';
 import { gymDateKey } from '../src/lib/gymTime.js';
@@ -259,7 +261,8 @@ try {
   let coverSession = null;
   await step('coach sees only published classes on a phone and asks for cover', async () => {
     const phone = riley.page;
-    await phone.goto(`${origin}/coaching`, { waitUntil: 'networkidle' });
+    // /coaching now opens Home; the classes list is its own tab.
+    await phone.goto(`${origin}/coaching?tab=roster`, { waitUntil: 'networkidle' });
     await phone.getByText(/Your .* roster changed/).first().waitFor();
     if (shots) await phone.screenshot({ path: `${shots}/08-coach-roster-phone.png`, fullPage: true });
     await phone.getByRole('button', { name: 'I’ve seen it' }).click();
@@ -374,8 +377,86 @@ try {
     await revoked.context.close();
   });
 
+
+  // ── Coach invite: manager makes a link → signed-out coach opens it → signs in → lands on the dashboard, linked.
+  const SAM = '00000000-0000-4000-9000-0000000000aa';
+  const samUser = { ...fixtureUser, id: SAM, email: 'sam@example.invalid', user_metadata: { full_name: 'Sam Synthetic' } };
+  const samSession = () => {
+    const session = fixtureSession();
+    const [header, , signature] = session.access_token.split('.');
+    const claims = Buffer.from(JSON.stringify({ sub: SAM, aud: 'authenticated', role: 'authenticated', exp: session.expires_at })).toString('base64url');
+    return { ...session, access_token: `${header}.${claims}.${signature}`, user: samUser };
+  };
+  await db.query(`insert into public.profiles (id, full_name, email, role) values ($1, 'Sam Synthetic', 'sam@example.invalid', 'member')`, [SAM]);
+  const samStaff = await rpcAs(db, DEMO_OWNER, 'staff_roster_upsert_staff', { p_staff: { display_name: 'Sam Synthetic', roles: ['assistant'] }, p_expected_version: null, p_request_id: crypto.randomUUID() });
+  let inviteUrl = null;
+  await step('manager creates an invite link for a coach with no sign-in', async () => {
+    await page.goto(`${origin}/admin/roster?rosterTab=coaches&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    const invite = page.getByRole('button', { name: 'Invite Sam Synthetic' });
+    await invite.waitFor();
+    assert.equal(await page.getByRole('button', { name: /^Invite Riley Synthetic/ }).count(), 0, 'linked coaches are not offered an invite');
+    await invite.click();
+    const drawer = page.getByRole('dialog', { name: 'Invite Sam Synthetic' });
+    await drawer.getByRole('button', { name: 'Create invite link' }).click();
+    const field = drawer.getByLabel('Invite link');
+    await field.waitFor();
+    inviteUrl = await field.inputValue();
+    assert.match(inviteUrl, new RegExp(`^${origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/coach-invite#token=[0-9a-f]{64}$`));
+    const token = inviteUrl.split('#token=')[1];
+    const { rows } = await db.query(`select encode(token_hash, 'hex') = encode(sha256(convert_to($1, 'UTF8')), 'hex') as matches, accepted_at from public.staff_roster_invites where staff_id = $2`, [token, samStaff.id]);
+    assert.deepEqual(rows, [{ matches: true, accepted_at: null }], 'one pending invite, stored as a hash');
+    if (shots) await page.screenshot({ path: `${shots}/12-manager-invite-link.png` });
+    await drawer.getByRole('button', { name: 'Done' }).click();
+    await page.getByText('Invite sent').first().waitFor();
+  });
+
+  const samContext = await rosterContext(browser, origin, SAM, { width: 390, height: 844 }, { signedIn: false });
+  await step('a signed-out coach opens the link, signs in, accepts, and lands on the dashboard linked', async () => {
+    const coachPage = samContext.page;
+    const token = inviteUrl.split('#token=')[1];
+    const urlsWithToken = [];
+    coachPage.on('request', request => { if (request.url().includes(token)) urlsWithToken.push(request.url()); });
+    await samContext.context.route('**/auth/v1/user', route => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(samUser) }));
+    await samContext.context.route('**/auth/v1/token**', route => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(samSession()) }));
+    await coachPage.goto(inviteUrl, { waitUntil: 'networkidle' });
+    await coachPage.getByRole('heading', { name: 'You’re invited to coach' }).waitFor();
+    assert.equal(new URL(coachPage.url()).hash, '', 'the token is taken out of the address bar');
+    assert.equal(await coachPage.getByText('Sam Synthetic').count(), 0, 'no coach name before sign-in');
+    if (shots) await coachPage.screenshot({ path: `${shots}/13-coach-invite-signed-out-phone.png`, fullPage: true });
+    const login = coachPage.getByRole('link', { name: 'Log in', exact: true }).last();
+    assert.equal(new URL(await login.getAttribute('href'), origin).searchParams.get('next'), '/coach-invite', 'the token never goes into ?next=');
+    await login.click();
+    await coachPage.locator('input[type="email"]').fill(samUser.email);
+    await coachPage.locator('input[type="password"]').fill('synthetic-password');
+    await coachPage.getByRole('button', { name: 'Log in' }).click();
+    await coachPage.getByRole('heading', { name: 'Join as Sam Synthetic' }).waitFor();
+    await coachPage.getByText('sam@example.invalid').waitFor();
+    if (shots) await coachPage.screenshot({ path: `${shots}/14-coach-invite-accept-phone.png`, fullPage: true });
+    await coachPage.getByRole('button', { name: 'Accept invite' }).click();
+    await coachPage.getByRole('heading', { name: /Hi Sam Synthetic/ }).waitFor();
+    await coachPage.getByText('Welcome to the XERT coach roster, Sam Synthetic').waitFor();
+    await coachPage.getByRole('tab', { name: 'Home', selected: true }).waitFor();
+    await coachPage.getByText(/Availability for/).first().waitFor();
+    assert.equal(new URL(coachPage.url()).pathname, '/coaching');
+    const { rows } = await db.query(`select m.profile_id, i.accepted_by from public.staff_members m join public.staff_roster_invites i on i.staff_id = m.id where m.id = $1`, [samStaff.id]);
+    assert.deepEqual(rows, [{ profile_id: SAM, accepted_by: SAM }]);
+    assert.deepEqual(urlsWithToken, [], 'no request URL ever carried the token');
+    assert.equal(await coachPage.evaluate(() => localStorage.getItem('xert.coachInvite')), null, 'the remembered link is cleared after joining');
+    if (shots) await coachPage.screenshot({ path: `${shots}/15-coach-home-after-joining-phone.png`, fullPage: true });
+  });
+
+  await step('the used link is refused for anyone else, in plain words', async () => {
+    const other = await rosterContext(browser, origin, coach('quinn').profileId, { width: 390, height: 844 });
+    await other.page.goto(inviteUrl, { waitUntil: 'networkidle' });
+    await other.page.getByText('This invite has already been used').waitFor();
+    assert.equal(await other.page.getByText('Sam Synthetic').count(), 0);
+    if (shots) await other.page.screenshot({ path: `${shots}/16-coach-invite-used-phone.png`, fullPage: true });
+    await other.context.close();
+    await as(db, '');
+  });
+
   await step('no page errors in any session', async () => {
-    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems, ...signedOut.problems];
+    const all = [...manager.problems, ...quinn.problems, ...riley.problems, ...jordan.problems, ...signedOut.problems, ...samContext.problems];
     assert.deepEqual(all, []);
   });
   const names = new Set(rpcLog.map(item => item.name));

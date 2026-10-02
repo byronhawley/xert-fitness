@@ -1,5 +1,5 @@
-// Runs the real staff roster migrations (the applied first release, then the
-// push reliability forward migration) inside PGlite (PostgreSQL in WASM)
+// Runs the real staff roster migrations (the applied first release, the push
+// reliability forward migration, then coach invites) inside PGlite (PostgreSQL in WASM)
 // over a minimal stand-in for the XERT tables it builds on. SYNTHETIC DATA.
 import { readFile } from 'node:fs/promises';
 import { PGlite } from '@electric-sql/pglite';
@@ -7,6 +7,7 @@ import { PGlite } from '@electric-sql/pglite';
 export const MIGRATION_URLS = Object.freeze([
   new URL('../../supabase/migrations/20261001010000_staff_roster.sql', import.meta.url),
   new URL('../../supabase/migrations/20261002010000_staff_roster_push_reliability.sql', import.meta.url),
+  new URL('../../supabase/migrations/20261002020000_staff_roster_coach_invites.sql', import.meta.url),
 ]);
 
 /** Every roster migration, in order, as one SQL script. */

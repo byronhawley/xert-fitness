@@ -461,7 +461,7 @@ test('with Supabase-style default grants, roster tables, sequences and internal 
   const sequences = await db.query(`select c.relname, has_sequence_privilege('anon', c.oid, 'usage') as anon_usage,
       has_sequence_privilege('authenticated', c.oid, 'usage') as auth_usage, has_sequence_privilege('authenticated', c.oid, 'select') as auth_select
     from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'S' and c.relname like 'staff\\_%' order by c.relname`);
-  assert.deepEqual(sequences.rows.map(row => row.relname), ['staff_availability_windows_id_seq', 'staff_roster_audit_events_id_seq']);
+  assert.deepEqual(sequences.rows.map(row => row.relname), ['staff_availability_windows_id_seq', 'staff_roster_audit_events_id_seq', 'staff_roster_invite_attempts_id_seq']);
   assert.deepEqual(sequences.rows.filter(row => row.anon_usage || row.auth_usage || row.auth_select), []);
   const tables = await db.query(`select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
     where n.nspname = 'public' and c.relkind = 'r' and c.relname like 'staff\\_%'
