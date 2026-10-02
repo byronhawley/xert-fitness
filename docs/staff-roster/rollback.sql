@@ -13,11 +13,11 @@
 -- columns go with the staff_notifications and push-delivery tables) and
 -- 20261002020000_staff_roster_coach_dashboard.sql (invites and the coach
 -- dashboard: staff_roster_* functions, dropped by the loop; its tables are
--- listed below). It leaves Supabase storage alone: the private
--- `staff-certificates` bucket, its files and the storage policies
--- staff_certificates_owner_insert / _owner_or_manager_read / _owner_delete and
--- site_images_staff_profile_insert must be removed in the Storage dashboard if
--- wanted (certificate files are personal records; export them first).
+-- listed below). It drops that migration's four storage policies
+-- (staff_certificates_owner_insert / _owner_or_manager_read / _owner_delete and
+-- site_images_staff_profile_insert) but leaves the private `staff-certificates`
+-- bucket and its files: remove those in the Storage dashboard if wanted
+-- (certificate files are personal records; export them first).
 -- Website coach profiles approved from coach drafts stay in public.coaches.
 --
 -- If the push dispatch schedule was ever activated
@@ -32,6 +32,16 @@
 begin;
 
 drop trigger if exists class_sessions_staff_roster_changes on public.class_sessions;
+
+do $storage$
+begin
+  if to_regclass('storage.objects') is null then return; end if;
+  execute 'drop policy if exists "staff_certificates_owner_insert" on storage.objects';
+  execute 'drop policy if exists "staff_certificates_owner_or_manager_read" on storage.objects';
+  execute 'drop policy if exists "staff_certificates_owner_delete" on storage.objects';
+  execute 'drop policy if exists "site_images_staff_profile_insert" on storage.objects';
+end;
+$storage$;
 
 do $rollback$
 declare

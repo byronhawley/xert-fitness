@@ -10,7 +10,7 @@ set local lock_timeout = '5s';
 -- Forward migration on top of 20261001010000_staff_roster.sql and
 -- 20261002010000_staff_roster_push_reliability.sql (both applied; never
 -- edited). Additive and idempotent. It changes no existing row, class,
--- booking, notice or device, and the roster stays switched off.
+-- booking, notice or device, and it leaves the roster switch exactly as it is.
 --
 -- A manager sends a coach (a staff_members row with no sign-in yet) a
 -- single-use link. The coach opens it, signs in or creates an account, and
@@ -453,6 +453,15 @@ $lockdown$;
 
 -- ─── Storage (skipped where there is no Supabase storage, e.g. local tests) ─
 
+-- Storage policies run as the signed-in user, who cannot read staff_members
+-- directly, so they ask this definer helper instead.
+create or replace function public.staff_roster_is_active_staff()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.staff_members where profile_id = auth.uid() and status = 'active');
+$$;
+revoke all on function public.staff_roster_is_active_staff() from public, anon, authenticated;
+grant execute on function public.staff_roster_is_active_staff() to authenticated;
+
 do $storage$
 begin
   if to_regclass('storage.buckets') is null or to_regclass('storage.objects') is null then return; end if;
@@ -469,7 +478,7 @@ begin
   -- A coach uploads only into their own folder; only they and managers read.
   execute $p$create policy "staff_certificates_owner_insert" on storage.objects for insert to authenticated
     with check (bucket_id = 'staff-certificates' and (storage.foldername(name))[1] = (select auth.uid())::text
-      and exists (select 1 from public.staff_members m where m.profile_id = (select auth.uid()) and m.status = 'active'))$p$;
+      and (select public.staff_roster_is_active_staff()))$p$;
   execute $p$create policy "staff_certificates_owner_or_manager_read" on storage.objects for select to authenticated
     using (bucket_id = 'staff-certificates' and ((storage.foldername(name))[1] = (select auth.uid())::text or public.is_admin()))$p$;
   execute $p$create policy "staff_certificates_owner_delete" on storage.objects for delete to authenticated
@@ -479,7 +488,7 @@ begin
   execute $p$create policy "site_images_staff_profile_insert" on storage.objects for insert to authenticated
     with check (bucket_id = 'site-images' and (storage.foldername(name))[1] = 'staff-profiles'
       and (storage.foldername(name))[2] = (select auth.uid())::text
-      and exists (select 1 from public.staff_members m where m.profile_id = (select auth.uid()) and m.status = 'active'))$p$;
+      and (select public.staff_roster_is_active_staff()))$p$;
 end;
 $storage$;
 
@@ -547,6 +556,24 @@ $$;
 drop trigger if exists staff_notification_push_preferences on public.staff_notification_push_deliveries;
 create trigger staff_notification_push_preferences before insert on public.staff_notification_push_deliveries
   for each row execute function public.staff_roster_respect_push_preference();
+
+-- Switching push off also closes push work already waiting to be sent.
+create or replace function public.staff_roster_push_off_closes_pending()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if not new.push then
+    update public.staff_notification_push_deliveries d set status = 'skipped', reason = 'PUSH_OFF_BY_RECIPIENT',
+      next_attempt_at = null, lease_token = null, updated_at = now()
+    where d.status = 'pending' and exists (select 1 from public.staff_notifications n
+      where n.id = d.notification_id and n.recipient_profile_id = new.profile_id);
+  end if;
+  return new;
+end;
+$$;
+revoke all on function public.staff_roster_push_off_closes_pending() from public, anon, authenticated;
+drop trigger if exists staff_notice_preferences_push_off on public.staff_notice_preferences;
+create trigger staff_notice_preferences_push_off after insert or update of push on public.staff_notice_preferences
+  for each row execute function public.staff_roster_push_off_closes_pending();
 
 create or replace function public.staff_roster_my_notice_preferences()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
@@ -730,7 +757,7 @@ begin
   perform public.staff_roster_audit(case when v_id is null then 'certificate_added' else 'certificate_updated' end, 'staff', v_staff.id::text, null, null,
     jsonb_build_object('certificate_id', v_row.id, 'kind', v_row.kind, 'expires_on', v_row.expires_on));
   return public.staff_roster_certificate_json(v_row, public.staff_roster_today());
-exception when check_violation then
+exception when check_violation or not_null_violation or invalid_datetime_format or datetime_field_overflow then
   raise exception 'CERTIFICATE_INVALID';
 end;
 $$;
@@ -982,14 +1009,14 @@ begin
     select p.oid::regprocedure as signature, p.proname
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.proname in (
-      'staff_roster_notify', 'staff_roster_respect_push_preference', 'staff_roster_my_notice_preferences', 'staff_roster_set_notice_preferences',
+      'staff_roster_notify', 'staff_roster_respect_push_preference', 'staff_roster_push_off_closes_pending', 'staff_roster_is_active_staff', 'staff_roster_my_notice_preferences', 'staff_roster_set_notice_preferences',
       'staff_roster_profile_json', 'staff_roster_my_profile', 'staff_roster_save_profile', 'staff_roster_profile_reviews', 'staff_roster_review_profile',
       'staff_roster_certificate_json', 'staff_roster_my_certificates', 'staff_roster_save_certificate', 'staff_roster_remove_certificate',
       'staff_roster_certificates_overview', 'staff_roster_run_certificate_reminders', 'staff_roster_on_class', 'staff_roster_short_name',
       'staff_roster_class_detail', 'staff_roster_save_session_note', 'staff_roster_my_hours', 'staff_roster_my_dashboard')
   loop
     execute format('revoke all on function %s from public, anon, authenticated', v_fn.signature);
-    if v_fn.proname in ('staff_roster_my_notice_preferences', 'staff_roster_set_notice_preferences', 'staff_roster_my_profile',
+    if v_fn.proname in ('staff_roster_is_active_staff', 'staff_roster_my_notice_preferences', 'staff_roster_set_notice_preferences', 'staff_roster_my_profile',
         'staff_roster_save_profile', 'staff_roster_profile_reviews', 'staff_roster_review_profile', 'staff_roster_my_certificates',
         'staff_roster_save_certificate', 'staff_roster_remove_certificate', 'staff_roster_certificates_overview',
         'staff_roster_run_certificate_reminders', 'staff_roster_class_detail', 'staff_roster_save_session_note',

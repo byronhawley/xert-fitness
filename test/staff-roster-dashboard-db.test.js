@@ -50,7 +50,7 @@ test('new tables are closed to the API and every new entry point is signed-in on
     where n.nspname = 'public' and p.proname like 'staff\\_roster\\_%'`);
   assert.deepEqual(fns.rows.filter(row => row.anon).map(row => row.proname), []);
   const internal = ['staff_roster_on_class', 'staff_roster_short_name', 'staff_roster_profile_json', 'staff_roster_certificate_json',
-    'staff_roster_respect_push_preference', 'staff_roster_notify'];
+    'staff_roster_respect_push_preference', 'staff_roster_push_off_closes_pending', 'staff_roster_notify'];
   assert.deepEqual(fns.rows.filter(row => internal.includes(row.proname) && row.auth).map(row => row.proname), [], 'helpers are not callable');
   assert.ok(fns.rows.every(row => /search_path=public/.test(row.config || '')), 'every roster function pins search_path');
 });
@@ -119,6 +119,8 @@ test('certificates: own only, files only in your own folder, managers see all an
   await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ kind: 'cpr', file_path: `${ids.ben}/stolen.pdf` })], /FILE_INVALID/);
   await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ kind: 'cpr', file_path: `${ids.ava}/../x.pdf` })], /CERTIFICATE_INVALID/);
   await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ kind: 'juggling' })], /CERTIFICATE_INVALID/);
+  await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ title: 'No kind' })], /CERTIFICATE_INVALID/);
+  await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ kind: 'cpr', expires_on: 'soon' })], /CERTIFICATE_INVALID/);
   await rejects(db, ids.ava, 'select public.staff_roster_save_certificate($1::jsonb)', [JSON.stringify({ kind: 'cpr', issued_on: '2026-05-01', expires_on: '2026-01-01' })], /CERTIFICATE_INVALID/);
   // Ben cannot see, edit or remove Ava's certificate.
   assert.deepEqual(await rpc(db, ids.ben, 'select public.staff_roster_my_certificates()'), []);
@@ -259,5 +261,21 @@ test('notice preferences: email off skips email, push off records push as skippe
     join public.staff_notifications n on n.id = d.notification_id where n.kind = 'synthetic_notice'`)).rows;
   assert.deepEqual(pushes.map(row => [row.who === ids.ava ? 'ava' : 'ben', row.status, row.reason]).sort(),
     [['ava', 'skipped', 'PUSH_OFF_BY_RECIPIENT'], ['ben', 'pending', null]]);
+  // Switching push off later also closes work already waiting for that coach.
+  await rpc(db, ids.ben, 'select public.staff_roster_set_notice_preferences(true, false)');
+  const after = (await db.query(`select d.status, d.reason from public.staff_notification_push_deliveries d
+    join public.staff_notifications n on n.id = d.notification_id where n.kind = 'synthetic_notice' and n.recipient_profile_id = $1`, [ids.ben])).rows;
+  assert.deepEqual(after, [{ status: 'skipped', reason: 'PUSH_OFF_BY_RECIPIENT' }]);
   assert.equal(staff.ava.length, 36);
+});
+
+test('storage policies ask a signed-in-only helper whether the caller is an active coach', async () => {
+  const { db } = await dashboardWorld();
+  assert.equal(await rpc(db, ids.ava, 'select public.staff_roster_is_active_staff()'), true);
+  assert.equal(await rpc(db, ids.member, 'select public.staff_roster_is_active_staff()'), false);
+  assert.equal(await rpc(db, ids.owner, 'select public.staff_roster_is_active_staff()'), false);
+  const grants = (await db.query(`select has_function_privilege('anon', 'public.staff_roster_is_active_staff()', 'execute') as anon,
+    has_function_privilege('authenticated', 'public.staff_roster_is_active_staff()', 'execute') as auth,
+    has_function_privilege('authenticated', 'public.staff_roster_push_off_closes_pending()', 'execute') as trigger_fn`)).rows[0];
+  assert.deepEqual(grants, { anon: false, auth: true, trigger_fn: false });
 });
