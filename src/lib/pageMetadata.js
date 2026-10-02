@@ -47,11 +47,15 @@ const NOINDEX_TITLES = Object.freeze({
   '/casual': 'Casual visit | XERT Fitness',
   '/3daypass': 'Three Day Pass | XERT Fitness',
   '/3months': 'Three month membership | XERT Fitness',
+  // Kept out of search until PT booking is switched on and settled.
+  '/pt': 'Personal Training | XERT Fitness',
+  '/pt/booking': 'Your PT booking | XERT Fitness',
 });
 
 const NOINDEX_PATHS = new Set([
   '/account',
   '/coaching',
+  '/pt/booking',
   '/admin',
   '/display',
   '/checkout-return',
