@@ -54,6 +54,11 @@ test('Publish dialog: "Texts: 4 sent, 1 no mobile number (Cam)" and a resend but
     status: { ...status, counts: { pending: 1 }, messages: [{ name: 'Ava', status: 'pending' }] }, result: { configured: false },
   }));
   assert.match(unconfigured, /SMS is not set up on the server/);
+  // Published while coach screens were off: nothing was queued, and it says why
+  // (not "nobody's classes changed").
+  const screensOff = renderToStaticMarkup(React.createElement(RosterTextsSummary, { status: { enabled: true, roster_enabled: false, counts: {}, messages: [], retryable: 0 } }));
+  assert.match(screensOff, /only go while coach screens are switched on/);
+  assert.doesNotMatch(screensOff, /Nobody’s classes changed/);
 });
 
 test('Publish dialog after publishing: the notice count, then the texts', async () => {

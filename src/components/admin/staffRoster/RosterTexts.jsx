@@ -13,6 +13,10 @@ export function RosterTextsSummary({ status, sending = false, result = null, bus
   if (!status.enabled) {
     return <p className="font-body text-xs text-xert-pale/55">Texts are off. Turn on “Text coaches when you publish” in Settings to also text coaches their classes.</p>;
   }
+  // Texts link to the coach screens, so none are queued while those are off.
+  if (status.roster_enabled === false) {
+    return <p className="font-body text-xs text-xert-pale/55">No texts were sent: they only go while coach screens are switched on (Settings), because each text links to them.</p>;
+  }
   const messages = status.messages || [];
   const waiting = (status.counts?.pending || 0) > 0;
   const tone = (status.counts?.failed || 0) > 0 ? 'danger' : messages.some(row => row.status === 'skipped') || waiting ? 'warning' : 'success';

@@ -140,7 +140,7 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
               ))}
             </ul>
           )}
-          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.{snapshot.settings?.sms_enabled ? ' They also get a text listing their classes (each coach can turn texts off).' : ''}</p>
+          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.{snapshot.settings?.sms_enabled && snapshot.settings?.enabled ? ' They also get a text listing their classes (each coach can turn texts off).' : ''}</p>
         </section>
       </div>
     </AdminDrawer>
