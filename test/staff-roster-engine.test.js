@@ -66,6 +66,7 @@ test('an incomplete first rollout is a labelled shortened cycle, never backdated
   const late = planPeriodOpening('2026-11', { today: '2026-10-01' });
   assert.equal(late.shortened, true);
   assert.equal(late.needsDueDate, true, 'default due (20 Sept) has passed, so the manager must choose');
+  assert.equal(late.publishTargetOn, null, 'no stale default publish target (1 Oct) is offered before a due date is chosen');
   const chosen = planPeriodOpening('2026-11', { today: '2026-10-01', dueOn: '2026-10-10' });
   assert.equal(chosen.opensOn, '2026-10-01');
   assert.equal(chosen.dueOn, '2026-10-10');
@@ -73,6 +74,15 @@ test('an incomplete first rollout is a labelled shortened cycle, never backdated
   const plan = reminderPlan(chosen);
   assert.ok(plan.every(item => item.date >= '2026-10-01'), 'no reminders for a time before the period opened');
   assert.throws(() => planPeriodOpening('2026-10', { today: '2026-10-01' }), /already started/);
+});
+
+test('opening late: a publish-by date left before the chosen due date is moved up, never sent out of order', () => {
+  // Reported 2026-10-02: November opened late, due 3 Oct, publish-by still the passed default 1 Oct; the database refused it.
+  const sent = planPeriodOpening('2026-11', { today: '2026-10-02', dueOn: '2026-10-03', publishTargetOn: '2026-10-01' });
+  assert.deepEqual([sent.opensOn, sent.dueOn, sent.publishTargetOn, sent.shortened], ['2026-10-02', '2026-10-03', '2026-10-03', true]);
+  const later = planPeriodOpening('2026-11', { today: '2026-10-02', dueOn: '2026-10-15', publishTargetOn: '2026-10-25' });
+  assert.equal(later.publishTargetOn, '2026-10-25', 'a valid later publish-by date is kept');
+  assert.throws(() => planPeriodOpening('2026-11', { today: '2026-10-02', dueOn: '2026-11-02' }), /before the roster month starts/);
 });
 
 test('reminders: opening, three days before, due date, then a manager summary — deduplicated and daytime', () => {

@@ -76,12 +76,19 @@ function parseDetail(detail) {
   try { return JSON.parse(detail); } catch { return null; }
 }
 
+// Table rules the database enforces directly (no roster error code of their own).
+const CONSTRAINT_MESSAGES = Object.freeze({
+  staff_roster_periods_order: 'Check the dates: availability must open on or before it is due, be due before the month starts, and the publish-by date must be on or after the due date.',
+});
+const CONSTRAINT_PATTERN = /violates check constraint "([a-z0-9_]+)"/;
+
 /** Turns a PostgREST/Postgres error into a readable Error with `code` and `detail`. */
 export function rosterError(error) {
   const raw = String(error?.message || error || '');
-  const code = raw.match(CODE_PATTERN)?.[1] || null;
+  const constraint = raw.match(CONSTRAINT_PATTERN)?.[1] || null;
+  const code = constraint ? null : raw.match(CODE_PATTERN)?.[1] || null;
   const detail = parseDetail(error?.details || error?.detail);
-  let message = (code && ROSTER_ERROR_MESSAGES[code]) || null;
+  let message = (code && ROSTER_ERROR_MESSAGES[code]) || (constraint && CONSTRAINT_MESSAGES[constraint]) || null;
   if (code === 'ASSIGNMENT_BLOCKED' && detail?.problems?.length) {
     message = detail.problems.map(item => PROBLEM_MESSAGES[item] || item).join(' ');
   }
