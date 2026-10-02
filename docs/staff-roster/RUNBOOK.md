@@ -10,7 +10,7 @@ separate go-ahead.
 | Piece | Where |
 | --- | --- |
 | Schema, rules, permissions | `supabase/migrations/20261001010000_staff_roster.sql` (additive; **applied in production 2026-10-01, never edit**) |
-| Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; not yet applied) |
+| Dependable phone push | `supabase/migrations/20261002010000_staff_roster_push_reliability.sql` (forward migration, additive, idempotent; applied in production 2026-10-02 01:46 UTC) |
 | Coach invite links + coach dashboard | `supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql` (forward migration, additive, idempotent; not yet applied) |
 | Push scheduler (not a migration) | `docs/staff-roster/push-dispatch-schedule.sql` (pg_cron + pg_net + Vault; activate only with approval) |
 | Manager screens | Command Centre → Classes → **Coach roster** (`/admin/roster`) |
