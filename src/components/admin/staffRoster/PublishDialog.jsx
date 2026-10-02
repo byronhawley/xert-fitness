@@ -42,16 +42,16 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
 
   return (
     <AdminDrawer open={open} onOpenChange={onOpenChange} title={`Publish ${monthLabel(month)}`}
-      description={first ? 'Coaches will see this roster and get a notice in the app.' : `Replaces published version ${snapshot.published.number}. Only coaches whose classes change are asked to look again.`}
+      description={first ? 'Coaches will see their classes and get a notice in their coach inbox.' : 'Replaces the roster coaches can see now. Only coaches whose classes change get a notice.'}
       closeLabel="Close publish"
       footer={<>
-        <AdminButton disabled={busy || !ready} onClick={submit}>{gaps ? `Publish with ${gaps} open ${gaps === 1 ? 'position' : 'positions'}` : 'Publish roster'}</AdminButton>
+        <AdminButton disabled={busy || !ready} onClick={submit}>{gaps ? `Publish with ${gaps} empty ${gaps === 1 ? 'spot' : 'spots'}` : 'Publish roster'}</AdminButton>
         <AdminButton variant="ghost" onClick={() => onOpenChange(false)}>Not yet</AdminButton>
       </>}>
       <div className="space-y-5">
         {blocked && (
           <Notice tone="danger" title="Fix these before publishing">
-            Each of these breaks a rule now — usually an absence or changed availability since they were assigned.
+            Each of these coaches can’t take that class any more — usually because of time off or changed availability since you chose them. Pick someone else first.
           </Notice>
         )}
         {preview.blocked.length > 0 && (
@@ -69,16 +69,16 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
         {serverResult?.reason === 'HARD_CONFLICTS' && preview.blocked.length === 0 && <p className="font-body text-sm text-status-danger-200">The server found conflicts the screen had not seen yet. Close this and refresh.</p>}
 
         <section>
-          <h3 className={ADMIN_TEXT.sectionHeading}>Coverage</h3>
-          {gaps === 0 ? <p className="font-body text-sm text-xert-pale/70 mt-1">Every required position is filled.</p> : (
+          <h3 className={ADMIN_TEXT.sectionHeading}>Classes still without a coach</h3>
+          {gaps === 0 ? <p className="font-body text-sm text-xert-pale/70 mt-1">Every class has its coaches.</p> : (
             <>
-              <p className="font-body text-sm text-status-warning-200 mt-1">{gaps} required {gaps === 1 ? 'position is' : 'positions are'} still open. The roster will show as incomplete until they’re filled.</p>
+              <p className="font-body text-sm text-status-warning-200 mt-1">{gaps} required {gaps === 1 ? 'spot is' : 'spots are'} still open. You can publish anyway and fill them later.</p>
               <ul className="mt-2 space-y-1">
                 {preview.gaps.slice(0, 12).map(item => <li key={`${item.session.id}:${item.slot.key}`} className="font-body text-xs text-xert-pale/65">{sessionLabel(item.session)}</li>)}
                 {preview.gaps.length > 12 && <li className="font-body text-xs text-xert-pale/50">and {preview.gaps.length - 12} more</li>}
               </ul>
               <div className="mt-3">
-                <AdminFormField label="Why publish with gaps?" helper="Saved with this version so everyone can see why it went out incomplete." required>
+                <AdminFormField label="Why publish with empty spots?" helper="A short note, e.g. “Hiring a weekend coach”. Kept with this roster so you remember why." required>
                   <textarea rows={2} value={reason} onChange={event => setReason(event.target.value)} />
                 </AdminFormField>
               </div>
@@ -87,7 +87,7 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
         </section>
 
         <section>
-          <h3 className={ADMIN_TEXT.sectionHeading}>Who is affected ({preview.impact.length})</h3>
+          <h3 className={ADMIN_TEXT.sectionHeading}>Coaches who’ll get a notice ({preview.impact.length})</h3>
           {preview.impact.length === 0 ? <p className="font-body text-sm text-xert-pale/60 mt-1">No coach’s classes change.</p> : (
             <ul className="staff-roster-list mt-2">
               {preview.impact.map(row => (
@@ -101,7 +101,7 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
               ))}
             </ul>
           )}
-          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to the coach app inbox. Email copies are sent only if switched on in roster settings.</p>
+          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.</p>
         </section>
       </div>
     </AdminDrawer>

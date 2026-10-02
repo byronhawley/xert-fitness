@@ -34,11 +34,10 @@
 .coaching-save-state[data-state="error"] { color: var(--state-danger-text); }
 .coaching-save-state[data-state="saved"] { color: var(--state-success); }
 
-/* Five tabs on a phone: a row that scrolls sideways instead of squeezing labels together. */
+/* Six tabs on a phone: two rows of three, so every tab is visible and nothing scrolls sideways. */
 @media (max-width: 520px) {
-  .coaching-tabs { display: flex; overflow-x: auto; scrollbar-width: none; }
-  .coaching-tabs::-webkit-scrollbar { display: none; }
-  .coaching-tabs button { flex: 0 0 auto; padding: 0 14px; white-space: nowrap; }
+  .coaching-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .coaching-tabs button { padding: 0 6px; }
 }
 
 .coaching-check { display: inline-block; width: 1.1em; text-align: center; color: var(--text-secondary); }
@@ -50,3 +49,42 @@
 .coaching-photo { width: 72px; height: 88px; flex-shrink: 0; overflow: hidden; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: var(--text-secondary); background: var(--surface-sunken); }
 .coaching-photo img { width: 100%; height: 100%; object-fit: cover; }
 .coaching-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+
+/* Availability: the ask header, the tap grid and the away calendar. Phone first, 44px+ targets. */
+.coaching-ask { border-color: var(--accent-default); }
+.coaching-ask-facts { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+.coaching-ask-facts dt { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); }
+.coaching-ask-facts dd { font-size: 1.05rem; font-weight: 700; color: var(--text-primary); }
+.coaching-step-heading { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); }
+.coaching-quick { display: flex; flex-wrap: wrap; gap: 8px; }
+.coaching-link { min-height: 44px; padding: 0 4px; font-size: 0.8rem; text-decoration: underline; color: var(--text-secondary); text-align: end; }
+
+.coaching-brush { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.coaching-brush button { min-height: 48px; border: 2px solid var(--border-strong); border-radius: var(--radius-control); font-weight: 700; font-size: 0.9rem; color: var(--text-primary); background: var(--surface-overlay); }
+.coaching-brush button[aria-checked="true"] { color: var(--text-inverse); }
+.coaching-brush button[aria-checked="true"][data-status="AVAILABLE"], .coaching-brush button[aria-checked="true"][data-status="PREFERRED"] { background: var(--state-success); border-color: var(--state-success); }
+.coaching-brush button[aria-checked="true"][data-status="UNAVAILABLE"] { background: var(--state-danger-text); border-color: var(--state-danger-text); }
+.coaching-brush button:focus-visible, .coaching-cell:focus-visible, .coaching-day:focus-visible { outline: var(--focus-width, 2px) solid var(--focus-ring, var(--accent-default)); outline-offset: 2px; }
+.coaching-legend { display: grid; gap: 2px; font-size: 0.75rem; color: var(--text-secondary); }
+.coaching-legend strong { color: var(--text-primary); font-weight: 600; }
+
+.coaching-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.25rem, 1fr)); gap: 6px; }
+.coaching-cell { display: grid; gap: 2px; justify-items: start; min-height: 56px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-primary); text-align: start; }
+.coaching-cell-time { font-size: 0.9rem; font-weight: 700; }
+.coaching-cell-state { font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); }
+.coaching-cell[data-status="AVAILABLE"], .coaching-cell[data-status="PREFERRED"] { border-color: var(--state-success); background: var(--state-success-10); }
+.coaching-cell[data-status="AVAILABLE"] .coaching-cell-state, .coaching-cell[data-status="PREFERRED"] .coaching-cell-state { color: var(--state-success); }
+.coaching-cell[data-status="PREFERRED"] { border-width: 2px; }
+.coaching-cell[data-status="UNAVAILABLE"] { border-color: var(--state-danger-text); border-style: dashed; }
+.coaching-cell[data-status="UNAVAILABLE"] .coaching-cell-state { color: var(--state-danger-text); }
+.coaching-cell[data-status="IF_NEEDED"] { border-color: var(--state-warning); }
+.coaching-cell[data-status="IF_NEEDED"] .coaching-cell-state { color: var(--state-warning); }
+
+.coaching-calendar-card { padding-inline: 8px; }
+.coaching-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.coaching-calendar-head { text-align: center; font-size: 0.7rem; color: var(--text-secondary); }
+.coaching-day { display: grid; align-content: center; justify-items: center; min-height: 44px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-primary); font-size: 0.85rem; font-weight: 600; line-height: 1.1; }
+.coaching-day[aria-pressed="true"] { background: var(--state-danger-text); border-color: var(--state-danger-text); color: var(--text-inverse); }
+.coaching-day-away { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; }
+
+.coaching-submit-bar { position: sticky; bottom: 0; z-index: 5; display: grid; gap: 6px; padding: 10px 0 max(10px, env(safe-area-inset-bottom)); background: var(--surface-base); border-top: 1px solid var(--border-hairline); }

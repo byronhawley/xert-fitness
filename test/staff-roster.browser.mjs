@@ -84,20 +84,58 @@ try {
   const manager = await rosterContext(browser, origin, DEMO_OWNER, { width: 1440, height: 1000 });
   const page = manager.page;
 
+  const NEXT_MONTH = addMonths(MONTH, 1);
+  await step('guided month: a new month asks coaches with suggested dates, no typing', async () => {
+    await page.goto(`${origin}/admin/roster?rosterMonth=${NEXT_MONTH}`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: 'Coach roster', exact: true }).waitFor();
+    const guide = page.getByRole('group', { name: /steps$/ });
+    await guide.getByText('Step 2 of 5: Ask for availability').waitFor();
+    await guide.locator('[aria-current="step"]').getByText('Next', { exact: true }).waitFor();
+    if (shots) await page.screenshot({ path: `${shots}/21-manager-guide-ask.png`, fullPage: true });
+    await guide.getByRole('button', { name: /^Ask coaches for availability/ }).click();
+    await page.getByRole('radio', { name: 'Availability', checked: true }).waitFor();
+    await page.getByText('Due by', { exact: true }).first().waitFor();
+    await page.getByText('Aim to publish by', { exact: true }).first().waitFor();
+    assert.equal(await page.locator('input[type="date"]').count(), 0, 'dates are suggested; no date field until Byron asks to change them');
+    if (shots) await page.screenshot({ path: `${shots}/22-manager-ask-coaches.png`, fullPage: true });
+    await page.getByRole('button', { name: /^Ask coaches/ }).last().click();
+    await page.getByText(/Coaches asked\./).first().waitFor();
+    const { rows } = await db.query(`select due_on::text, publish_target_on::text from public.staff_roster_periods where month = $1`, [`${NEXT_MONTH}-01`]);
+    assert.equal(rows.length, 1, 'the month is open for availability');
+    await guide.getByText('Step 3 of 5: Wait for answers').waitFor();
+    await guide.getByText(/^0 of \d+ in/).waitFor();
+  });
+
+  await step('guided month on a 375px phone: steps stack, nothing scrolls sideways', async () => {
+    const small = await rosterContext(browser, origin, DEMO_OWNER, { width: 375, height: 812 });
+    await small.page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    await small.page.getByText(/^Step \d of 5:/).waitFor();
+    const overflow = await small.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
+    if (shots) await small.page.screenshot({ path: `${shots}/23-manager-guide-phone.png`, fullPage: true });
+    assert.deepEqual(small.problems, []);
+    await small.context.close();
+  });
+
   await step('manager opens the roster in the Classes hub', async () => {
     await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterView=month`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: 'Coach roster', exact: true }).waitFor();
     await page.getByText('Nothing published for this month yet').waitFor();
+    // Quinn hasn't answered yet, so the guide is waiting on answers and says how many are in.
+    // (Step 4 once the due date has passed, depending on today's date.)
+    await page.getByText(/^Step [34] of 5: (Wait for answers|Build the roster)$/).waitFor();
+    await page.getByText(/^\d+ of \d+ in/).waitFor();
   });
 
-  await step('suggest draft previews, then adds to the draft without publishing', async () => {
-    await page.getByRole('button', { name: /^Suggest draft/ }).click();
-    const drawer = page.getByRole('dialog', { name: 'Suggested draft' });
+  await step('the guide’s Suggest previews the whole month, then adds to the draft without publishing', async () => {
+    await page.getByRole('group', { name: /steps$/ }).getByRole('button', { name: /^Suggest a roster/ }).click();
+    const drawer = page.getByRole('dialog', { name: 'Suggested coaches' });
     await drawer.getByText(/Search (finished|limit reached)/).waitFor();
+    await drawer.getByText(/For all of /).waitFor();
     if (shots) await page.screenshot({ path: `${shots}/02-suggest-draft-preview.png` });
-    await drawer.getByRole('button', { name: /^Add \d+ to draft/ }).click();
+    await drawer.getByRole('button', { name: /^Add \d+ to the roster draft/ }).click();
     await drawer.waitFor({ state: 'hidden' });
-    await page.getByText(/^Draft 1 — coaches can’t see these changes yet/).first().waitFor();
+    await page.getByText(/^Draft — coaches can’t see these changes yet/).first().waitFor();
     const { rows } = await db.query(`select state, (select count(*) from public.staff_assignments a where a.revision_id = r.id)::int as n from public.staff_roster_revisions r`);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].state, 'draft', 'suggesting never publishes');
@@ -109,7 +147,7 @@ try {
     await page.getByRole('region', { name: /^Mon / }).waitFor();
     if (shots) await page.screenshot({ path: `${shots}/01-manager-roster-week.png`, fullPage: true });
     await page.getByLabel('Only classes needing a coach').check();
-    await page.getByText(/more classes than available coaches|required positions filled/).first().waitFor();
+    await page.getByText(/more classes than available coaches|coaching spots filled/).first().waitFor();
     if (shots) await page.screenshot({ path: `${shots}/03-coverage-shortage.png`, fullPage: true });
     await page.getByLabel('Only classes needing a coach').uncheck();
   });
@@ -221,10 +259,10 @@ try {
     await page.getByRole('button', { name: 'Review & publish' }).click();
     const dialog = page.getByRole('dialog', { name: /^Publish / });
     const publish = dialog.getByRole('button', { name: /^Publish/ });
-    const gaps = await dialog.getByText(/required positions? (is|are) still open/).count();
+    const gaps = await dialog.getByText(/required spots? (is|are) still open/).count();
     if (gaps) {
       assert.equal(await publish.isDisabled(), true, 'cannot publish gaps without a reason');
-      await dialog.getByLabel(/Why publish with gaps/).fill('Synthetic demo: hiring a weekend coach');
+      await dialog.getByLabel(/Why publish with empty spots/).fill('Synthetic demo: hiring a weekend coach');
     }
     if (shots) await page.screenshot({ path: `${shots}/05-publish-review.png` });
     await publish.click();
@@ -241,24 +279,45 @@ try {
     assert.equal(nudge.body, JSON.stringify({ action: 'staff_roster_push' }), 'no roster detail goes with the push request');
   });
 
-  const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 390, height: 844 });
-  await step('coach gives availability on a phone: shortcuts, autosave, review, submit', async () => {
+  const quinn = await rosterContext(browser, origin, coach('quinn').profileId, { width: 375, height: 812 });
+  await step('coach gives availability on a 375px phone: tap grid, days away, autosave, plain review, submit', async () => {
     const phone = quinn.page;
     await phone.goto(`${origin}/coaching?tab=availability&month=${MONTH}`, { waitUntil: 'networkidle' });
     await phone.getByRole('heading', { name: /Hi Quinn Synthetic/ }).waitFor();
-    await phone.getByRole('group', { name: /^Tuesday 6:15 am/ }).getByRole('button', { name: 'Yes' }).click();
-    await phone.getByRole('group', { name: /^Thursday 6:15 am/ }).getByRole('button', { name: 'Yes' }).click();
-    await phone.getByRole('group', { name: /^Saturday 6:15 am/ }).getByRole('button', { name: 'Prefer' }).click();
-    await phone.getByRole('group', { name: /^Wednesday 4:30 pm/ }).getByRole('button', { name: 'If needed' }).click();
-    await phone.getByText('Draft saved — not submitted yet').waitFor({ timeout: 10000 });
-    const draft = await db.query(`select count(*)::int as n from public.staff_availability_drafts`);
+    await phone.getByText('What we need from you').waitFor();
+    await phone.getByText('Not started', { exact: true }).waitFor();
+    const cell = name => phone.getByRole('button', { name: new RegExp(`^${name}:`) });
+    await phone.getByRole('radio', { name: 'Can do' }).waitFor();
+    assert.equal(await phone.getByRole('radio', { name: 'Can do' }).getAttribute('aria-checked'), 'true', 'Can do is the starting answer');
+    await cell('Tuesday 6:15 am').click();
+    await cell('Thursday 6:15 am').click();
+    await phone.getByRole('radio', { name: 'Prefer' }).click();
+    await cell('Saturday 6:15 am').click();
+    await phone.getByRole('radio', { name: 'Can’t' }).click();
+    await cell('Wednesday 4:30 pm').click();
+    await cell('Tuesday 6:15 am').getByText('Can do').waitFor();
+    await cell('Saturday 6:15 am').getByText('Prefer').waitFor();
+    await cell('Wednesday 4:30 pm').getByText('Can’t').waitFor();
+    const awayDay = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2 && date > firstMonday);
+    await phone.getByRole('group', { name: /^Days away in/ }).getByRole('button').filter({ hasText: new RegExp(`^${Number(awayDay.slice(8))}$`) }).click();
+    await phone.getByText(/^Away 1 day:/).waitFor();
+    await phone.getByText('Draft saved. Not sent to the manager until you submit.').waitFor({ timeout: 10000 });
+    await phone.getByText('Draft saved', { exact: true }).waitFor();
+    const draft = await db.query(`select count(*)::int as n, (select payload from public.staff_availability_drafts limit 1) as payload from public.staff_availability_drafts`);
     assert.equal(draft.rows[0].n, 1, 'autosave writes a draft, not a submission');
+    assert.deepEqual(draft.rows[0].payload.exceptions, [{ date: awayDay, start: 0, end: 1440, status: 'UNAVAILABLE' }]);
+    const overflow = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 0, `no horizontal page scroll at 375px (overflow ${overflow}px)`);
+    const small = await phone.evaluate(() => [...document.querySelectorAll('.coaching-cell, .coaching-day, .coaching-brush button')]
+      .map(node => node.getBoundingClientRect()).filter(box => box.width < 44 || box.height < 44).length);
+    assert.equal(small, 0, 'every grid, calendar and answer button is at least 44px');
     if (shots) await phone.screenshot({ path: `${shots}/06-coach-availability-phone.png`, fullPage: true });
-    await phone.getByRole('button', { name: /^Review / }).click();
-    await phone.getByText(/You’ll be considered for/).first().waitFor();
+    await phone.getByRole('button', { name: 'Review and submit' }).click();
+    await phone.getByText(/^You can do \d+ classes? of \d+, prefer \d+, can’t do \d+, away 1 day\.$/).first().waitFor();
     if (shots) await phone.screenshot({ path: `${shots}/07-coach-availability-review-phone.png`, fullPage: true });
     await phone.getByRole('button', { name: /^Submit / }).click();
     await phone.getByText(/submitted/).first().waitFor();
+    await phone.getByText('Submitted', { exact: true }).waitFor();
     const submitted = await db.query(`select s.version from public.staff_availability_submissions s join public.staff_members m on m.id = s.staff_id where m.display_name = 'Quinn Synthetic'`);
     assert.deepEqual(submitted.rows.map(row => row.version), [1]);
   });
@@ -525,6 +584,23 @@ try {
     await phone.getByText(/Not a timesheet or payroll record/).waitFor();
     await phone.getByText('Coach profile for the website').waitFor();
     if (shots) await phone.screenshot({ path: `${shots}/20-coach-home-dashboard-phone.png`, fullPage: true });
+  });
+
+  await step('adding a coach goes straight to their invite link', async () => {
+    await page.goto(`${origin}/admin/roster?rosterTab=coaches&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
+    await page.getByText(/^\d+ ready/).waitFor();
+    await page.getByRole('button', { name: 'Add a coach' }).click();
+    const editor = page.getByRole('dialog', { name: 'Add a coach' });
+    await editor.getByLabel('Name on the roster').fill('Drew Synthetic');
+    assert.equal(await editor.getByLabel('Most classes a week').isVisible(), false, 'limits wait behind More settings');
+    if (shots) await page.screenshot({ path: `${shots}/24-manager-add-coach.png` });
+    await editor.getByRole('button', { name: 'Save' }).click();
+    const invite = page.getByRole('dialog', { name: 'Invite Drew Synthetic' });
+    await invite.getByRole('button', { name: 'Create invite link' }).waitFor();
+    if (shots) await page.screenshot({ path: `${shots}/25-manager-new-coach-invite.png` });
+    await invite.getByRole('button', { name: 'Done' }).click();
+    await page.locator('li', { hasText: 'Drew Synthetic' }).getByText('Needs to sign in').waitFor();
+    if (shots) await page.screenshot({ path: `${shots}/26-manager-coaches-tab.png`, fullPage: true });
   });
 
   await step('no page errors in any session', async () => {

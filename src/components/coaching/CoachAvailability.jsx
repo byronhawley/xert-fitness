@@ -1,11 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AVAILABILITY_STATUSES, copyPreviousMonth, startFromPattern, validateAvailability } from '@/lib/staffRoster/availability';
-import { monthClassSessions, periodPhase, presetShortcuts, reviewClasses, setShortcut, shortcutStatus, startingPoint } from '@/lib/staffRoster/availabilityEditor';
-import { clockLabel, gymDateOf, minuteLabel, parseClock } from '@/lib/staffRoster/time';
+import {
+  availabilityStatus, availabilitySummary, awayDates, classTimeShortcuts, monthClassSessions, periodPhase, setShortcut, setShortcuts,
+  shortcutStatus, startingPoint, toggleAwayDate,
+} from '@/lib/staffRoster/availabilityEditor';
+import { clockLabel, datesOfMonth, gymDateOf, parseClock, weekdayOf } from '@/lib/staffRoster/time';
 import { at, Banner, BUTTON, dateName, GHOST, INPUT, LABEL, monthName, Pill, Sheet, STATUS_WORDS, WEEKDAYS } from './coachingUi';
 
 const SHORT = { PREFERRED: 'Prefer', AVAILABLE: 'Yes', IF_NEEDED: 'If needed', UNAVAILABLE: 'No' };
 const TONE = { PREFERRED: 'success', AVAILABLE: 'success', IF_NEEDED: 'warning', UNAVAILABLE: 'danger', PARTIAL: 'warning', UNKNOWN: 'neutral' };
+
+/** The three answers on the tap grid. Each has a symbol and a word, so colour is never the only signal. */
+export const GRID_CHOICES = Object.freeze([
+  { status: 'AVAILABLE', label: 'Can do', symbol: '✓', help: 'You can coach it.' },
+  { status: 'PREFERRED', label: 'Prefer', symbol: '★', help: 'You’d like these first.' },
+  { status: 'UNAVAILABLE', label: 'Can’t', symbol: '✕', help: 'Don’t put you on it.' },
+]);
+const CELL_WORD = { AVAILABLE: ['✓', 'Can do'], PREFERRED: ['★', 'Prefer'], UNAVAILABLE: ['✕', 'Can’t'], IF_NEEDED: ['?', 'If needed'] };
 
 function Choice({ label, value, onChange, disabled = false }) {
   return (
@@ -28,10 +39,10 @@ function WindowSheet({ open, mode, month, onClose, onAdd }) {
   const end = parseClock(to);
   const valid = start !== null && end !== null && end > start;
   return (
-    <Sheet open={open} title={mode === 'date' ? 'Add a date' : 'Add a usual time'} onClose={onClose}
+    <Sheet open={open} title={mode === 'date' ? 'Change one date' : 'Add a usual time'} onClose={onClose}
       footer={<><button type="button" className={BUTTON} disabled={!valid} onClick={() => onAdd(mode === 'date' ? { date, start, end, status } : { weekday, start, end, status })}>Add</button><button type="button" className={GHOST} onClick={onClose}>Cancel</button></>}>
       {mode === 'date' ? (
-        <div><label htmlFor="exception-date" className={LABEL}>Date</label><input id="exception-date" type="date" className={INPUT} min={`${month}-01`} max={`${month}-31`} value={date} onChange={event => setDate(event.target.value)} /></div>
+        <div><label htmlFor="exception-date" className={LABEL}>Date</label><input id="exception-date" type="date" className={INPUT} min={`${month}-01`} max={datesOfMonth(month).at(-1)} value={date} onChange={event => setDate(event.target.value)} /></div>
       ) : (
         <div><label htmlFor="window-day" className={LABEL}>Day</label>
           <select id="window-day" className={INPUT} value={weekday} onChange={event => setWeekday(Number(event.target.value))}>{WEEKDAYS.map((name, index) => <option key={name} value={index}>{name}</option>)}</select></div>
@@ -44,6 +55,86 @@ function WindowSheet({ open, mode, month, onClose, onAdd }) {
       <Choice label="Answer" value={status} onChange={value => setStatus(value || status)} />
       {!valid && <p className="font-body text-xs text-status-danger-200">The end time must be after the start.</p>}
     </Sheet>
+  );
+}
+
+/** Weekly tap grid: pick an answer, then tap the class times it applies to. */
+function WeekGrid({ grid, payload, brush, setBrush, onChange, monthLabel }) {
+  const brushChoice = GRID_CHOICES.find(item => item.status === brush);
+  if (grid.length === 0) {
+    return <p className="coaching-card font-body text-sm text-xert-pale/70">No classes are on the timetable for {monthLabel} yet. Use “Add a usual time” under More options, or check back later.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      <div className="coaching-card space-y-2">
+        <p id="brush-label" className="font-body text-sm text-xert-offwhite">Choose an answer, then tap the class times it applies to. Tap a time again to clear it.</p>
+        <div className="coaching-brush" role="radiogroup" aria-labelledby="brush-label">
+          {GRID_CHOICES.map(item => (
+            <button key={item.status} type="button" role="radio" aria-checked={brush === item.status} data-status={item.status} onClick={() => setBrush(item.status)}>
+              <span aria-hidden="true">{item.symbol}</span> {item.label}
+            </button>
+          ))}
+        </div>
+        <ul className="coaching-legend" aria-label="What the answers mean">
+          {GRID_CHOICES.map(item => <li key={item.status}><span aria-hidden="true" data-status={item.status}>{item.symbol}</span> <strong>{item.label}</strong> — {item.help}</li>)}
+          <li><span aria-hidden="true">–</span> <strong>Not set</strong> — counts as can’t.</li>
+        </ul>
+      </div>
+      {WEEKDAYS.map((name, weekday) => {
+        const cells = grid.filter(item => item.weekday === weekday);
+        if (!cells.length) return null;
+        const allBrush = cells.every(cell => shortcutStatus(payload, cell) === brush);
+        return (
+          <section key={name} className="coaching-card space-y-2" aria-label={`${name}s`}>
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="font-body text-sm font-semibold text-xert-offwhite">{name}s</h4>
+              <button type="button" className="coaching-link" onClick={() => onChange(setShortcuts(payload, cells, allBrush ? null : brush))}>
+                {allBrush ? `Clear all ${name}s` : `All ${name}s: ${brushChoice.label}`}
+              </button>
+            </div>
+            <div className="coaching-cells">
+              {cells.map(cell => {
+                const status = shortcutStatus(payload, cell);
+                const [symbol, word] = CELL_WORD[status] || ['–', 'Not set'];
+                const next = status === brush ? 'clear it' : `mark ${brushChoice.label}`;
+                return (
+                  <button key={cell.presetMinute} type="button" className="coaching-cell" data-status={status || 'NONE'}
+                    aria-label={`${name} ${cell.label}: ${word}. Tap to ${next}`}
+                    onClick={() => onChange(setShortcut(payload, cell, status === brush ? null : brush))}>
+                    <span className="coaching-cell-time">{cell.label}</span>
+                    <span className="coaching-cell-state"><span aria-hidden="true">{symbol}</span> {word}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** "I'm away these days": tap whole days in a month calendar. */
+function AwayCalendar({ month, payload, onChange }) {
+  const dates = datesOfMonth(month);
+  const away = new Set(awayDates(payload));
+  const pad = (weekdayOf(dates[0]) + 6) % 7;
+  return (
+    <div className="coaching-card coaching-calendar-card space-y-2">
+      <p className="font-body text-sm text-xert-pale/75">Tap any day you can’t work at all, even if it’s usually fine. Tap again to undo.</p>
+      <div className="coaching-calendar" aria-hidden="true">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <span key={day} className="coaching-calendar-head">{day.slice(0, 2)}</span>)}</div>
+      <div className="coaching-calendar" role="group" aria-label={`Days away in ${monthName(month)}`}>
+        {Array.from({ length: pad }, (_, index) => <span key={`pad-${index}`} aria-hidden="true" />)}
+        {dates.map(date => (
+          <button key={date} type="button" className="coaching-day" aria-pressed={away.has(date)} aria-label={`${dateName(date)}${away.has(date) ? ', away' : ''}`}
+            onClick={() => onChange(toggleAwayDate(payload, date))}>
+            <span>{Number(date.slice(8))}</span>
+            {away.has(date) && <span className="coaching-day-away">Away</span>}
+          </button>
+        ))}
+      </div>
+      <p className="font-body text-xs text-xert-pale/60" role="status">{away.size ? `Away ${away.size} ${away.size === 1 ? 'day' : 'days'}: ${[...away].map(date => dateName(date, { weekday: false })).join(', ')}.` : 'No days away.'}</p>
+    </div>
   );
 }
 
@@ -64,10 +155,12 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
   const [classes, setClasses] = useState([]);
   const [sheet, setSheet] = useState(null);
   const [step, setStep] = useState('answer');
+  const [brush, setBrush] = useState('AVAILABLE');
   const [busy, setBusy] = useState(false);
   const [changeMessage, setChangeMessage] = useState('');
   const dirty = useRef(false);
   const timer = useRef(null);
+  const topRef = useRef(null);
 
   useEffect(() => {
     if (!period) return;
@@ -75,7 +168,7 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
     setPayload(start.payload);
     setSource(start.source);
     setDraftVersion(period.draft?.version || 0);
-    setSaveState(period.draft ? 'saved' : 'idle');
+    setSaveState('idle');
     setStep('answer');
     dirty.current = false;
   }, [period?.month, period?.draft?.version, period?.submission?.version]);
@@ -108,15 +201,27 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
     timer.current = setTimeout(() => saveDraft(next), 1200);
   };
   useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => { if (step === 'review') topRef.current?.focus(); }, [step]);
 
-  const shortcuts = useMemo(() => presetShortcuts(classes, me.settings?.class_time_presets || []), [classes, me.settings]);
-  const review = useMemo(() => (payload && month ? reviewClasses(payload, month, classes) : null), [payload, month, classes]);
+  const grid = useMemo(() => classTimeShortcuts(classes, me.settings?.class_time_presets || []), [classes, me.settings]);
+  const summary = useMemo(() => (payload && month ? availabilitySummary(payload, month, classes) : null), [payload, month, classes]);
   const local = payload && month ? validateAvailability(payload, month) : { errors: [] };
-  const shortcutKeys = new Set(shortcuts.map(item => `${item.weekday}:${item.start}:${item.end}`));
-  const customWeekly = (payload?.weekly || []).filter(item => !shortcutKeys.has(`${item.weekday}:${item.start}:${item.end}`));
+  const gridKeys = new Set(grid.map(item => `${item.weekday}:${item.start}:${item.end}`));
+  const customWeekly = (payload?.weekly || []).filter(item => !gridKeys.has(`${item.weekday}:${item.start}:${item.end}`));
+  const away = new Set(awayDates(payload));
+  const otherDates = (payload?.exceptions || []).filter(item => !(away.has(item.date) && item.status === 'UNAVAILABLE' && item.start === 0 && item.end === 1440));
 
-  if (!period) return <div className="coaching-card"><p className="font-body text-sm text-xert-pale/70">The manager hasn’t asked for availability yet. You’ll get a notice here when they do.</p></div>;
+  if (!period) {
+    return (
+      <div className="coaching-card space-y-1">
+        <p className="font-body text-sm font-semibold text-xert-offwhite">Nothing to fill in right now</p>
+        <p className="font-body text-sm text-xert-pale/70">The manager hasn’t asked for availability yet. You’ll get a notice in your Inbox when they do.</p>
+      </div>
+    );
+  }
 
+  const status = availabilityStatus(period, { editedHere: saveState !== 'idle' });
+  const lastMonth = me.last_submission && me.last_submission.month !== period.month ? me.last_submission : null;
   const submit = async () => {
     clearTimeout(timer.current);
     setBusy(true);
@@ -136,94 +241,103 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
           {periods.map(item => <button key={item.month} type="button" className={GHOST} aria-pressed={item.month === period.month} onClick={() => setMonthParam(item.month.slice(0, 7))}>{monthName(item.month)}</button>)}
         </div>
       )}
-      <header className="space-y-1">
-        <h2 className="font-display text-3xl uppercase text-xert-offwhite">{monthName(month)}</h2>
-        <p className="font-body text-sm text-xert-pale/70">
-          {phase === 'not_open' && `Opens ${dateName(period.opens_on)}.`}
-          {phase === 'open' && `Due ${dateName(period.due_on)}.${period.reopened ? ' Reopened for you by the manager.' : ''}`}
-          {phase === 'closed' && `The deadline was ${dateName(period.due_on)}.`}
-          {period.submission && ` Submitted ${period.submission.no_availability ? '“not available this month”' : `version ${period.submission.version}`}${period.submission.late ? ' (late)' : ''}.`}
+
+      <header className="coaching-card coaching-ask space-y-2" aria-labelledby="availability-heading">
+        <p className="font-body text-xs uppercase tracking-wider text-xert-pale/60">What we need from you</p>
+        <h2 id="availability-heading" className="font-display text-3xl uppercase text-xert-offwhite">{monthName(month)}</h2>
+        <p className="font-body text-sm text-xert-pale/80">
+          {phase === 'not_open' && `The manager will ask for ${monthName(month)} availability on ${dateName(period.opens_on)}. You’ll get a notice.`}
+          {phase === 'open' && `Tell the manager which classes you can coach. They build the roster from your answers.`}
+          {phase === 'closed' && `The due date has passed, so your answers are locked.`}
         </p>
+        <dl className="coaching-ask-facts">
+          <div><dt>Due by</dt><dd>{dateName(period.due_on)}</dd></div>
+          <div><dt>Status</dt><dd><Pill tone={status.tone}>{status.label}</Pill></dd></div>
+        </dl>
+        {period.reopened && phase === 'open' && <p className="font-body text-xs text-status-warning-200">The manager reopened this for you. Submit again when you’re done.</p>}
+        {period.submission?.late && <p className="font-body text-xs text-xert-pale/60">Your last answer was sent after the due date.</p>}
+        {editable && (
+          <p className="coaching-save-state" data-state={saveState} role="status" aria-live="polite">
+            {saveState === 'saving' && 'Saving…'}{saveState === 'pending' && 'Saving soon…'}{saveState === 'saved' && 'Draft saved. Not sent to the manager until you submit.'}
+            {saveState === 'error' && <>Couldn’t save. <button type="button" className="underline" onClick={() => saveDraft(payload)}>Try again</button></>}
+            {saveState === 'idle' && (source === 'usual_week' ? 'Started from your usual week.' : source === 'submission' ? 'Showing what you submitted.' : source === 'draft' ? 'Picking up your saved draft.' : '')}
+          </p>
+        )}
       </header>
 
       {phase === 'closed' && (
         <Banner tone="warning" title="Need to change something?" action={period.change_request_open ? <Pill tone="info">Request sent</Pill> : <button type="button" className={GHOST} onClick={() => setSheet('change')}>Ask the manager</button>}>
-          After the deadline the manager has to reopen your availability. Absences can always be reported from Requests.
+          After the due date the manager has to reopen your availability. If you can’t make a class, use Requests to ask for time away or cover.
         </Banner>
       )}
 
       {editable && payload && step === 'answer' && (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="coaching-save-state" data-state={saveState} role="status" aria-live="polite">
-              {saveState === 'saving' && 'Saving draft…'}{saveState === 'pending' && 'Unsaved changes'}{saveState === 'saved' && 'Draft saved — not submitted yet'}
-              {saveState === 'error' && <>Couldn’t save. <button type="button" className="underline" onClick={() => saveDraft(payload)}>Try again</button></>}
-              {saveState === 'idle' && (source === 'usual_week' ? 'Started from your usual week' : source === 'submission' ? 'Showing what you submitted' : '')}
-            </span>
-          </div>
-
-          <label className="coaching-card flex items-center gap-3 font-body text-sm text-xert-offwhite">
-            <input type="checkbox" checked={Boolean(payload.noAvailability)} onChange={event => update(event.target.checked ? { weekly: [], exceptions: [], noAvailability: true } : { ...payload, noAvailability: false })} />
-            I can’t work at all in {monthName(month)}
-          </label>
+          {(me.usual_week?.pattern?.length > 0 || lastMonth) && (
+            <section className="space-y-2" aria-labelledby="quick-heading">
+              <h3 id="quick-heading" className="coaching-step-heading">Quick start</h3>
+              <div className="coaching-quick">
+                {me.usual_week?.pattern?.length > 0 && <button type="button" className={GHOST} onClick={() => update(startFromPattern(me.usual_week.pattern))}>Same as my usual week</button>}
+                {lastMonth && <button type="button" className={GHOST} onClick={() => update(copyPreviousMonth({ ...lastMonth.payload, noAvailability: lastMonth.no_availability }))}>Copy {monthName(lastMonth.month)}</button>}
+              </div>
+              <p className="font-body text-xs text-xert-pale/55">Fills in your weekly times. Days away are never copied.</p>
+            </section>
+          )}
 
           {!payload.noAvailability && (
             <>
-              <section className="space-y-3" aria-labelledby="shortcut-heading">
-                <h3 id="shortcut-heading" className="font-body text-xs font-semibold uppercase tracking-wider text-xert-pale/60">Class times each week</h3>
-                {shortcuts.length === 0 && <p className="font-body text-sm text-xert-pale/60">No classes are on the timetable for {monthName(month)} yet. Add usual times below instead.</p>}
-                {WEEKDAYS.map((name, weekday) => {
-                  const list = shortcuts.filter(item => item.weekday === weekday);
-                  if (!list.length) return null;
-                  return (
-                    <div key={name} className="coaching-card space-y-3">
-                      <p className="font-body text-sm font-semibold text-xert-offwhite">{name}s</p>
-                      {list.map(item => (
-                        <div key={`${item.presetMinute}`} className="space-y-1">
-                          <p className="font-body text-xs text-xert-pale/70">{item.label} {item.sessions === 1 ? 'class' : 'classes'} · on duty {minuteLabel(item.start)}–{minuteLabel(item.end)}</p>
-                          <Choice label={`${name} ${item.label}`} value={shortcutStatus(payload, item)} onChange={status => update(setShortcut(payload, item, status))} />
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
+              <section className="space-y-2" aria-labelledby="week-heading">
+                <h3 id="week-heading" className="coaching-step-heading">1. Your usual week</h3>
+                <WeekGrid grid={grid} payload={payload} brush={brush} setBrush={setBrush} onChange={update} monthLabel={monthName(month)} />
               </section>
 
-              <section className="space-y-2" aria-labelledby="custom-heading">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 id="custom-heading" className="font-body text-xs font-semibold uppercase tracking-wider text-xert-pale/60">Other usual times</h3>
-                  <button type="button" className={GHOST} onClick={() => setSheet('weekly')}>Add time</button>
-                </div>
-                {customWeekly.map((item, index) => (
-                  <div key={`${item.weekday}-${item.start}-${index}`} className="coaching-card flex items-center justify-between gap-2">
-                    <span className="font-body text-sm">{WEEKDAYS[item.weekday]} {clockLabel(item.start)}–{clockLabel(item.end)} · <Pill tone={TONE[item.status]}>{STATUS_WORDS[item.status]}</Pill></span>
-                    <button type="button" className={GHOST} aria-label={`Remove ${WEEKDAYS[item.weekday]} ${clockLabel(item.start)}`} onClick={() => update({ ...payload, weekly: payload.weekly.filter(entry => entry !== item) })}>Remove</button>
-                  </div>
-                ))}
+              <section className="space-y-2" aria-labelledby="away-heading">
+                <h3 id="away-heading" className="coaching-step-heading">2. Days you’re away</h3>
+                <AwayCalendar month={month} payload={payload} onChange={update} />
+                {otherDates.length > 0 && (
+                  <ul className="space-y-2" aria-label="Other date changes">
+                    {otherDates.map((item, index) => (
+                      <li key={`${item.date}-${item.start}-${index}`} className="coaching-card flex items-center justify-between gap-2">
+                        <span className="font-body text-sm">{dateName(item.date)} {item.start === 0 && item.end === 1440 ? 'all day' : `${clockLabel(item.start)}–${clockLabel(item.end)}`} · <Pill tone={TONE[item.status]}>{STATUS_WORDS[item.status]}</Pill></span>
+                        <button type="button" className={GHOST} aria-label={`Remove ${dateName(item.date)}`} onClick={() => update({ ...payload, exceptions: payload.exceptions.filter(entry => entry !== item) })}>Remove</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </section>
-
-              <section className="space-y-2" aria-labelledby="dates-heading">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 id="dates-heading" className="font-body text-xs font-semibold uppercase tracking-wider text-xert-pale/60">Specific dates</h3>
-                  <button type="button" className={GHOST} onClick={() => setSheet('date')}>Add date</button>
-                </div>
-                <p className="font-body text-xs text-xert-pale/55">A date overrides your usual week for the times you give, e.g. away on the 14th.</p>
-                {(payload.exceptions || []).map((item, index) => (
-                  <div key={`${item.date}-${item.start}-${index}`} className="coaching-card flex items-center justify-between gap-2">
-                    <span className="font-body text-sm">{dateName(item.date)} {item.start === 0 && item.end === 1440 ? 'all day' : `${clockLabel(item.start)}–${clockLabel(item.end)}`} · <Pill tone={TONE[item.status]}>{STATUS_WORDS[item.status]}</Pill></span>
-                    <button type="button" className={GHOST} aria-label={`Remove ${dateName(item.date)}`} onClick={() => update({ ...payload, exceptions: payload.exceptions.filter(entry => entry !== item) })}>Remove</button>
-                  </div>
-                ))}
-              </section>
-
-              <div className="flex flex-wrap gap-2">
-                {me.usual_week?.pattern?.length > 0 && <button type="button" className={GHOST} onClick={() => update(startFromPattern(me.usual_week.pattern))}>Reset to my usual week</button>}
-                {me.last_submission && me.last_submission.month !== period.month && <button type="button" className={GHOST} onClick={() => update(copyPreviousMonth({ ...me.last_submission.payload, noAvailability: me.last_submission.no_availability }))}>Copy {monthName(me.last_submission.month)}</button>}
-                <button type="button" className={GHOST} disabled={!payload.weekly.length} onClick={async () => {
-                  try { await client.saveUsualWeek(payload.weekly, me.usual_week?.version ?? 0); notify('Saved as your usual week. Next month starts from it.'); onChanged?.(); } catch (failure) { notify(failure.message, 'error'); }
-                }}>Save as my usual week</button>
-              </div>
             </>
+          )}
+
+          <label className="coaching-card flex items-center gap-3 font-body text-sm text-xert-offwhite min-h-11">
+            <input type="checkbox" className="h-5 w-5" checked={Boolean(payload.noAvailability)} onChange={event => update(event.target.checked ? { weekly: [], exceptions: [], noAvailability: true } : { ...payload, noAvailability: false })} />
+            I can’t coach at all in {monthName(month)}
+          </label>
+
+          {!payload.noAvailability && (
+            <details className="coaching-card" open={customWeekly.length > 0 || undefined}>
+              <summary className="font-body text-sm text-xert-pale cursor-pointer min-h-11 flex items-center">More options</summary>
+              <div className="space-y-3 mt-2">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="font-body text-sm font-semibold text-xert-offwhite">Other usual times</h4>
+                    <button type="button" className={GHOST} onClick={() => setSheet('weekly')}>Add a usual time</button>
+                  </div>
+                  <p className="font-body text-xs text-xert-pale/55">For a time that isn’t a class above, or to say “if needed”.</p>
+                  {customWeekly.map((item, index) => (
+                    <div key={`${item.weekday}-${item.start}-${index}`} className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-body text-sm">{WEEKDAYS[item.weekday]} {clockLabel(item.start)}–{clockLabel(item.end)} · <Pill tone={TONE[item.status]}>{STATUS_WORDS[item.status]}</Pill></span>
+                      <button type="button" className={GHOST} aria-label={`Remove ${WEEKDAYS[item.weekday]} ${clockLabel(item.start)}`} onClick={() => update({ ...payload, weekly: payload.weekly.filter(entry => entry !== item) })}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={GHOST} onClick={() => setSheet('date')}>Change part of one day</button>
+                  <button type="button" className={GHOST} disabled={!payload.weekly.length} onClick={async () => {
+                    try { await client.saveUsualWeek(payload.weekly, me.usual_week?.version ?? 0); notify('Saved as your usual week. Next month starts from it.'); onChanged?.(); } catch (failure) { notify(failure.message, 'error'); }
+                  }}>Save as my usual week</button>
+                </div>
+              </div>
+            </details>
           )}
 
           {local.errors.length > 0 && (
@@ -231,27 +345,36 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
               <ul className="list-disc ps-4">{local.errors.map(message => <li key={message}>{message}</li>)}</ul>
             </Banner>
           )}
-          <button type="button" className={`${BUTTON} w-full`} disabled={local.errors.length > 0} onClick={() => setStep('review')}>Review {monthName(month)}</button>
+          <div className="coaching-submit-bar">
+            {summary && local.errors.length === 0 && <p className="font-body text-xs text-xert-pale/75" aria-live="polite">{summary.sentence}</p>}
+            <button type="button" className={`${BUTTON} w-full`} disabled={local.errors.length > 0} onClick={() => setStep('review')}>Review and submit</button>
+          </div>
         </>
       )}
 
-      {editable && payload && step === 'review' && review && (
+      {editable && payload && step === 'review' && summary && (
         <section className="space-y-4" aria-labelledby="review-heading">
-          <h3 id="review-heading" className="font-display text-2xl uppercase text-xert-offwhite">Check before you submit</h3>
-          {payload.noAvailability ? <Banner tone="info" title={`You’re telling the manager you can’t work in ${monthName(month)}`}>You won’t be rostered. You can still offer to cover a class later.</Banner> : (
-            <div className="coaching-card space-y-1 font-body text-sm">
-              <p className="text-xert-offwhite">You’ll be considered for <strong>{review.considered}</strong> of {review.rows.length} classes.</p>
-              {review.ifNeeded > 0 && <p className="text-xert-pale/75">{review.ifNeeded} more only if nobody else can.</p>}
-              {review.partial > 0 && <p className="text-status-warning-200">{review.partial} only partly covered — you won’t be rostered on those. Extend your times if you can do the whole duty.</p>}
-              {review.unknown > 0 && <p className="text-xert-pale/60">{review.unknown} not answered — treated as not available.</p>}
+          <h3 id="review-heading" ref={topRef} tabIndex={-1} className="font-display text-2xl uppercase text-xert-offwhite">Check and submit</h3>
+          {payload.noAvailability ? <Banner tone="info" title={`You’re telling the manager you can’t coach in ${monthName(month)}`}>You won’t be put on any class. You can still offer to cover a class later.</Banner> : (
+            <div className="coaching-card space-y-3">
+              <p className="font-body text-base text-xert-offwhite">{summary.sentence}</p>
+              <dl className="coaching-stats">
+                <div className="coaching-card"><dt className="font-body text-xs text-xert-pale/60">Can do</dt><dd className="font-display text-2xl text-xert-offwhite">{summary.canDo}</dd></div>
+                <div className="coaching-card"><dt className="font-body text-xs text-xert-pale/60">Prefer</dt><dd className="font-display text-2xl text-xert-offwhite">{summary.prefer}</dd></div>
+                <div className="coaching-card"><dt className="font-body text-xs text-xert-pale/60">Can’t</dt><dd className="font-display text-2xl text-xert-offwhite">{summary.cant}</dd></div>
+                <div className="coaching-card"><dt className="font-body text-xs text-xert-pale/60">Days away</dt><dd className="font-display text-2xl text-xert-offwhite">{summary.away}</dd></div>
+              </dl>
+              {summary.ifNeeded > 0 && <p className="font-body text-sm text-xert-pale/75">{summary.ifNeeded} of those only if nobody else can.</p>}
+              {summary.partial > 0 && <p className="font-body text-sm text-status-warning-200">{summary.partial} only partly covered — you won’t be put on those. Make your times cover the whole class, including setup.</p>}
+              {summary.unknown > 0 && <p className="font-body text-sm text-xert-pale/65">{summary.unknown} not answered — the manager will treat these as can’t.</p>}
             </div>
           )}
-          {!payload.noAvailability && review.rows.length > 0 && (
+          {!payload.noAvailability && summary.rows.length > 0 && (
             <details className="coaching-card">
               <summary className="font-body text-sm text-xert-pale cursor-pointer min-h-11 flex items-center">See every class</summary>
               <ul className="mt-2 space-y-1">
-                {review.rows.map(row => (
-                  <li key={row.session.id} className="flex items-center justify-between gap-2 font-body text-sm">
+                {summary.rows.map(row => (
+                  <li key={row.session.id} className="flex flex-wrap items-center justify-between gap-2 font-body text-sm">
                     <span>{dateName(gymDateOf(row.session.start))} {at(row.session.start)} · {row.session.title}</span>
                     <Pill tone={TONE[row.status]}>{STATUS_WORDS[row.status]}</Pill>
                   </li>
@@ -259,11 +382,9 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
               </ul>
             </details>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className={BUTTON} disabled={busy} onClick={submit}>{period.submission ? 'Submit changes' : `Submit ${monthName(month)}`}</button>
-            <button type="button" className={GHOST} onClick={() => setStep('answer')}>Back</button>
-          </div>
-          <p className="font-body text-xs text-xert-pale/55">Submitting doesn’t put you on the roster. The manager builds and publishes it, and you’ll get a notice when they do.</p>
+          <button type="button" className={`${BUTTON} w-full`} disabled={busy} onClick={submit}>{period.submission ? 'Submit changes' : `Submit ${monthName(month)}`}</button>
+          <button type="button" className={`${GHOST} w-full`} onClick={() => setStep('answer')}>Change my answers</button>
+          <p className="font-body text-xs text-xert-pale/55">Submitting doesn’t put you on the roster yet. The manager builds it and publishes it, and you’ll get a notice when they do. You can change your answers until {dateName(period.due_on)}.</p>
         </section>
       )}
 

@@ -13,7 +13,7 @@ const NUMBER_FIELDS = [
   ['target_classes_per_month', 'Target classes a month', 'Used to spread work fairly. Not a promise.'],
   ['min_classes_per_month', 'Minimum classes a month', null],
   ['max_classes_per_week', 'Most classes a week', 'A hard limit when set'],
-  ['max_duty_minutes_per_day', 'Most duty minutes a day', 'A hard limit when set'],
+  ['max_duty_minutes_per_day', 'Most minutes on the floor a day', 'Counts setup and pack-down. A hard limit when set'],
   ['min_rest_minutes', 'Minimum rest between days (minutes)', 'A hard limit when set'],
 ];
 
@@ -58,9 +58,9 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
         capability: item.capability.trim().toLowerCase().replace(/\s+/g, '_'),
         valid_from: item.valid_from ? `${item.valid_from}T00:00:00+10:00` : null,
         valid_until: item.valid_until ? `${item.valid_until}T00:00:00+10:00` : null,
-      }))), 'Capabilities saved');
+      }))), 'Qualifications saved');
     }
-    onClose();
+    onClose(undefined, row ? null : saved);
   };
   const setStatus = async status => {
     const result = await onMutate(client => client.setStaffStatus(row.id, status, row.version, statusReason), status === 'inactive' ? 'Coach deactivated. Their history is kept.' : 'Coach reactivated');
@@ -72,10 +72,7 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
       description="Only managers see these details. Coaches see their own roster, never each other’s notes or limits."
       footer={<><AdminButton disabled={busy || !form.display_name.trim() || form.roles.length === 0} onClick={save}>Save</AdminButton><AdminButton variant="ghost" onClick={() => onClose()}>Cancel</AdminButton></>}>
       <div className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <AdminFormField label="Name on the roster" required><input value={form.display_name} onChange={event => set('display_name', event.target.value)} /></AdminFormField>
-          <AdminFormField label="Name in the class calendar" helper="If the timetable shows a different name for them"><input value={form.legacy_label} onChange={event => set('legacy_label', event.target.value)} /></AdminFormField>
-        </div>
+        <AdminFormField label="Name on the roster" required><input value={form.display_name} onChange={event => set('display_name', event.target.value)} /></AdminFormField>
         <fieldset>
           <legend className="admin-kit-label">Can work as</legend>
           <div className="flex flex-wrap gap-4 mt-1">
@@ -90,7 +87,9 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
 
         <section className="space-y-2">
           <h3 className={ADMIN_TEXT.sectionHeading}>Sign-in</h3>
-          <p className="font-body text-sm text-xert-pale/70">{form.profile_id ? `Linked to ${linkedLabel || 'an account'}.` : 'Not linked. Link their XERT account so they can give availability and see their roster. No membership is needed.'}</p>
+          <p className="font-body text-sm text-xert-pale/70">{form.profile_id ? `Linked to ${linkedLabel || 'an account'}. They can give availability and see their classes.`
+            : row ? 'Not linked yet. Easiest: close this and press “Invite” to send them a link. Or, if they already have a XERT account, find it here.'
+              : 'After you save, you can send them an invite link to sign in. Or, if they already have a XERT account, find it here. No membership is needed.'}</p>
           <div className="flex flex-wrap items-end gap-2">
             <AdminFormField label="Find account by name or email"><input value={query} onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') search(); }} /></AdminFormField>
             <AdminButton variant="ghost" disabled={query.trim().length < 2} onClick={search}>Search</AdminButton>
@@ -109,6 +108,10 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
           )}
         </section>
 
+        <details className="staff-roster-more">
+          <summary><span className="font-body text-sm font-semibold text-xert-offwhite">More settings</span><span className="font-body text-xs text-xert-pale/60">Timetable name, website profile, limits, qualifications, private note. All optional.</span></summary>
+          <div className="space-y-5">
+        <AdminFormField label="Name in the class calendar" helper="Only if the timetable shows a different name for them"><input value={form.legacy_label} onChange={event => set('legacy_label', event.target.value)} /></AdminFormField>
         <AdminFormField label="Website coach profile" helper="Optional. Lets the public timetable show who is coaching, from the published roster.">
           <select value={form.coach_id || ''} onChange={event => set('coach_id', event.target.value)}>
             <option value="">Not linked</option>
@@ -123,27 +126,29 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
         </div>
 
         <section className="space-y-2">
-          <h3 className={ADMIN_TEXT.sectionHeading}>Capabilities</h3>
-          <p className="font-body text-xs text-xert-pale/55">E.g. first_aid or a class type they’re trained for. A class position can require one; an expired capability blocks assignment.</p>
+          <h3 className={ADMIN_TEXT.sectionHeading}>Qualifications</h3>
+          <p className="font-body text-xs text-xert-pale/55">E.g. first_aid, or a class type they’re trained for. A class can require one; once it expires they can’t be put on that class.</p>
           {capabilities.map((item, index) => (
             <div key={index} className="grid gap-2 sm:grid-cols-4 items-end">
-              <AdminFormField label="Capability"><input value={item.capability} onChange={event => setCapabilities(list => list.map((entry, i) => (i === index ? { ...entry, capability: event.target.value } : entry)))} /></AdminFormField>
+              <AdminFormField label="Qualification"><input value={item.capability} onChange={event => setCapabilities(list => list.map((entry, i) => (i === index ? { ...entry, capability: event.target.value } : entry)))} /></AdminFormField>
               <AdminFormField label="Valid from"><input type="date" value={item.valid_from} onChange={event => setCapabilities(list => list.map((entry, i) => (i === index ? { ...entry, valid_from: event.target.value } : entry)))} /></AdminFormField>
               <AdminFormField label="Valid until"><input type="date" value={item.valid_until} onChange={event => setCapabilities(list => list.map((entry, i) => (i === index ? { ...entry, valid_until: event.target.value } : entry)))} /></AdminFormField>
               <AdminButton variant="ghost" onClick={() => setCapabilities(list => list.filter((_, i) => i !== index))}>Remove</AdminButton>
             </div>
           ))}
-          <AdminButton variant="ghost" onClick={() => setCapabilities(list => [...list, { capability: '', valid_from: '', valid_until: '' }])}>Add capability</AdminButton>
+          <AdminButton variant="ghost" onClick={() => setCapabilities(list => [...list, { capability: '', valid_from: '', valid_until: '' }])}>Add qualification</AdminButton>
         </section>
 
         <AdminFormField label="Manager note" helper="Private to managers. Don’t record medical details."><textarea rows={2} value={form.manager_note || ''} onChange={event => set('manager_note', event.target.value)} /></AdminFormField>
+          </div>
+        </details>
 
         {row && (
           <section className="space-y-2">
             <h3 className={ADMIN_TEXT.sectionHeading}>{row.status === 'active' ? 'Deactivate' : 'Reactivate'}</h3>
             <p className="font-body text-xs text-xert-pale/55">{row.status === 'active' ? 'They stop appearing as a choice and can’t be published on future classes. Past rosters and history stay.' : 'They can be assigned again.'}</p>
             <div className="flex flex-wrap items-end gap-2">
-              <AdminFormField label="Reason (activity log)"><input value={statusReason} onChange={event => setStatusReason(event.target.value)} /></AdminFormField>
+              <AdminFormField label="Reason (kept in the Activity tab)"><input value={statusReason} onChange={event => setStatusReason(event.target.value)} /></AdminFormField>
               <AdminButton variant={row.status === 'active' ? 'danger' : 'ghost'} disabled={busy} onClick={() => setStatus(row.status === 'active' ? 'inactive' : 'active')}>{row.status === 'active' ? 'Deactivate' : 'Reactivate'}</AdminButton>
             </div>
           </section>
@@ -231,7 +236,16 @@ function InviteDrawer({ row, invite, busy, onClose, onMutate, onChanged }) {
   );
 }
 
-export default function CoachesPanel({ data, onMutate, focusStaffId }) {
+/** One plain status per coach, in words: what they can do now, and what's next. */
+export function coachRowState(row, invite) {
+  if (row.status !== 'active') return { key: 'inactive', label: 'Inactive', tone: 'neutral', detail: 'Not offered for classes. History is kept.' };
+  if (row.profile_id) return { key: 'ready', label: 'Ready', tone: 'success', detail: `Signs in as ${row.account_email || 'their XERT account'}.` };
+  if (invite?.status === 'pending') return { key: 'invited', label: 'Invite sent', tone: 'info', detail: 'Waiting for them to open the link and sign in.' };
+  if (invite?.status === 'expired') return { key: 'expired', label: 'Invite expired', tone: 'warning', detail: 'Send a new invite link.' };
+  return { key: 'needs_invite', label: 'Needs to sign in', tone: 'warning', detail: 'Send an invite link so they can give availability and see their classes.' };
+}
+
+export default function CoachesPanel({ data, onMutate, focusStaffId, intent = null, onIntentDone = () => {} }) {
   const { snapshot, busy } = data;
   const [editing, setEditing] = useState(null);
   const [inviting, setInviting] = useState(null);
@@ -243,29 +257,42 @@ export default function CoachesPanel({ data, onMutate, focusStaffId }) {
     if (Array.isArray(rows)) setInvites(Object.fromEntries(rows.map(item => [item.staff_id, item])));
   }, [onMutate]);
   useEffect(() => { loadInvites(); }, [loadInvites]);
+  useEffect(() => {
+    if (intent === 'add-coach') { setEditing('new'); onIntentDone(); }
+  }, [intent, onIntentDone]);
+  const states = staff.map(row => ({ row, state: coachRowState(row, invites[row.id]) }));
+  const ready = states.filter(item => item.state.key === 'ready').length;
+  const waiting = states.filter(item => ['needs_invite', 'invited', 'expired'].includes(item.state.key)).length;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={ADMIN_TEXT.lede}>Everyone who can be rostered. Linking a sign-in gives them the coach screens in the app and on the website. Send an invite link and they can link it themselves.</p>
+        <div className="min-w-0 space-y-1">
+          <p className={ADMIN_TEXT.lede}>Everyone you can put on a class. Add a coach, then send them an invite link: they sign in on the website (no membership needed) and can then give availability and see their classes.</p>
+          {staff.length > 0 && <p className="font-body text-sm text-xert-offwhite" role="status">{ready} ready{waiting ? ` · ${waiting} still to sign in` : ''}</p>}
+        </div>
         <AdminButton onClick={() => setEditing('new')}>Add a coach</AdminButton>
       </div>
       {notice}
       <ProfileReviews onMutate={onMutate} />
       <CertificateWatch onMutate={onMutate} />
-      {staff.length === 0 && <p className="font-body text-sm text-xert-pale/60">No coaches yet.</p>}
+      {staff.length === 0 && (
+        <Notice tone="info" title="No coaches yet" action={<AdminButton onClick={() => setEditing('new')}>Add your first coach</AdminButton>}>
+          1. Add their name and what they can coach. 2. Send them the invite link. 3. Once they sign in, ask them for availability.
+        </Notice>
+      )}
       <ul className="staff-roster-list">
-        {staff.map(row => {
+        {states.map(({ row, state }) => {
           const invite = invites[row.id];
           const canInvite = !row.profile_id && row.status === 'active';
           return (
-            <li key={row.id} className="staff-roster-row" data-focused={focusStaffId === row.id}>
+            <li key={row.id} id={`roster-staff-${row.id}`} className="staff-roster-row" data-focused={focusStaffId === row.id}>
               <div className="min-w-0">
-                <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} {row.status !== 'active' && <Tone>Inactive</Tone>} {canInvite && invite && <Tone tone={INVITE_TONE[invite.status]}>{INVITE_STATUS_LABELS[invite.status]}</Tone>}</p>
-                <p className="font-body text-xs text-xert-pale/60">{row.roles.map(role => ROLE_LABELS[role]).join(', ')} · {row.account_email ? `Signs in as ${row.account_email}` : 'No sign-in linked'}{row.capabilities?.length ? ` · ${row.capabilities.map(item => item.capability).join(', ')}` : ''}</p>
+                <p className="font-body text-sm font-semibold text-xert-offwhite">{row.display_name} <Tone tone={state.tone}>{state.label}</Tone></p>
+                <p className="font-body text-xs text-xert-pale/60">{row.roles.map(role => ROLE_LABELS[role]).join(', ')} · {state.detail}{row.capabilities?.length ? ` · ${row.capabilities.map(item => item.capability).join(', ')}` : ''}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                {canInvite && <AdminButton variant="ghost" aria-label={`Invite ${row.display_name}`} onClick={() => setInviting(row)}>{invite?.status === 'pending' ? 'Invite…' : 'Invite'}</AdminButton>}
-                <AdminButton variant="ghost" onClick={() => setEditing(row)}>Edit</AdminButton>
+                {canInvite && <AdminButton variant={invite?.status === 'pending' ? 'ghost' : 'primary'} onClick={() => setInviting(row)}>{invite?.status === 'pending' ? 'Invite again' : 'Invite'}<span className="visually-hidden"> {row.display_name}</span></AdminButton>}
+                <AdminButton variant="ghost" onClick={() => setEditing(row)}>Edit<span className="visually-hidden"> {row.display_name}</span></AdminButton>
               </div>
             </li>
           );
@@ -273,7 +300,12 @@ export default function CoachesPanel({ data, onMutate, focusStaffId }) {
       </ul>
       {inviting && <InviteDrawer row={inviting} invite={invites[inviting.id]} busy={busy} onMutate={onMutate} onChanged={loadInvites} onClose={() => { setInviting(null); data.reload?.(); }} />}
       {editing && <CoachEditor row={editing === 'new' ? null : editing} busy={busy} onMutate={onMutate}
-        onClose={review => { setEditing(null); setNotice(review ? <Notice tone="warning" title={`${review} future ${review === 1 ? 'class needs' : 'classes need'} another coach`}>They stay on those classes until you change them, and the roster can’t be published while they’re there.</Notice> : null); }} />}
+        onClose={(review, created) => {
+          setEditing(null);
+          setNotice(review ? <Notice tone="warning" title={`${review} future ${review === 1 ? 'class needs' : 'classes need'} another coach`}>They stay on those classes until you change them, and the roster can’t be published while they’re there.</Notice> : null);
+          // A new coach with no sign-in goes straight to the invite link: the next step.
+          if (created?.id && !created.profile_id) setInviting({ ...created, display_name: created.display_name, status: created.status || 'active' });
+        }} />}
     </div>
   );
 }

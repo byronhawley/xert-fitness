@@ -38,8 +38,8 @@ export default function SuggestDialog({ open, onOpenChange, ctx, sessionIds, sco
   if (!open) return null;
   if (!result || working) {
     return (
-      <AdminDrawer open={open} onOpenChange={onOpenChange} title="Suggested draft" description={`For ${scopeLabel}.`} closeLabel="Close suggested draft">
-        <p className="font-body text-sm text-xert-pale/70" role="status">Working out a draft…</p>
+      <AdminDrawer open={open} onOpenChange={onOpenChange} title="Suggested coaches" description={`For ${scopeLabel}.`} closeLabel="Close suggested coaches">
+        <p className="font-body text-sm text-xert-pale/70" role="status">Working out who fits best…</p>
       </AdminDrawer>
     );
   }
@@ -50,19 +50,21 @@ export default function SuggestDialog({ open, onOpenChange, ctx, sessionIds, sco
   const session = id => ctx.sessions.get(id);
 
   return (
-    <AdminDrawer open={open} onOpenChange={onOpenChange} title="Suggested draft" description={`For ${scopeLabel}. Review it first — nothing changes until you add it to the draft.`}
-      closeLabel="Close suggested draft"
+    <AdminDrawer open={open} onOpenChange={onOpenChange} title="Suggested coaches" description={`For ${scopeLabel}. Check it first. Nothing changes until you add it, and coaches see nothing until you publish.`}
+      closeLabel="Close suggested coaches"
       footer={<>
-        <AdminButton disabled={busy || changes.length === 0} onClick={() => onApply(changes)}>{changes.length ? `Add ${result.added.length} to draft${removals.length ? `, remove ${removals.length}` : ''}` : 'Nothing to change'}</AdminButton>
-        <AdminButton variant="ghost" onClick={() => onOpenChange(false)}>Discard suggestion</AdminButton>
+        <AdminButton disabled={busy || changes.length === 0} onClick={() => onApply(changes)}>{changes.length ? `Add ${result.added.length} to the roster draft${removals.length ? `, remove ${removals.length}` : ''}` : 'Nothing to change'}</AdminButton>
+        <AdminButton variant="ghost" onClick={() => onOpenChange(false)}>Don’t use this</AdminButton>
       </>}>
       <div className="space-y-5">
         <AdminSegmented label="Starting point" value={mode} onValueChange={setMode} options={[
-          { value: 'keep', label: 'Keep my draft, fill gaps' },
-          { value: 'fresh', label: 'Start over (keep pins)' },
+          { value: 'keep', label: 'Keep my choices, fill empty spots' },
+          { value: 'fresh', label: 'Start over (keep pinned coaches)' },
         ]} />
-        <Notice tone={result.limitReached ? 'warning' : 'info'} title={result.summary}>
-          {result.limitReached ? 'Try a smaller range, or pin the classes you are sure about and run it again.' : `Worked out in ${elapsed} ms. Preferred times and fair spread come first; “if needed” only when nobody else can.`}
+        <Notice tone={result.limitReached || result.unfilled.length ? 'warning' : 'info'}
+          title={`${result.added.length} ${result.added.length === 1 ? 'coach' : 'coaches'} suggested. ${result.unfilled.length ? `${result.unfilled.length} ${result.unfilled.length === 1 ? 'spot stays' : 'spots stay'} empty — nobody free can take ${result.unfilled.length === 1 ? 'it' : 'them'}.` : 'Every spot is filled.'}`}>
+          <span className="block text-xs text-xert-pale/55">{result.summary}</span>
+          {result.limitReached ? 'Try a smaller range, or pin the classes you are sure about and run it again.' : `Worked out in ${elapsed} ms. Coaches’ preferred times and a fair share of classes come first; “if needed” answers only when nobody else can.`}
         </Notice>
         {result.added.length > 0 && (
           <section>
@@ -89,7 +91,7 @@ export default function SuggestDialog({ open, onOpenChange, ctx, sessionIds, sco
                   <li key={item.id} className="staff-roster-row">
                     <div className="min-w-0">
                       <p className="font-body text-sm text-xert-offwhite"><span className="staff-roster-diff-removed">{staffName(ctx, item.staffId)}</span> · {sessionLabel(session(item.sessionId))}</p>
-                      <p className="font-body text-xs text-xert-pale/55">{reason || 'Starting over: unpinned choices are cleared.'}</p>
+                      <p className="font-body text-xs text-xert-pale/55">{reason || 'Starting over: choices you didn’t pin are cleared.'}</p>
                     </div>
                   </li>
                 );

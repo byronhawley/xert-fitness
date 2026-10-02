@@ -60,15 +60,21 @@ export default function RequestsPanel({ data, focus, onMutate, onShowSession }) 
   const absences = [...(snapshot.absences || [])].sort((a, b) => (Number(['reported', 'requested'].includes(b.status)) - Number(['reported', 'requested'].includes(a.status))) || toMs(a.starts_at) - toMs(b.starts_at));
   const covers = [...(snapshot.cover_requests || [])].sort((a, b) => (Number(['open', 'offered'].includes(b.status)) - Number(['open', 'offered'].includes(a.status))) || toMs(a.created_at) - toMs(b.created_at));
 
+  const waiting = absences.filter(item => ['requested', 'reported'].includes(item.status)).length
+    + covers.filter(item => item.status === 'offered' && item.current).length;
+
   return (
     <div className="space-y-8">
+      <Notice tone={waiting ? 'warning' : 'success'} title={waiting ? `${waiting} ${waiting === 1 ? 'request needs' : 'requests need'} your decision` : 'Nothing waiting for you'}>
+        Coaches ask for time off and for cover here. Requests waiting for you are listed first. If a coach tells you in person, use “Record an absence”.
+      </Notice>
       <section aria-labelledby="roster-absences" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 id="roster-absences" className={ADMIN_TEXT.sectionHeading}>Absences</h3>
+          <h3 id="roster-absences" className={ADMIN_TEXT.sectionHeading}>Time off</h3>
           <AdminButton variant="ghost" onClick={() => setRecording(value => !value)} aria-expanded={recording}>{recording ? 'Cancel' : 'Record an absence'}</AdminButton>
         </div>
         {recording && <RecordAbsence ctx={ctx} busy={busy} onMutate={onMutate} onDone={() => setRecording(false)} />}
-        {absences.length === 0 && <p className="font-body text-sm text-xert-pale/60">No absences this month.</p>}
+        {absences.length === 0 && <p className="font-body text-sm text-xert-pale/60">No time off asked for this month.</p>}
         <ul className="staff-roster-list">
           {absences.map(absence => {
             const hit = affected(ctx, absence.staff_id, absence.starts_at, absence.ends_at);
