@@ -24,11 +24,16 @@ set local lock_timeout = '5s';
 --     copied or replaced. A replayed publish request returns before touching
 --     the revision, and (revision_id, staff_id) is unique, so nothing is
 --     queued twice.
---   * Who is texted: on the month's first publish, every coach with upcoming
---     classes ('published': all their classes from the roster's start day).
---     Later, only coaches whose own classes changed since the previous
---     published version: added, removed, moved to a new time, or a new role
---     ('changed': just what changed).
+--   * One rule: each coach converges to a correct text for the month's
+--     latest published version. A coach's text is counted from their basis,
+--     the version of their last text this month that went out (or is going,
+--     or may have gone). No basis: 'published', all their classes from the
+--     roster's start day. Otherwise 'changed': just what changed since the
+--     basis (added, removed, moved to a new time, or a new role); nothing
+--     changed means no text. Waiting texts for older versions are closed as
+--     REPLACED_BY_NEWER, and every claim and "Resend failed texts" re-runs
+--     the queue, so a version whose queueing was cancelled or timed out at
+--     commit is caught up. Texts already sending or sent are never changed.
 --   * A coach who opted out, has no linked account, no valid Australian
 --     mobile (profiles.phone), or is inactive gets a 'skipped' row with the
 --     reason, so the manager can see why and fix it.
@@ -208,26 +213,113 @@ returns jsonb language sql stable security definer set search_path = public as $
 $$;
 
 
+-- ─── What each coach should be told ─────────────────────────────────────────
+--
+-- One rule: each coach converges to a correct text for the month's latest
+-- published version. A coach's next text is counted from their BASIS: the
+-- version of their last text this month that went out, is going out, or may
+-- have gone (no answer from the SMS service). With no basis their next text is
+-- the full list; with a basis it is just what changed since. Changes made in a
+-- version whose queueing was cancelled are never lost, because nothing is
+-- counted from a version the coach was not texted about.
+
+-- Where a month's lists start: now, or the part-month start if later.
+create or replace function public.staff_roster_sms_from(p_month date)
+returns timestamptz language sql stable security definer set search_path = public as $$
+  select greatest(now(), coalesce((select public.staff_roster_local(p.starts_on, 0)
+    from public.staff_roster_periods p where p.month = p_month), now()));
+$$;
+
+-- The version of the coach's last text this month that went out, is going
+-- out ('sending') or may have gone ('failed' with no answer: UNCONFIRMED).
+-- Null when none did.
+create or replace function public.staff_roster_sms_basis(p_staff uuid, p_month date)
+returns uuid language sql stable security definer set search_path = public as $$
+  select m.revision_id from public.staff_roster_sms_messages m
+  join public.staff_roster_revisions r on r.id = m.revision_id
+  where m.staff_id = p_staff and m.month = p_month
+    and (m.status in ('sending', 'sent') or (m.status = 'failed' and m.reason like 'UNCONFIRMED%'))
+  order by r.number desc, m.created_at desc, m.id desc limit 1;
+$$;
+
+-- The text a coach should get for a published version, counted from their
+-- basis: {kind, lines}, or null when there is nothing to tell (no basis and no
+-- classes, or no change since the basis).
+create or replace function public.staff_roster_sms_plan(p_staff uuid, p_revision uuid, p_month date, p_from timestamptz)
+returns jsonb language plpgsql stable security definer set search_path = public as $$
+declare
+  v_base uuid;
+  v_lines jsonb;
+begin
+  v_base := public.staff_roster_sms_basis(p_staff, p_month);
+  if v_base is null then
+    v_lines := public.staff_roster_sms_current(p_staff, p_revision, p_from);
+    if jsonb_array_length(v_lines) = 0 then return null; end if;
+    return jsonb_build_object('kind', 'published', 'lines', v_lines);
+  end if;
+  v_lines := public.staff_roster_sms_changes(p_staff, v_base, p_revision, p_from);
+  if jsonb_array_length(v_lines) = 0 then return null; end if;
+  return jsonb_build_object('kind', 'changed', 'lines', v_lines);
+end;
+$$;
+
+-- The active coaches a published version may concern: those with classes in
+-- it, and those with a text this month that went out (or is going or waiting),
+-- who may have lost classes since.
+create or replace function public.staff_roster_sms_coaches(p_revision uuid, p_from timestamptz)
+returns table (staff_id uuid) language sql stable security definer set search_path = public as $$
+  select distinct x.staff_id from (
+    select l.staff_id from public.staff_roster_sms_lines(p_revision, p_from) l
+    union all
+    select m.staff_id from public.staff_roster_sms_messages m
+    join public.staff_roster_revisions r on r.id = p_revision and r.month = m.month
+    where m.status in ('pending', 'sending', 'sent') or (m.status = 'failed' and m.reason like 'UNCONFIRMED%')
+  ) x join public.staff_members s on s.id = x.staff_id
+  where s.status = 'active';
+$$;
+
+-- How many coaches still need a text for a published version that has no row
+-- for them (its queueing was cancelled or timed out). "Resend failed texts"
+-- queues them.
+create or replace function public.staff_roster_sms_unqueued(p_revision uuid)
+returns integer language sql stable security definer set search_path = public as $$
+  select count(*)::int
+  from public.staff_roster_revisions r
+  cross join lateral public.staff_roster_sms_coaches(r.id, public.staff_roster_sms_from(r.month)) c
+  where r.id = p_revision and r.state = 'published'
+    and not exists (select 1 from public.staff_roster_sms_messages m where m.revision_id = r.id and m.staff_id = c.staff_id)
+    and public.staff_roster_sms_plan(c.staff_id, r.id, r.month, public.staff_roster_sms_from(r.month)) is not null;
+$$;
+
+
 -- ─── Queueing on publish ────────────────────────────────────────────────────
 
--- Queues the texts for one published revision. Never sends. Idempotent: a
--- coach who already has a row for this revision is left alone. Waits at most
--- 2 s for the texts lock (it runs at the publish's commit); a lock timeout is
--- caught by staff_roster_sms_on_publish.
+-- Brings one month's texts up to date with its published version. Never
+-- sends. Run by the publish trigger, by "Resend failed texts" and by every
+-- claim, so a version whose queueing was cancelled is caught up later.
+--   (a) Waiting texts for earlier versions are out of date: closed as
+--       skipped / REPLACED_BY_NEWER.
+--   (b) For each coach it may concern: a waiting text for this version is
+--       recounted from the coach's basis (rewritten if it changed, closed as
+--       REPLACED_BY_NEWER if nothing is left to tell); a coach with no row for
+--       this version who needs a text gets one ('skipped' with the reason
+--       when they cannot be texted). Rows already sending, sent, failed or
+--       skipped for this version are kept as they are.
+-- Idempotent: (revision_id, staff_id) is unique and an up-to-date row is left
+-- alone. Waits at most 2 s for the texts lock (it runs at the publish's
+-- commit); a lock timeout is caught by staff_roster_sms_on_publish. Lock
+-- order is always the roster lock (when held) then the texts lock.
 create or replace function public.staff_roster_sms_queue(p_revision uuid)
 returns integer language plpgsql security definer set search_path = public set lock_timeout = '2s' as $$
 declare
   v_rev public.staff_roster_revisions;
   v_settings public.staff_roster_settings;
-  v_prev uuid;
   v_starts_on date;
   v_from timestamptz;
   v_staff record;
+  v_row public.staff_roster_sms_messages;
   v_member public.staff_members;
-  v_base uuid;
-  v_current jsonb;
-  v_lines jsonb;
-  v_kind text;
+  v_plan jsonb;
   v_reason text;
   v_id uuid;
   v_queued integer := 0;
@@ -239,52 +331,51 @@ begin
   if not (coalesce(v_settings.sms_enabled, false) and coalesce(v_settings.enabled, false)) then return 0; end if;
   perform pg_advisory_xact_lock(hashtextextended('xert_staff_roster_sms', 0));
 
-  -- The version this one replaced (publish supersedes it just before).
-  select r.id into v_prev from public.staff_roster_revisions r
-  where r.month = v_rev.month and r.id <> v_rev.id and r.state = 'superseded' and r.published_at is not null
-  order by r.published_at desc, r.number desc limit 1;
   -- Part-month rosters start on starts_on; earlier classes are never listed.
   select p.starts_on into v_starts_on from public.staff_roster_periods p where p.month = v_rev.month;
-  v_from := greatest(now(), coalesce(public.staff_roster_local(v_starts_on, 0), now()));
+  v_from := public.staff_roster_sms_from(v_rev.month);
 
-  for v_staff in
-    select distinct x.staff_id from (
-      select l.staff_id from public.staff_roster_sms_lines(v_rev.id, v_from) l
-      union all
-      select l.staff_id from public.staff_roster_sms_lines(v_prev, v_from) l
-    ) x order by x.staff_id
-  loop
-    -- A republish only texts coaches whose own classes changed.
-    if v_prev is not null and public.staff_roster_sms_changes(v_staff.staff_id, v_prev, v_rev.id, v_from) = '[]'::jsonb then continue; end if;
-    if exists (select 1 from public.staff_roster_sms_messages where revision_id = v_rev.id and staff_id = v_staff.staff_id) then continue; end if;
+  -- (a) Waiting texts for earlier versions never go: what they say is out of date.
+  update public.staff_roster_sms_messages set status = 'skipped', reason = 'REPLACED_BY_NEWER', lease_token = null,
+    lease_expires_at = null, next_attempt_at = null, updated_at = now()
+  where month = v_rev.month and revision_id <> v_rev.id and status = 'pending';
 
-    -- Changes are counted from the last text that went (or is going) out, so
-    -- a coach whose earlier text never went out gets the full list instead.
-    select m.revision_id into v_base from public.staff_roster_sms_messages m
-    where m.month = v_rev.month and m.staff_id = v_staff.staff_id and m.status in ('pending', 'sending', 'sent')
-    order by m.created_at desc limit 1;
-    v_current := public.staff_roster_sms_current(v_staff.staff_id, v_rev.id, v_from);
-    if v_base is null and jsonb_array_length(v_current) > 0 then
-      v_kind := 'published';
-      v_lines := v_current;
-    else
-      v_kind := 'changed';
-      v_lines := public.staff_roster_sms_changes(v_staff.staff_id, coalesce(v_base, v_prev), v_rev.id, v_from);
-      if jsonb_array_length(v_lines) = 0 then continue; end if;
+  -- (b) Each coach this version may concern.
+  for v_staff in select c.staff_id from public.staff_roster_sms_coaches(v_rev.id, v_from) c order by c.staff_id loop
+    select * into v_row from public.staff_roster_sms_messages where revision_id = v_rev.id and staff_id = v_staff.staff_id;
+    -- Sending, sent, failed or skipped for this version: kept as it is.
+    if v_row.id is not null and v_row.status <> 'pending' then continue; end if;
+    v_plan := public.staff_roster_sms_plan(v_staff.staff_id, v_rev.id, v_rev.month, v_from);
+
+    if v_row.id is not null then
+      -- A waiting text for this version: recount it from the coach's basis.
+      if v_plan is null then
+        update public.staff_roster_sms_messages set status = 'skipped', reason = 'REPLACED_BY_NEWER', lease_token = null,
+          lease_expires_at = null, next_attempt_at = null, updated_at = now()
+        where id = v_row.id;
+      elsif v_row.kind is distinct from v_plan->>'kind' or v_row.details->'lines' is distinct from v_plan->'lines' then
+        update public.staff_roster_sms_messages set kind = v_plan->>'kind',
+          details = v_row.details || jsonb_build_object('lines', v_plan->'lines'), updated_at = now()
+        where id = v_row.id;
+      end if;
+      continue;
     end if;
+    if v_plan is null then continue; end if;
 
     select * into v_member from public.staff_members where id = v_staff.staff_id;
     v_reason := public.staff_roster_sms_block_reason(v_staff.staff_id);
-    -- Older texts that never went out are now out of date.
+    -- Older texts that never went out are now out of date (one that may have
+    -- gone, UNCONFIRMED, is kept: it is the coach's basis).
     update public.staff_roster_sms_messages set status = 'skipped', reason = 'REPLACED_BY_NEWER', lease_token = null,
       lease_expires_at = null, next_attempt_at = null, updated_at = now()
-    where month = v_rev.month and staff_id = v_staff.staff_id and status in ('failed', 'skipped')
+    where month = v_rev.month and staff_id = v_staff.staff_id and revision_id <> v_rev.id
+      and (status = 'skipped' or (status = 'failed' and coalesce(reason, '') not like 'UNCONFIRMED%'))
       and coalesce(reason, '') <> 'REPLACED_BY_NEWER';
     insert into public.staff_roster_sms_messages (month, revision_id, staff_id, profile_id, phone, kind, details, status, reason, next_attempt_at)
     values (v_rev.month, v_rev.id, v_staff.staff_id, v_member.profile_id,
-      public.staff_roster_sms_staff_phone(v_staff.staff_id), v_kind,
+      public.staff_roster_sms_staff_phone(v_staff.staff_id), v_plan->>'kind',
       jsonb_build_object('first_name', split_part(btrim(v_member.display_name), ' ', 1), 'month', v_rev.month,
-        'starts_on', v_starts_on, 'revision', v_rev.number, 'lines', v_lines),
+        'starts_on', v_starts_on, 'revision', v_rev.number, 'lines', v_plan->'lines'),
       case when v_reason is null then 'pending' else 'skipped' end, v_reason,
       case when v_reason is null then now() end)
     on conflict (revision_id, staff_id) do nothing
@@ -298,8 +389,10 @@ $$;
 -- Runs at commit (deferred), after the publish or cover approval has written
 -- the revision's assignments. A problem here never undoes the publish: a
 -- cancel or statement timeout that lands while texts are queued is caught too
--- (`others` does not cover query_canceled). Texts it never queued are queued
--- by "Resend failed texts" (staff_roster_sms_retry).
+-- (`others` does not cover query_canceled). Texts it did not queue are
+-- caught up by the next claim (every send run, e.g. right after the next
+-- publish) or by "Resend failed texts", both of which re-run the queue for the
+-- month's published version.
 create or replace function public.staff_roster_sms_on_publish()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
@@ -323,11 +416,16 @@ create constraint trigger staff_roster_revisions_sms
 -- ─── Sending (service role only) ────────────────────────────────────────────
 
 -- Leases up to `p_limit` texts that are due. Before leasing it (1) returns
--- expired leases to pending (or failed after the last attempt), (2) re-checks
--- each pending coach (opted out since, deactivated, mobile removed) and
--- refreshes the number, and closes texts a later published version has made
--- out of date. A coach's later text waits until their earlier one is done, so
--- texts arrive in order. Returns [] while texting is switched off.
+-- expired leases to pending (or failed after the last attempt), (2) brings
+-- each month that has texts up to date with its published version
+-- (staff_roster_sms_queue: out-of-date waiting texts closed as
+-- REPLACED_BY_NEWER, the version's own text recounted from each coach's last
+-- text that went out, and any coach who needs a text and has none queued),
+-- and (3) re-checks each pending coach (opted out since, deactivated, mobile
+-- removed) and refreshes the number. A coach's later text waits until their
+-- earlier one is done, so texts arrive in order. Returns [] while texting is
+-- switched off. It takes only the texts lock (never the roster lock), the
+-- same order a publish uses: roster lock, then texts lock.
 create or replace function public.staff_roster_sms_claim(p_limit integer default 20, p_worker text default 'api')
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -352,7 +450,22 @@ begin
   if not (coalesce(v_settings.sms_enabled, false) and coalesce(v_settings.enabled, false)) then return '[]'::jsonb; end if;
   if coalesce(p_limit, 0) <= 0 then return '[]'::jsonb; end if;
 
-  -- (2) Re-check who is still textable, with today's number.
+  -- (2) Each month with texts, up to date with its published version. Months
+  -- that never had a text (published while texting was off) are left alone;
+  -- "Resend failed texts" covers those. Past months are skipped once they
+  -- have nothing waiting.
+  for v_row in
+    select r.id from public.staff_roster_revisions r
+    where r.state = 'published'
+      and exists (select 1 from public.staff_roster_sms_messages m where m.month = r.month)
+      and (r.month + interval '1 month 1 day' > now()
+        or exists (select 1 from public.staff_roster_sms_messages m where m.month = r.month and m.status = 'pending'))
+    order by r.month
+  loop
+    perform public.staff_roster_sms_queue(v_row.id);
+  end loop;
+
+  -- (3) Re-check who is still textable, with today's number.
   for v_row in select id, staff_id from public.staff_roster_sms_messages where status = 'pending' loop
     v_reason := public.staff_roster_sms_block_reason(v_row.staff_id);
     if v_reason is not null then
@@ -363,21 +476,11 @@ begin
       where id = v_row.id and phone is distinct from public.staff_roster_sms_staff_phone(v_row.staff_id);
     end if;
   end loop;
-  -- (2b) A text for a version that a later published version has replaced,
-  -- where the later one queued nothing for that coach (it was published while
-  -- texts could not be queued, e.g. coach screens off) and their classes
-  -- differ: its list is out of date, so it is never sent.
-  update public.staff_roster_sms_messages m set status = 'skipped', reason = 'REPLACED_BY_NEWER', lease_token = null,
-    next_attempt_at = null, updated_at = now()
-  from public.staff_roster_revisions r
-  where m.status = 'pending' and r.month = m.month and r.state = 'published' and r.id <> m.revision_id
-    and not exists (select 1 from public.staff_roster_sms_messages n where n.revision_id = r.id and n.staff_id = m.staff_id)
-    and public.staff_roster_sms_changes(m.staff_id, m.revision_id, r.id, now()) <> '[]'::jsonb;
   update public.staff_roster_sms_messages set status = 'failed', reason = left('RETRIES_EXHAUSTED:' || coalesce(reason, 'UNKNOWN'), 300),
     lease_token = null, next_attempt_at = null, updated_at = now()
   where status = 'pending' and attempts >= 3;
 
-  -- (3) Lease what is due.
+  -- (4) Lease what is due.
   with picked as (
     select m.id from public.staff_roster_sms_messages m
     where m.status = 'pending' and coalesce(m.next_attempt_at, m.created_at) <= now() and m.attempts < 3 and m.phone is not null
@@ -461,9 +564,12 @@ begin
         'sent', count(*) filter (where status = 'sent'), 'pending', count(*) filter (where status in ('pending', 'sending')),
         'failed', count(*) filter (where status = 'failed'), 'skipped', count(*) filter (where status = 'skipped'))
       from public.staff_roster_sms_messages where revision_id = v_rev.id),
+    -- Texts for the published version that failed or were skipped for a
+    -- missing or wrong mobile, plus coaches it never queued a text for.
     'retryable', (select count(*) from public.staff_roster_sms_messages m
-      where m.month = p_month and (m.status = 'failed' or (m.status = 'skipped' and m.reason in ('NO_MOBILE', 'MOBILE_INVALID', 'NO_ACCOUNT')))
-        and not exists (select 1 from public.staff_roster_sms_messages n where n.staff_id = m.staff_id and n.month = m.month and n.created_at > m.created_at)),
+      where m.revision_id = v_rev.id and (m.status = 'failed' or (m.status = 'skipped' and m.reason in ('NO_MOBILE', 'MOBILE_INVALID', 'NO_ACCOUNT'))))
+      + case when coalesce(v_settings.sms_enabled and v_settings.enabled, false) and v_rev.id is not null
+          then public.staff_roster_sms_unqueued(v_rev.id) else 0 end,
     'messages', (select coalesce(jsonb_agg(jsonb_build_object('id', m.id, 'staff_id', m.staff_id, 'name', s.display_name, 'kind', m.kind,
         'status', m.status, 'reason', m.reason, 'attempts', m.attempts, 'sent_at', m.sent_at, 'updated_at', m.updated_at)
         order by s.display_name, m.id), '[]'::jsonb)
@@ -502,11 +608,12 @@ begin
 end;
 $$;
 
--- "Resend failed texts": first queue any text the month's published version
--- never queued (its queueing was cancelled at commit), then for each coach's
--- latest text this month that failed, or was skipped for a missing or wrong
--- mobile, check the coach again (with their number as it is now) and queue
--- it. Sending happens on the next run.
+-- "Resend failed texts": first re-run the queue for the month's published
+-- version (staff_roster_sms_queue), so every coach whose last text is out of
+-- date, or who was never texted, gets one counted from what they were last
+-- sent; then each text for that version that failed, or was skipped for a
+-- missing or wrong mobile, is checked again (with the coach's number as it is
+-- now) and queued. Sending happens on the next run.
 create or replace function public.staff_roster_sms_retry(p_month date)
 returns jsonb language plpgsql security definer set search_path = public as $$
 declare
@@ -525,9 +632,8 @@ begin
   if v_rev is not null then v_queued := public.staff_roster_sms_queue(v_rev); end if;
   for v_row in
     select m.id, m.staff_id from public.staff_roster_sms_messages m
-    where m.month = p_month and (m.status = 'failed' or (m.status = 'skipped' and m.reason in ('NO_MOBILE', 'MOBILE_INVALID', 'NO_ACCOUNT')))
-      and not exists (select 1 from public.staff_roster_sms_messages n where n.staff_id = m.staff_id and n.month = m.month and n.created_at > m.created_at)
-    order by m.created_at
+    where m.revision_id = v_rev and (m.status = 'failed' or (m.status = 'skipped' and m.reason in ('NO_MOBILE', 'MOBILE_INVALID', 'NO_ACCOUNT')))
+    order by m.created_at, m.id
   loop
     v_reason := public.staff_roster_sms_block_reason(v_row.staff_id);
     if v_reason is null then

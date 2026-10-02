@@ -157,10 +157,24 @@ Temporary Twilio failures are retried (3 attempts in all). Switching texting
 off cancels texts still waiting. Coaches can turn texts off under
 Profile → How you get notices.
 
+Who gets what: each coach ends up with one correct text for the month's
+latest published version, counted from the last text they were actually sent
+(or that is going out, or that may have gone with no answer from Twilio). A
+coach never sent anything gets their full list; otherwise just what changed
+since that text, and nothing if nothing changed. A text still waiting when a
+newer version is published is closed as "replaced by a newer text" and the
+newer version's text takes its place. Texts already sending or sent are
+never changed, and a coach's texts go one at a time, in order.
+
 If a publish's commit is cancelled while texts are being queued (a statement
 timeout, or the texts lock held for more than 2 s), the publish still goes
-through; texts it did not queue are queued by **Resend failed texts**, which
-first queues anything the current published version never queued.
+through. Nothing is lost: every send run (right after the next publish, or
+when the roster opens with texts waiting) first brings each month that has
+texts up to date with its published version, and **Resend failed texts**
+does the same for the month on screen. The publish dialog counts coaches a
+cancelled queue missed under **Resend failed texts**. A month published while
+texting was off is never texted by itself; only a publish or **Resend failed
+texts** for that month sends its texts.
 
 ### 1e. Apply the roster fixes migration (needs approval)
 

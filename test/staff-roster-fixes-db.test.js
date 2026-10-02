@@ -271,7 +271,11 @@ async function textWorld() {
 const texts = async db => (await db.query(`select m.status, m.reason, m.kind, r.number from public.staff_roster_sms_messages m
   join public.staff_roster_revisions r on r.id = m.revision_id order by r.number, m.created_at`)).rows;
 
-test('texts: a text queued before a later publish that queued nothing for that coach is closed as out of date, not sent', async () => {
+// With 20261002050000's convergence rule, the out-of-date text is still
+// closed as REPLACED_BY_NEWER, but the claim then queues the coach a text for
+// the version that replaced it (her whole list, since nothing has gone out
+// yet). Before, she was left with no text at all.
+test('texts: a text queued before a later publish that queued nothing for that coach is closed as out of date, and the claim sends the current list instead', async () => {
   const { db, staff } = await textWorld();
   const s2 = await addSession(db, day(14), 375, 60);
   await apply(db, [{ op: 'assign', session_id: s2, slot_key: 'lead', staff_id: staff.ava }]);
@@ -284,11 +288,17 @@ test('texts: a text queued before a later publish that queued nothing for that c
   assert.equal((await publish(db)).ok, true);
   await db.exec('update public.staff_roster_settings set enabled = true;');
   const claimed = (await pgAdmin(db).rpc('staff_roster_sms_claim', { p_limit: 10, p_worker: 'fixes-test' })).data;
-  assert.deepEqual(claimed, [], 'the out-of-date list is not sent');
-  assert.deepEqual((await texts(db)).map(row => [row.number, row.status, row.reason]), [[2, 'skipped', 'REPLACED_BY_NEWER']]);
+  assert.equal(claimed.length, 1, 'the out-of-date list is not sent; the current one is');
+  assert.equal(claimed[0].kind, 'published');
+  assert.equal(claimed[0].details.revision, 3);
+  assert.equal(claimed[0].details.lines.length, 3, 'all three of Ava’s classes');
+  assert.deepEqual((await texts(db)).map(row => [row.number, row.status, row.reason]), [[2, 'skipped', 'REPLACED_BY_NEWER'], [3, 'sending', null]]);
 });
 
-test('texts: a pending text the later publish did not change is still sent', async () => {
+// The later version replaces Ava's waiting text with an equal one for itself
+// (every waiting text belongs to the month's published version), so she still
+// gets exactly one text with her list.
+test('texts: a pending text the later publish did not change is still sent, as the later version\'s text', async () => {
   const { db, staff } = await textWorld();
   const s2 = await addSession(db, day(14), 375, 60);
   await apply(db, [{ op: 'assign', session_id: s2, slot_key: 'lead', staff_id: staff.ava }]);
@@ -301,6 +311,10 @@ test('texts: a pending text the later publish did not change is still sent', asy
   const claimed = (await pgAdmin(db).rpc('staff_roster_sms_claim', { p_limit: 10, p_worker: 'fixes-test' })).data;
   assert.equal(claimed.length, 1);
   assert.equal(claimed[0].staff_id, staff.ava);
+  assert.equal(claimed[0].kind, 'published');
+  assert.equal(claimed[0].details.revision, 3);
+  assert.deepEqual((await texts(db)).filter(row => row.status !== 'skipped' || row.reason !== 'NO_MOBILE').map(row => [row.number, row.status, row.reason]),
+    [[2, 'skipped', 'REPLACED_BY_NEWER'], [3, 'sending', null]]);
 });
 
 test('texts: "Resend failed texts" queues what a cancelled publish never queued, once', async () => {

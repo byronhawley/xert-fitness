@@ -139,12 +139,20 @@ test('first publish: one "published" text per coach listing every class, with a 
   assert.match(body, /^XERT: Hi Ava, your \w+ classes: \w{3} 13 \w{3} 5:15am Engine; \w{3} 15 \w{3} 6:15am Strength\. See all: https:\/\/www\.xertfitness\.com\.au\/coaching\?tab=roster$/);
 });
 
+// A coach is told about the latest version relative to their last text that
+// went out. Ava's first text has gone, so an unchanged republish has nothing
+// to tell her. Ben, Dee and Eve were never texted (no mobile, opted out, a
+// landline), so each version records why they still were not: a 'skipped' row
+// for the version the manager is looking at, never a text.
 test('a republish with no changes queues nothing; a replayed publish request queues nothing twice', async () => {
   const { db, s, staff } = await firstPublish();
-  const before = await messages(db);
+  for (const row of await claim(db)) await record(db, row, true);
   await newDraft(db);
-  assert.equal((await publish(db, 'Synthetic gaps')).ok, true);
-  assert.equal((await messages(db)).length, before.length, 'nobody’s classes changed');
+  const unchanged = await publish(db, 'Synthetic gaps');
+  assert.equal(unchanged.ok, true);
+  const again = await messages(db, 'm.revision_id = $1', [unchanged.revision_id]);
+  assert.deepEqual(again.map(row => [row.name, row.status, row.reason]),
+    [['Ben', 'skipped', 'NO_MOBILE'], ['Dee Lane', 'skipped', 'OPTED_OUT'], ['Eve', 'skipped', 'MOBILE_INVALID']], 'nothing to text: Ava’s classes did not change');
 
   // The same request id again: publish answers from its replay store and the revision is untouched.
   await apply(db, [assign(s.spare, staff.ben)]);
@@ -172,8 +180,12 @@ test('a later publish texts only the coaches whose classes changed, listing just
   await newDraft(db);
   await apply(db, [{ op: 'unassign', assignment_id: await assignmentId(db, s.strength) }, assign(s.spare, staff.ava)]);
   const second = await publish(db, 'Synthetic gaps');
-  const queued = await messages(db, 'm.revision_id = $1', [second.revision_id]);
-  assert.deepEqual(queued.map(row => [row.name, row.kind, row.status]), [['Ava', 'changed', 'pending']]);
+  const all = await messages(db, 'm.revision_id = $1', [second.revision_id]);
+  // Coaches never texted are recorded again with why (they have nothing sent to count changes from).
+  assert.deepEqual(all.map(row => [row.name, row.kind, row.status, row.reason]), [
+    ['Ava', 'changed', 'pending', null], ['Ben', 'published', 'skipped', 'NO_MOBILE'],
+    ['Dee Lane', 'published', 'skipped', 'OPTED_OUT'], ['Eve', 'published', 'skipped', 'MOBILE_INVALID']]);
+  const queued = all.filter(row => row.status === 'pending');
   const lines = queued[0].details.lines;
   assert.deepEqual(lines.map(line => [line.change, line.title, new Date(line.start).toISOString()]), [
     ['added', 'Engine', gymInstantIso(day(20), 420)],
@@ -185,7 +197,7 @@ test('a later publish texts only the coaches whose classes changed, listing just
   assert.match(body, /your \w+ roster changed: added \w{3} 20 \w{3} 7:00am Engine; removed \w{3} 15 \w{3} 6:15am Strength; moved \w{3} 13 \w{3} 5:15am Engine to \w{3} 13 \w{3} 5:45am\. See all: /);
 });
 
-test('a coach made inactive who loses classes is skipped as inactive; a coach whose earlier text never went gets the full list', async () => {
+test('a coach made inactive is not texted (a waiting text is skipped as inactive); a coach whose earlier text never went gets the full list', async () => {
   const { db, s, staff } = await firstPublish();
   const ben = (await db.query('select version from public.staff_members where id = $1', [staff.ben])).rows[0];
   await rpc(db, ids.owner, 'select public.staff_roster_set_staff_status($1, $2, $3, $4, $5)', [staff.ben, 'inactive', ben.version, 'Synthetic leave', rid()]);
@@ -195,12 +207,21 @@ test('a coach made inactive who loses classes is skipped as inactive; a coach wh
   await apply(db, [{ op: 'unassign', assignment_id: await assignmentId(db, s.ben) }, assign(s.spare, staff.eve)]);
   const second = await publish(db, 'Synthetic gaps');
   const rows = byName(await messages(db, 'm.revision_id = $1', [second.revision_id]));
-  assert.deepEqual(Object.keys(rows).sort(), ['Ben', 'Eve']);
-  assert.deepEqual([rows.Ben.kind, rows.Ben.status, rows.Ben.reason], ['changed', 'skipped', 'INACTIVE']);
+  // Ben is inactive and was never sent anything: no row. Ava's first text is
+  // still waiting, so this version's text for her is her whole list again.
+  assert.deepEqual(Object.keys(rows).sort(), ['Ava', 'Dee Lane', 'Eve']);
+  assert.deepEqual([rows.Ava.kind, rows.Ava.status], ['published', 'pending']);
   assert.deepEqual([rows.Eve.kind, rows.Eve.status, rows.Eve.phone], ['published', 'pending', '+61400000005']);
   assert.deepEqual(rows.Eve.details.lines.map(line => line.title), ['Boxing', 'Engine']);
-  const old = (await messages(db, `s.display_name = 'Eve' and m.revision_id <> $1`, [second.revision_id]))[0];
-  assert.deepEqual([old.status, old.reason], ['skipped', 'REPLACED_BY_NEWER']);
+  const old = byName(await messages(db, 'm.revision_id <> $1', [second.revision_id]));
+  assert.deepEqual([old.Eve.status, old.Eve.reason], ['skipped', 'REPLACED_BY_NEWER']);
+  assert.deepEqual([old.Ava.status, old.Ava.reason], ['skipped', 'REPLACED_BY_NEWER'], 'the waiting first-version text is out of date');
+  // Eve is made inactive while her text waits: the claim skips it as inactive.
+  const eve = (await db.query('select version from public.staff_members where id = $1', [staff.eve])).rows[0];
+  await rpc(db, ids.owner, 'select public.staff_roster_set_staff_status($1, $2, $3, $4, $5)', [staff.eve, 'inactive', eve.version, 'Synthetic leave', rid()]);
+  assert.deepEqual((await claim(db)).map(row => row.staff_id), [staff.ava]);
+  const after = byName(await messages(db, 'm.revision_id = $1', [second.revision_id]));
+  assert.deepEqual([after.Eve.status, after.Eve.reason], ['skipped', 'INACTIVE']);
 });
 
 test('claim leases due texts once, record needs the lease, temporary failures retry up to three attempts', async () => {
@@ -317,7 +338,9 @@ test('approving cover publishes a new version and texts the two coaches it chang
   const approved = await rpc(db, ids.owner, 'select public.staff_roster_approve_cover($1, $2, $3, $4)', [cover.id, offer.id, coverRow.version, rid()]);
   assert.equal(approved.ok, true);
   const rows = byName(await messages(db, 'm.revision_id = $1', [approved.revision_id]));
-  assert.deepEqual(Object.keys(rows).sort(), ['Ava', 'Ben']);
+  // Dee (opted out) and Eve (landline) were never texted: recorded again with why.
+  assert.deepEqual(Object.keys(rows).sort(), ['Ava', 'Ben', 'Dee Lane', 'Eve']);
+  assert.deepEqual([rows['Dee Lane'].status, rows.Eve.status], ['skipped', 'skipped']);
   assert.deepEqual([rows.Ava.kind, rows.Ava.details.lines.map(line => line.change)], ['changed', ['removed']]);
   assert.deepEqual([rows.Ben.kind, rows.Ben.status], ['published', 'pending'], 'Ben was never texted before, so he gets his whole month');
 });
@@ -386,6 +409,196 @@ test('re-running the migration changes nothing; a failure part-way leaves no tab
     (select count(*)::int from information_schema.columns where table_name = 'staff_roster_settings' and column_name = 'sms_enabled') as columns,
     (select count(*)::int from public.xert_schema_capabilities where capability = 'staff_roster_sms') as capability`);
   assert.deepEqual(rows, [{ tables: 0, columns: 0, capability: 0 }]);
+});
+
+// ─── Convergence: each coach ends up with a correct text for the latest version ─
+
+const titles = row => row.details.lines.map(line => line.change ? `${line.change} ${line.title}` : line.title);
+const unassign = async (db, session) => ({ op: 'unassign', assignment_id: await assignmentId(db, session) });
+const sendAll = async db => {
+  const sent = [];
+  for (;;) {
+    const batch = await claim(db);
+    if (!batch.length) return sent;
+    for (const row of batch) { await record(db, row, true); sent.push(row); }
+  }
+};
+async function noDuplicates(db) {
+  const { rows } = await db.query('select revision_id, staff_id, count(*)::int as n from public.staff_roster_sms_messages group by 1, 2 having count(*) > 1');
+  assert.deepEqual(rows, [], 'at most one row per (revision, coach)');
+}
+/** Publishes once with the texts queue swapped for one that raises `errcode`, as a cancel or lock timeout at commit would. */
+async function publishWithQueueFailing(db, errcode, message) {
+  const queue = (await db.query(`select pg_get_functiondef('public.staff_roster_sms_queue(uuid)'::regprocedure) as def`)).rows[0].def;
+  await db.exec(`create or replace function public.staff_roster_sms_queue(p_revision uuid) returns integer language plpgsql set search_path = public as $$
+    begin raise exception '${message}' using errcode = '${errcode}'; end; $$;`);
+  try {
+    const result = await publish(db, 'Synthetic gaps');
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result;
+  } finally {
+    await db.exec(queue);
+  }
+}
+
+/**
+ * D1 from the replica proof. One = Ava, Two = Ben (given a mobile), Three =
+ * Eve (a landline), Five = Dee (opted out). Version 3's queueing is cancelled
+ * at commit and version 4's times out on the texts lock.
+ */
+async function d1World({ sendFirst = false } = {}) {
+  const env = await smsWorld();
+  const { db, staff } = env;
+  await db.query(`update public.profiles set phone = '0400 000 002' where id = $1`, [ids.ben]);
+  const s = {
+    oct9: await addSession(db, day(9), 315, 60, { title: 'Nine' }),
+    oct12: await addSession(db, day(12), 315, 60, { title: 'Twelve' }),
+    oct14: await addSession(db, day(14), 315, 60, { title: 'Fourteen' }),
+    oct16: await addSession(db, day(16), 315, 60, { title: 'Sixteen' }),
+    oct18: await addSession(db, day(18), 315, 60, { title: 'Eighteen' }),
+    oct20: await addSession(db, day(20), 315, 60, { title: 'Twenty' }),
+  };
+  // Version 1: One has Oct 9, 12 and 20.
+  await apply(db, [assign(s.oct9, staff.ava), assign(s.oct12, staff.ava), assign(s.oct20, staff.ava), assign(s.oct14, staff.eve), assign(s.oct18, staff.dee)]);
+  const v1 = await publish(db, 'Synthetic gaps');
+  assert.equal(v1.ok, true, JSON.stringify(v1));
+  const first = byName(await messages(db, 'm.revision_id = $1', [v1.revision_id]));
+  assert.deepEqual([first.Ava.kind, first.Ava.status, titles(first.Ava)], ['published', 'pending', ['Nine', 'Twelve', 'Twenty']]);
+  if (sendFirst) assert.deepEqual((await sendAll(db)).map(row => row.staff_id), [staff.ava]);
+  // Version 2: One loses Oct 20; Two takes Oct 16.
+  await newDraft(db);
+  await apply(db, [await unassign(db, s.oct20), assign(s.oct16, staff.ben)]);
+  const v2 = await publish(db, 'Synthetic gaps');
+  // Version 3, queueing cancelled at commit: Three's Oct 14 goes to Two.
+  await newDraft(db);
+  await apply(db, [await unassign(db, s.oct14), assign(s.oct14, staff.ben)]);
+  const v3 = await publishWithQueueFailing(db, 'query_canceled', 'canceling statement due to user request');
+  // Version 4, queueing timed out on the texts lock: Five's Oct 18 is unassigned.
+  await newDraft(db);
+  await apply(db, [await unassign(db, s.oct18)]);
+  const v4 = await publishWithQueueFailing(db, 'lock_not_available', 'canceling statement due to lock timeout');
+  assert.deepEqual(await messages(db, 'm.revision_id in ($1, $2)', [v3.revision_id, v4.revision_id]), [], 'versions 3 and 4 queued nothing');
+  return { ...env, s, v1, v2, v3, v4 };
+}
+
+test('D1: after a cancelled and a timed-out queue, the claim sends One his current list and Two his full list; nothing more after', async () => {
+  const { db, staff, v2, v4 } = await d1World();
+  const atV2 = byName(await messages(db, 'm.revision_id = $1', [v2.revision_id]));
+  assert.deepEqual([atV2.Ava.kind, titles(atV2.Ava)], ['published', ['Nine', 'Twelve']], 'v1 never went, so v2 is One’s whole list, not “removed Oct 20”');
+  assert.deepEqual([atV2.Ben.kind, titles(atV2.Ben)], ['published', ['Sixteen']]);
+
+  const sent = await sendAll(db);
+  assert.deepEqual(sent.map(row => [row.staff_id, row.kind, row.details.revision, titles(row)]).sort(), [
+    [staff.ava, 'published', 4, ['Nine', 'Twelve']],
+    [staff.ben, 'published', 4, ['Fourteen', 'Sixteen']],
+  ].sort());
+  const rows = await messages(db, `s.display_name in ('Ava', 'Ben')`);
+  assert.deepEqual(rows.map(row => [row.number, row.name, row.status, row.reason]), [
+    [1, 'Ava', 'skipped', 'REPLACED_BY_NEWER'],
+    [2, 'Ava', 'skipped', 'REPLACED_BY_NEWER'],
+    [2, 'Ben', 'skipped', 'REPLACED_BY_NEWER'],
+    [4, 'Ava', 'sent', null],
+    [4, 'Ben', 'sent', null],
+  ]);
+  const latest = byName(await messages(db, 'm.revision_id = $1', [v4.revision_id]));
+  assert.deepEqual(Object.keys(latest).sort(), ['Ava', 'Ben'], 'Three and Five have no classes left and were never texted');
+
+  // Resend and further claims change nothing and send nothing.
+  const count = (await messages(db)).length;
+  assert.deepEqual(await rpc(db, ids.owner, 'select public.staff_roster_sms_retry($1)', [MONTH_DATE]), { queued: 0, still_skipped: 0 });
+  assert.deepEqual(await claim(db), []);
+  assert.equal(await rpc(db, null, 'select public.staff_roster_sms_queue($1)', [v4.revision_id]), 0);
+  assert.equal((await messages(db)).length, count);
+  const status = await rpc(db, ids.owner, 'select public.staff_roster_sms_status($1)', [MONTH_DATE]);
+  assert.deepEqual([status.counts.sent, status.counts.pending, status.retryable, status.due], [2, 0, 0, false]);
+  await noDuplicates(db);
+});
+
+test('D1 with One’s first text sent: he is told only what changed since it; "Resend failed texts" alone also recovers', async () => {
+  const { db, staff, v4 } = await d1World({ sendFirst: true });
+  // Before any claim, the manager sees the coaches the cancelled queues missed.
+  let status = await rpc(db, ids.owner, 'select public.staff_roster_sms_status($1)', [MONTH_DATE]);
+  assert.equal(status.retryable, 2, 'One and Two still need a text for the published version');
+  const retried = await rpc(db, ids.owner, 'select public.staff_roster_sms_retry($1)', [MONTH_DATE]);
+  assert.equal(retried.queued, 2);
+  const latest = byName(await messages(db, 'm.revision_id = $1', [v4.revision_id]));
+  assert.deepEqual([latest.Ava.kind, titles(latest.Ava)], ['changed', ['removed Twenty']]);
+  assert.deepEqual([latest.Ben.kind, titles(latest.Ben)], ['published', ['Fourteen', 'Sixteen']]);
+  const sent = await sendAll(db);
+  assert.deepEqual(sent.map(row => row.staff_id).sort(), [staff.ava, staff.ben].sort());
+  assert.deepEqual(await rpc(db, ids.owner, 'select public.staff_roster_sms_retry($1)', [MONTH_DATE]), { queued: 0, still_skipped: 0 });
+  assert.deepEqual(await claim(db), []);
+  status = await rpc(db, ids.owner, 'select public.staff_roster_sms_status($1)', [MONTH_DATE]);
+  assert.equal(status.retryable, 0);
+  await noDuplicates(db);
+});
+
+test('a sent basis, then two quick publishes: one "changed" text covering both', async () => {
+  const { db, s, staff } = await firstPublish();
+  await sendAll(db);
+  await newDraft(db);
+  await apply(db, [assign(s.spare, staff.ava)]);
+  const v2 = await publish(db, 'Synthetic gaps');
+  await newDraft(db);
+  await apply(db, [await unassign(db, s.strength)]);
+  const v3 = await publish(db, 'Synthetic gaps');
+  const pending = await messages(db, `s.display_name = 'Ava' and m.status = 'pending'`);
+  assert.deepEqual(pending.map(row => [row.revision_id, row.kind, titles(row)]), [[v3.revision_id, 'changed', ['added Engine', 'removed Strength']]]);
+  const [old] = await messages(db, `s.display_name = 'Ava' and m.revision_id = $1`, [v2.revision_id]);
+  assert.deepEqual([old.status, old.reason], ['skipped', 'REPLACED_BY_NEWER']);
+  const sent = await sendAll(db);
+  assert.deepEqual(sent.map(row => [row.staff_id, row.details.revision, titles(row)]), [[staff.ava, 3, ['added Engine', 'removed Strength']]]);
+  assert.deepEqual(await claim(db), []);
+  await noDuplicates(db);
+});
+
+test('a coach taken off every class after a sent text is told what was removed', async () => {
+  const { db, s, staff } = await firstPublish();
+  await sendAll(db);
+  await newDraft(db);
+  await apply(db, [await unassign(db, s.engine), await unassign(db, s.strength)]);
+  const v2 = await publish(db, 'Synthetic gaps');
+  const [ava] = await messages(db, `s.display_name = 'Ava' and m.revision_id = $1`, [v2.revision_id]);
+  assert.deepEqual([ava.kind, ava.status, titles(ava)], ['changed', 'pending', ['removed Engine', 'removed Strength']]);
+  assert.match(buildRosterSms(ava), /roster changed: removed .* Engine; removed .* Strength\./);
+  const sent = await sendAll(db);
+  assert.deepEqual(sent.map(row => row.staff_id), [staff.ava]);
+  // Nothing left to tell Ava: retry and claim queue nothing further (Ben and
+  // Eve are still skipped for their mobiles).
+  assert.deepEqual(await rpc(db, ids.owner, 'select public.staff_roster_sms_retry($1)', [MONTH_DATE]), { queued: 0, still_skipped: 2 });
+  assert.deepEqual(await claim(db), []);
+  await noDuplicates(db);
+});
+
+test('a text already sending is never changed; the next one waits for it and counts from it', async () => {
+  const { db, s, staff } = await firstPublish();
+  const [leased] = await claim(db);
+  await newDraft(db);
+  await apply(db, [assign(s.spare, staff.ava)]);
+  const v2 = await publish(db, 'Synthetic gaps');
+  const [first] = await messages(db, 'm.id = $1', [leased.id]);
+  assert.deepEqual([first.status, first.lease_token, first.kind, titles(first)], ['sending', leased.lease_token, 'published', ['Engine', 'Strength']]);
+  const [next] = await messages(db, `s.display_name = 'Ava' and m.revision_id = $1`, [v2.revision_id]);
+  assert.deepEqual([next.kind, next.status, titles(next)], ['changed', 'pending', ['added Engine']], 'counted from the text going out');
+  assert.deepEqual(await claim(db), [], 'waits until the earlier text is done');
+  assert.deepEqual(await record(db, leased, true), { recorded: true, status: 'sent' });
+  const [again] = await claim(db);
+  assert.deepEqual([again.id, again.kind, titles(again)], [next.id, 'changed', ['added Engine']]);
+  await noDuplicates(db);
+});
+
+test('a text that may have gone (no answer from the SMS service) counts as sent: the next text is just the changes', async () => {
+  const { db, s, staff } = await firstPublish();
+  const [leased] = await claim(db);
+  assert.deepEqual(await record(db, leased, false, { error: 'UNCONFIRMED TIMEOUT: aborted' }), { recorded: true, status: 'failed' });
+  await newDraft(db);
+  await apply(db, [assign(s.spare, staff.ava)]);
+  const v2 = await publish(db, 'Synthetic gaps');
+  const [next] = await messages(db, `s.display_name = 'Ava' and m.revision_id = $1`, [v2.revision_id]);
+  assert.deepEqual([next.kind, titles(next)], ['changed', ['added Engine']]);
+  const [kept] = await messages(db, 'm.id = $1', [leased.id]);
+  assert.deepEqual([kept.status, kept.reason], ['failed', 'UNCONFIRMED TIMEOUT: aborted'], 'left as it is');
+  await noDuplicates(db);
 });
 
 test('MONTH is ahead of today, so these tests never depend on the date they run', () => {
