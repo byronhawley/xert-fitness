@@ -75,6 +75,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   staff_roster_push_reliability: 'Apply supabase/migrations/20261002010000_staff_roster_push_reliability.sql in Supabase (after 20261001010000_staff_roster.sql).',
   // Coach invite links and the coach dashboard; the roster stays off.
   staff_roster_coach_dashboard: 'Apply supabase/migrations/20261002020000_staff_roster_coach_dashboard.sql in Supabase (after 20261002010000_staff_roster_push_reliability.sql).',
+  // Installs switched off; the PT page and coach PT tab stay hidden until the owner turns it on.
+  pt_booking: 'Apply supabase/migrations/20261002030000_pt_booking.sql in Supabase (after the staff roster migrations).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

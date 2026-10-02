@@ -15,6 +15,8 @@ import CoachAvailability from '@/components/coaching/CoachAvailability';
 import CoachRequests from '@/components/coaching/CoachRequests';
 import CoachInbox from '@/components/coaching/CoachInbox';
 import CoachProfile from '@/components/coaching/CoachProfile';
+import CoachPT from '@/components/coaching/CoachPT';
+import { ptClient } from '@/lib/ptBookingData';
 import '@/components/coaching/coaching.css';
 
 // Home is the default. Every older link names its tab (`?tab=roster` …), so
@@ -26,6 +28,7 @@ const TABS = [
   { key: 'requests', label: 'Requests' },
   { key: 'inbox', label: 'Inbox' },
   { key: 'profile', label: 'Profile' },
+  { key: 'pt', label: 'PT', when: 'pt' },
 ];
 
 const BLOCKED = {
@@ -59,7 +62,11 @@ export default function Coaching({ client: injected = null }) {
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
   const today = gymDateKey(new Date());
-  const tab = TABS.some(item => item.key === params.get('tab')) ? params.get('tab') : 'home';
+  // PT has its own switch; its tab only appears once PT booking is on.
+  const [ptOn, setPtOn] = useState(false);
+  useEffect(() => { ptClient().then(pt => pt.coaches()).then(result => setPtOn(Boolean(result?.enabled))).catch(() => setPtOn(false)); }, []);
+  const tabs = TABS.filter(item => !item.when || (item.when === 'pt' && ptOn));
+  const tab = tabs.some(item => item.key === params.get('tab')) ? params.get('tab') : 'home';
 
   useEffect(() => { if (!injected) staffRoster().then(setClient); }, [injected]);
   const loadMe = useCallback(async () => {
@@ -98,8 +105,8 @@ export default function Coaching({ client: injected = null }) {
         <p className="font-body text-xs uppercase tracking-wider text-xert-pale/60">Coach</p>
         <h1 className="font-display text-4xl uppercase text-xert-offwhite">Hi {me.staff.display_name}</h1>
       </header>
-      <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5" style={/** @type {React.CSSProperties} */ ({ '--coaching-tab-count': TABS.length })}>
-        {TABS.map(item => (
+      <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5" style={/** @type {React.CSSProperties} */ ({ '--coaching-tab-count': tabs.length })}>
+        {tabs.map(item => (
           <button key={item.key} type="button" role="tab" id={`coach-tab-${item.key}`} aria-selected={tab === item.key} aria-controls="coach-panel" onClick={() => setParam('tab', item.key)}>
             {item.label}{counts[item.key] ? <span className="coaching-count" aria-label={`, ${counts[item.key]} need you`}>{counts[item.key]}</span> : null}
           </button>
@@ -112,6 +119,7 @@ export default function Coaching({ client: injected = null }) {
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'inbox' && <CoachInbox client={client} notify={notify} onChanged={loadMe} />}
         {tab === 'profile' && <CoachProfile client={client} uid={session?.user?.id} notify={notify} />}
+        {tab === 'pt' && <CoachPT today={today} notify={notify} />}
       </section>
     </Shell>
   );

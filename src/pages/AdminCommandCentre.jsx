@@ -16,6 +16,7 @@ const StaffRosterWorkspace = lazy(() => import('@/components/admin/staffRoster/S
 const WorkoutManager = lazy(() => import('@/components/admin/WorkoutManager'));
 const BookingRequestsTable = lazy(() => import('@/components/admin/BookingRequestsTable'));
 const PTRequestsTable = lazy(() => import('@/components/admin/PTRequestsTable'));
+const PTBookingAdmin = lazy(() => import('@/components/admin/PTBookingAdmin'));
 const AvailabilityManager = lazy(() => import('@/components/admin/AvailabilityManager'));
 const SoftLaunchSettings = lazy(() => import('@/components/admin/SoftLaunchSettings'));
 const CampaignStats = lazy(() => import('@/components/admin/CampaignStats'));
@@ -142,7 +143,7 @@ export default function AdminCommandCentre() {
       case 'products': return <ProductsManager initialAction={intent.get('action')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
       case 'content': return <ContentManager onDirtyChange={setHasUnsavedChanges} />;
       case 'bookings': return <BookingRequestsTable />;
-      case 'pt-requests': return <PTRequestsTable />;
+      case 'pt-requests': return <><div className="px-4 pt-5 sm:px-8 sm:pt-7 mx-auto w-full max-w-6xl"><PTBookingAdmin /></div><PTRequestsTable /></>;
       case 'availability': return <AvailabilityManager />;
       case 'forms': return <FormsSurveysManager initialAction={intent.get('action')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
       case 'announcements': return <AnnouncementsManager initialAction={intent.get('action')} onIntentHandled={consumeIntent} onDirtyChange={setHasUnsavedChanges} />;
