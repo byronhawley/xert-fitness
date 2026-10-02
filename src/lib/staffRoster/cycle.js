@@ -77,7 +77,9 @@ export function planPeriodOpening(monthKey, { today, cycle = DEFAULT_CYCLE, dueO
   let dueOn = chosenDue || defaults.dueOn;
   if (compareDateKeys(dueOn, opensOn) < 0) {
     if (!chosenDue) {
-      return { ...defaults, opensOn, dueOn: null, shortened, needsDueDate: true };
+      // The default publish target belongs to the passed default cycle; it is
+      // chosen again once the manager picks a due date.
+      return { ...defaults, opensOn, dueOn: null, publishTargetOn: null, shortened, needsDueDate: true };
     }
     throw new Error('The due date cannot be before availability opens.');
   }
