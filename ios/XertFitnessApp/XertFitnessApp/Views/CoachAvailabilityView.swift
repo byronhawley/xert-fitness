@@ -100,9 +100,6 @@ struct CoachAvailabilitySections: View {
                 }
             }
             .onDisappear(perform: flushPendingSave)
-            .sheet(item: $sheet) { sheet in
-                sheetContent(sheet)
-            }
 
         if let period, let monthKey {
             switch phase {
@@ -160,6 +157,13 @@ struct CoachAvailabilitySections: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.vertical, XertSpace.xs)
+                // A modifier on a List `Section` is applied to every row in it,
+                // so a `.sheet` there is one presenter per row on the same
+                // binding, and the sheet closes as it opens. The editor sheets
+                // (only reachable when there is a period) hang off this row.
+                .sheet(item: $sheet) { sheet in
+                    sheetContent(sheet)
+                }
                 if phase == .open {
                     saveStatusRow
                 }

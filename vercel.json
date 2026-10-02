@@ -84,6 +84,9 @@
   "functions": {
     "api/admin-fitbox-integration.js": {
       "maxDuration": 60
+    },
+    "api/push-subscription.js": {
+      "maxDuration": 60
     }
   }
 }

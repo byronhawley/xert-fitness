@@ -448,6 +448,14 @@ struct StaffRosterNotification: Decodable, Hashable, Identifiable {
     var coachingLink: XertCoachingLink? {
         link.flatMap { XertCoachingLink.link(inAppNotice: $0) }
     }
+
+    /// Manager notices (`/admin/roster?…`, shown to admins) open the web
+    /// manager console, never My Coaching. Only the allowlisted tab and
+    /// month survive; record ids such as `rosterFocus` are dropped.
+    var managerLink: XertManagerRosterLink? {
+        guard coachingLink == nil else { return nil }
+        return link.flatMap { XertManagerRosterLink.link(webPath: $0) }
+    }
 }
 
 // MARK: - staff_roster_month_classes

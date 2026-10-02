@@ -215,22 +215,190 @@ struct XertCoachingLink: Hashable {
     }
 }
 
+// MARK: - Manager console
+
+/// A manager roster destination. Manager notices open the existing web
+/// manager console, never a native screen, so this only ever produces
+/// `https://<canonical web host>/admin/roster` with an allowlisted
+/// `rosterTab` and a `rosterMonth=YYYY-MM`. Everything else in a stored link
+/// (record ids such as `rosterFocus`, other parameters, fragments, foreign
+/// hosts) is dropped. The web console signs the manager in and checks
+/// permission server-side; this link never grants anything.
+struct XertManagerRosterLink: Hashable {
+    static let path = "/admin/roster"
+    /// The web workspace tabs, as `StaffRosterWorkspace.jsx` names them.
+    static let allowedTabs: [String] = ["roster", "availability", "requests", "coaches", "settings", "activity"]
+
+    let tab: String?
+    let month: String?
+
+    init(tab: String? = nil, month: String? = nil) {
+        self.tab = tab.flatMap { Self.allowedTabs.contains($0) ? $0 : nil }
+        self.month = month.flatMap { XertCoachingLink.isValidMonth($0) ? $0 : nil }
+    }
+
+    private var queryItems: [URLQueryItem] {
+        var items: [URLQueryItem] = []
+        if let tab { items.append(URLQueryItem(name: "rosterTab", value: tab)) }
+        if let month { items.append(URLQueryItem(name: "rosterMonth", value: month)) }
+        return items
+    }
+
+    /// Relative web path, e.g. `/admin/roster?rosterTab=requests&rosterMonth=2026-11`.
+    var webPath: String {
+        // Both values are allowlisted, so they never need percent-encoding.
+        var parts: [String] = []
+        if let tab { parts.append("rosterTab=" + tab) }
+        if let month { parts.append("rosterMonth=" + month) }
+        return parts.isEmpty ? Self.path : Self.path + "?" + parts.joined(separator: "&")
+    }
+
+    /// The console on the canonical web host over https. Never another host.
+    var webURL: URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = AppConfig.vercelHost
+        components.path = Self.path
+        let items = queryItems
+        components.queryItems = items.isEmpty ? nil : items
+        return components.url
+    }
+
+    /// Whether a relative path names the manager console (`/admin/roster…`).
+    static func isManagerPath(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return trimmed == Self.path
+            || trimmed.hasPrefix(Self.path + "?")
+            || trimmed.hasPrefix(Self.path + "/")
+            || trimmed.hasPrefix(Self.path + "#")
+    }
+
+    /// A relative web path from a push `open_path` or a stored in-app notice
+    /// link. Absolute URLs, other paths and credentials are rejected; unknown
+    /// or repeated parameters and invalid values are dropped.
+    static func link(webPath value: String) -> XertManagerRosterLink? {
+        guard
+            let components = URLComponents(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+            components.scheme == nil,
+            components.host == nil,
+            components.port == nil,
+            components.user == nil,
+            components.password == nil
+        else { return nil }
+        let lowered = components.path.lowercased()
+        guard lowered == Self.path || lowered == Self.path + "/" else { return nil }
+        var tabs: [String] = []
+        var months: [String] = []
+        for item in components.queryItems ?? [] {
+            if item.name == "rosterTab" { tabs.append(item.value ?? "") }
+            if item.name == "rosterMonth" { months.append(item.value ?? "") }
+        }
+        return XertManagerRosterLink(
+            tab: tabs.count == 1 ? tabs[0] : nil,
+            month: months.count == 1 ? months[0] : nil
+        )
+    }
+}
+
+/// Who a roster notice is for. The notice decides, not the account: an admin
+/// who is also a coach gets the console for manager notices and My Coaching
+/// for their own coach notices.
+enum StaffRosterAudience: String {
+    case coach
+    case manager
+
+    /// Used when a payload has no (or an unknown) `audience`.
+    static func inferred(fromPath value: String) -> StaffRosterAudience {
+        XertManagerRosterLink.isManagerPath(value) ? .manager : .coach
+    }
+}
+
+/// Where a roster push or notice opens.
+enum StaffRosterDestination: Hashable {
+    /// Native My Coaching (coach-only; the server decides access).
+    case coaching(XertCoachingLink)
+    /// The web manager console (the server decides access).
+    case managerConsole(XertManagerRosterLink)
+
+    var audience: StaffRosterAudience {
+        switch self {
+        case .coaching(_): return .coach
+        case .managerConsole(_): return .manager
+        }
+    }
+
+    /// `/open/coaching…` for coaches, `/admin/roster?…` for managers.
+    var path: String {
+        switch self {
+        case .coaching(let link): return link.openPath
+        case .managerConsole(let link): return link.webPath
+        }
+    }
+
+    /// Strict parse of a push `open_path` for an audience (inferred from the
+    /// path when nil). Nil when the path is not valid for that audience; a
+    /// coach notice never opens the console and a manager notice never opens
+    /// My Coaching.
+    static func destination(path: String, audience: StaffRosterAudience?) -> StaffRosterDestination? {
+        switch audience ?? StaffRosterAudience.inferred(fromPath: path) {
+        case .coach:
+            return XertCoachingLink.link(openPath: path).map { StaffRosterDestination.coaching($0) }
+        case .manager:
+            return XertManagerRosterLink.link(webPath: path).map { StaffRosterDestination.managerConsole($0) }
+        }
+    }
+
+    /// Stored in-app notice links: coach `/coaching?…` or manager `/admin/roster?…`.
+    static func destination(inAppNotice value: String) -> StaffRosterDestination? {
+        if let link = XertCoachingLink.link(inAppNotice: value) { return .coaching(link) }
+        if let link = XertManagerRosterLink.link(webPath: value) { return .managerConsole(link) }
+        return nil
+    }
+
+    /// Where an unusable path falls back to: the audience's own home.
+    static func fallback(for audience: StaffRosterAudience) -> StaffRosterDestination {
+        switch audience {
+        case .coach: return .coaching(XertCoachingLink())
+        case .manager: return .managerConsole(XertManagerRosterLink())
+        }
+    }
+}
+
 // MARK: - Push
 
 /// Staff roster APNs payloads:
 /// `{ aps: { category: "xert.staff-roster", "thread-id": "xert-staff-roster", … },
-///    staff_notification_id: "<uuid>", open_path: "/open/coaching/<tab>[?month=YYYY-MM]" }`.
-/// Receiving a push never marks it read; the notice is marked read only once
-/// the coach actually opens My Coaching from it.
+///    staff_notification_id: "<uuid>", audience: "coach" | "manager",
+///    open_path: "/open/coaching[/<tab>][?month=YYYY-MM]"            (coach)
+///             | "/admin/roster?rosterTab=<tab>&rosterMonth=YYYY-MM" (manager) }`.
+/// A missing `audience` is inferred from the path prefix.
+/// Receiving a push never marks it read; a coach notice is marked read only
+/// once the coach actually opens My Coaching from it.
 enum StaffRosterPush {
     static let category = "xert.staff-roster"
     static let threadIdentifier = "xert-staff-roster"
     static let notificationIDKey = "staff_notification_id"
     static let openPathKey = "open_path"
+    static let audienceKey = "audience"
 
     struct Target: Equatable {
-        let link: XertCoachingLink
+        let destination: StaffRosterDestination
         let notificationID: UUID?
+
+        init(destination: StaffRosterDestination, notificationID: UUID?) {
+            self.destination = destination
+            self.notificationID = notificationID
+        }
+
+        init(link: XertCoachingLink, notificationID: UUID?) {
+            self.init(destination: .coaching(link), notificationID: notificationID)
+        }
+
+        /// The My Coaching section, for coach notices only.
+        var link: XertCoachingLink? {
+            if case .coaching(let link) = destination { return link }
+            return nil
+        }
     }
 
     static func isStaffRosterPayload(_ userInfo: [AnyHashable: Any]) -> Bool {
@@ -242,14 +410,24 @@ enum StaffRosterPush {
         return false
     }
 
-    /// Where a tapped roster push opens. A missing or invalid `open_path` falls
-    /// back to the Upcoming section rather than to an unrelated screen.
+    /// The payload's declared audience; nil when missing or unknown.
+    static func audience(from userInfo: [AnyHashable: Any]) -> StaffRosterAudience? {
+        (userInfo[audienceKey] as? String).flatMap { StaffRosterAudience(rawValue: $0.lowercased()) }
+    }
+
+    /// Where a tapped roster push opens. A missing or invalid `open_path`
+    /// falls back to the audience's home (Upcoming for coaches, the console
+    /// for managers) rather than to an unrelated screen or another host.
     static func target(from userInfo: [AnyHashable: Any]) -> Target? {
         guard isStaffRosterPayload(userInfo) else { return nil }
-        let link = (userInfo[openPathKey] as? String).flatMap { XertCoachingLink.link(openPath: $0) }
-            ?? XertCoachingLink()
+        let rawPath = userInfo[openPathKey] as? String
+        let audience: StaffRosterAudience = Self.audience(from: userInfo)
+            ?? rawPath.map { StaffRosterAudience.inferred(fromPath: $0) }
+            ?? .coach
+        let destination = rawPath.flatMap { StaffRosterDestination.destination(path: $0, audience: audience) }
+            ?? StaffRosterDestination.fallback(for: audience)
         let notificationID = (userInfo[notificationIDKey] as? String).flatMap(UUID.init(uuidString:))
-        return Target(link: link, notificationID: notificationID)
+        return Target(destination: destination, notificationID: notificationID)
     }
 }
 
@@ -257,10 +435,12 @@ enum StaffRosterPush {
 /// announcement return routes. Consumed exactly once.
 enum StaffRosterPushNavigation {
     static let pendingPathKey = "xert.navigation.pendingCoachingPath"
+    static let pendingAudienceKey = "xert.navigation.pendingCoachingAudience"
     static let pendingNotificationIDKey = "xert.navigation.pendingCoachingNotificationID"
 
     static func markPending(_ target: StaffRosterPush.Target, defaults: UserDefaults = .standard) {
-        defaults.set(target.link.openPath, forKey: pendingPathKey)
+        defaults.set(target.destination.path, forKey: pendingPathKey)
+        defaults.set(target.destination.audience.rawValue, forKey: pendingAudienceKey)
         if let notificationID = target.notificationID {
             defaults.set(notificationID.uuidString, forKey: pendingNotificationIDKey)
         } else {
@@ -270,17 +450,25 @@ enum StaffRosterPushNavigation {
 
     static func consumePending(defaults: UserDefaults = .standard) -> StaffRosterPush.Target? {
         let rawPath = defaults.string(forKey: pendingPathKey)
+        let rawAudience = defaults.string(forKey: pendingAudienceKey)
         let rawNotificationID = defaults.string(forKey: pendingNotificationIDKey)
         clearPending(defaults: defaults)
-        guard let rawPath, let link = XertCoachingLink.link(openPath: rawPath) else { return nil }
+        guard
+            let rawPath,
+            let destination = StaffRosterDestination.destination(
+                path: rawPath,
+                audience: rawAudience.flatMap { StaffRosterAudience(rawValue: $0) }
+            )
+        else { return nil }
         return StaffRosterPush.Target(
-            link: link,
+            destination: destination,
             notificationID: rawNotificationID.flatMap(UUID.init(uuidString:))
         )
     }
 
     static func clearPending(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: pendingPathKey)
+        defaults.removeObject(forKey: pendingAudienceKey)
         defaults.removeObject(forKey: pendingNotificationIDKey)
     }
 }

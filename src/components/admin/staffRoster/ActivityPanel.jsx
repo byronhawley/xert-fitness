@@ -23,12 +23,19 @@ const ACTION_LABELS = {
 };
 
 // Phone push: Apple accepting a push is not proof the phone showed it, and
-// never means the coach read it (only "Opened in app" means that).
-function pushStatus(push) {
-  if (!push || !(push.accepted || push.failed || push.sending)) return null;
-  if (push.failed && !push.accepted) return ['Push failed', 'danger'];
-  if (push.accepted) return [`Push accepted by Apple${push.failed ? `, ${push.failed} failed` : ''}`, push.failed ? 'warning' : 'neutral'];
-  return ['Push sending', 'warning'];
+// never means the coach read it (only "Opened in app" means that). Work that
+// was closed without sending (too old, superseded, already read) is shown as
+// "not sent", never as a failure or a success.
+export function pushStatus(push) {
+  if (!push) return null;
+  const { accepted = 0, failed = 0, sending = 0, pending = 0, uncertain = 0, not_sent: notSent = 0 } = push;
+  if (!(accepted || failed || sending || pending || uncertain || notSent)) return null;
+  const extra = [failed && `${failed} failed`, uncertain && `${uncertain} unconfirmed`].filter(Boolean).join(', ');
+  if (accepted) return [`Push accepted by Apple${extra ? `, ${extra}` : ''}`, extra ? 'warning' : 'neutral'];
+  if (sending || pending) return [sending ? 'Push sending' : 'Push waiting to send', 'warning'];
+  if (failed) return [`Push failed${uncertain ? `, ${uncertain} unconfirmed` : ''}`, 'danger'];
+  if (uncertain) return ['Push sent, not confirmed by Apple', 'warning'];
+  return ['Push not sent (out of date or already read)', 'neutral'];
 }
 
 function when(value) {

@@ -36,6 +36,10 @@ struct AccountView: View {
     @State private var handledCoachingRouteSequence: UInt = 0
     @State private var handledCoachingLinkSequence: UInt = 0
     @State private var showingCoaching = false
+    /// Whether My Coaching is on screen, and how often it has appeared, so a
+    /// requested push that SwiftUI dropped can be asked for again.
+    @State private var coachingDestinationVisible = false
+    @State private var coachingAppearances: UInt = 0
     @State private var isSubmittingAuthentication = false
     @FocusState private var focusedProfileField: ProfileField?
     @FocusState private var focusedAuthField: AuthField?
@@ -113,6 +117,11 @@ struct AccountView: View {
                 }
                 .navigationDestination(isPresented: $showingCoaching) {
                     MyCoachingView(staffRoster: staffRoster)
+                        .onAppear {
+                            coachingDestinationVisible = true
+                            coachingAppearances &+= 1
+                        }
+                        .onDisappear { coachingDestinationVisible = false }
                 }
                 .onAppear(perform: syncProfileForm)
                 .onAppear {
@@ -247,7 +256,33 @@ struct AccountView: View {
             staffRoster.linkSequence != handledCoachingLinkSequence
         else { return }
         handledCoachingLinkSequence = staffRoster.linkSequence
-        showingCoaching = true
+        presentCoaching(attempt: 0)
+    }
+
+    /// SwiftUI drops a `navigationDestination(isPresented:)` push requested in
+    /// the same update that builds this stack or swaps its content: a cold
+    /// launch from a push (Account appears for the first time) or the sign-in
+    /// that resumes a My Coaching link (signed-out sections become signed-in
+    /// ones). The binding then reads `true` with Account still on screen. Ask
+    /// on the next turn of the main actor, and ask again if My Coaching did
+    /// not appear.
+    private func presentCoaching(attempt: Int) {
+        Task { @MainActor in
+            await Task.yield()
+            guard store.isSignedIn else { return }
+            let appearances = coachingAppearances
+            showingCoaching = true
+            guard attempt < 3, !coachingDestinationVisible else { return }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard
+                store.isSignedIn,
+                showingCoaching,
+                !coachingDestinationVisible,
+                coachingAppearances == appearances
+            else { return }
+            showingCoaching = false
+            presentCoaching(attempt: attempt + 1)
+        }
     }
 
     // MARK: - Signed-in profile

@@ -79,6 +79,7 @@ struct MyCoachingView: View {
                 Text("Hi \(me.staff.display_name)")
                     .xertDisplay(30)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("coaching-greeting")
                 XertSegmented(
                     title: "Section",
                     selection: $tab,
@@ -483,6 +484,7 @@ private struct CoachUpcomingSections: View {
 private struct CoachNoticesSection: View {
     @ObservedObject var staffRoster: StaffRosterStore
     let onOpen: (XertCoachingLink) -> Void
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         Section {
@@ -546,6 +548,17 @@ private struct CoachNoticesSection: View {
                         }
                     }
                     .buttonStyle(XertControlButtonStyle(variant: .ghost))
+                } else if let managerLink = item.managerLink {
+                    // A manager notice (shown to an admin who also coaches)
+                    // belongs to the web manager console, not My Coaching.
+                    Button("Open manager console") {
+                        StaffRosterManagerConsole.open(managerLink, using: openURL)
+                        if item.isUnread {
+                            Task { await staffRoster.markRead([item.id]) }
+                        }
+                    }
+                    .buttonStyle(XertControlButtonStyle(variant: .ghost))
+                    .accessibilityHint("Opens the roster manager console in your browser")
                 }
                 if item.isUnread {
                     Button("Mark read") {
@@ -581,6 +594,15 @@ private struct CoachRosterSections: View {
     var body: some View {
         Section {
             monthNavigator
+                // A modifier on a List `Section` is applied to every row in it, so a
+                // `.sheet` there becomes one presenter per row on the same binding:
+                // the second one undoes the first and the sheet closes as it opens.
+                // Each sheet hangs off exactly one row instead.
+                .sheet(item: $coverFor) { assignment in
+                    CoachCoverRequestSheet(assignment: assignment) { reason in
+                        await staffRoster.requestCover(assignment.assignment_id, reason: reason)
+                    }
+                }
             if let acks = staffRoster.roster?.pending_acknowledgements, !acks.isEmpty {
                 ForEach(acks, id: \.revision_id) { ack in
                     HStack(spacing: XertSpace.md) {
@@ -605,11 +627,6 @@ private struct CoachRosterSections: View {
         .listRowBackground(Color.xertInk)
         .onAppear(perform: applyRequestedMonth)
         .onChange(of: requestedMonth) { _ in applyRequestedMonth() }
-        .sheet(item: $coverFor) { assignment in
-            CoachCoverRequestSheet(assignment: assignment) { reason in
-                await staffRoster.requestCover(assignment.assignment_id, reason: reason)
-            }
-        }
 
         if staffRoster.roster == nil {
             Section {
@@ -805,17 +822,21 @@ private struct CoachRequestsSections: View {
                 Label("I need time away", systemImage: "calendar.badge.minus")
             }
             .buttonStyle(XertControlButtonStyle(variant: .primary, expands: true))
+            // A modifier on a List `Section` is applied to every row in it, so a
+            // `.sheet` there becomes one presenter per row on the same binding:
+            // the second one undoes the first and the sheet closes as it opens.
+            // Each sheet hangs off exactly one row instead.
+            .sheet(isPresented: $showingAbsence) {
+                CoachAbsenceSheet { starts, ends, urgent, reason in
+                    await staffRoster.requestAbsence(starts: starts, ends: ends, urgent: urgent, reason: reason)
+                }
+            }
             Text("Volunteering to cover a class is only an offer. The roster changes only when the manager approves a replacement.")
                 .font(.caption)
                 .foregroundStyle(Color.xertMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .listRowBackground(Color.xertInk)
-        .sheet(isPresented: $showingAbsence) {
-            CoachAbsenceSheet { starts, ends, urgent, reason in
-                await staffRoster.requestAbsence(starts: starts, ends: ends, urgent: urgent, reason: reason)
-            }
-        }
 
         if let mine = staffRoster.requests {
             coverBoardSection

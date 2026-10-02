@@ -140,6 +140,10 @@ final class XertAppDelegate: NSObject, UIApplicationDelegate, UNUserNotification
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         XertNotificationCategories.register()
+        #if DEBUG
+        // UI tests: replay a staff roster push tap through the real parser.
+        XertUITestFixtures.simulateNotificationTapIfRequested()
+        #endif
         return true
     }
 

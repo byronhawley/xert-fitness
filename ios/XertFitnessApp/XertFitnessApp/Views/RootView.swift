@@ -10,6 +10,7 @@ struct RootView: View {
     @EnvironmentObject private var store: XertStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.openURL) private var openURL
     @AppStorage(AppPrivacyLock.preferenceKey) private var privacyLockEnabled = false
     @SceneStorage("xert.memberRoute") private var restoredMemberRoute = XertMemberRoute.home.restorationValue
     @SceneStorage("xert.memberWorkspace") private var restoredMemberWorkspace = ""
@@ -55,6 +56,10 @@ struct RootView: View {
                 )
                 .zIndex(10)
             }
+            #if DEBUG
+            XertUITestHookOverlay()
+                .zIndex(20)
+            #endif
         }
         .focusedSceneValue(\.xertNavigationCommandContext, navigationCommandContext)
         .onChange(of: scenePhase, perform: handleScenePhase)
@@ -120,6 +125,12 @@ struct RootView: View {
             if isPrivacyLocked, privacyLockError == nil {
                 Task { await unlockApp() }
             }
+            #if DEBUG
+            // UI tests: deliver a launch link once the fixture account is known.
+            if let url = XertUITestFixtures.launchURL {
+                handleOpenURL(url, source: .external)
+            }
+            #endif
         }
         .onChange(of: privacyLockEnabled) { isEnabled in
             guard isEnabled, store.isSignedIn else {
@@ -841,6 +852,10 @@ struct RootView: View {
     private func restoreMemberWorkspaceWhenReady() {
         guard store.hasBootstrapped, !hasRestoredMemberWorkspace else { return }
         hasRestoredMemberWorkspace = true
+        #if DEBUG
+        // UI tests always start from Home, whatever an earlier run left behind.
+        if XertUITestFixtures.isActive { return }
+        #endif
         guard !hasExplicitMemberNavigation else { return }
         navigation.restore(
             workspaceValue: restoredMemberWorkspace,
@@ -860,6 +875,11 @@ struct RootView: View {
         guard store.isSignedIn, let intent = pendingProtectedNavigation else { return }
         pendingProtectedNavigation = nil
         navigation.open(intent.route, source: intent.source)
+        if case .coaching(let link) = intent.route {
+            // Same as `openMemberRoute`: ask My Coaching to open on the link's
+            // section once sign-in has finished, not only via Account's route.
+            staffRoster.open(link)
+        }
         if intent.route == .purchaseConfirmation {
             Task { await store.reconcilePendingCheckout() }
         }
@@ -1042,15 +1062,24 @@ struct RootView: View {
         }
     }
 
-    /// A tapped staff roster push opens its `open_path` through the same
-    /// route as a universal link. Its notice is marked read only once My
-    /// Coaching is showing for the coach.
+    /// A tapped staff roster push opens where its notice's audience works.
+    /// Coach notices open My Coaching through the same route as a universal
+    /// link (signed out, the destination waits for sign-in), and are marked
+    /// read only once My Coaching is showing for the coach. Manager notices
+    /// open the web manager console, which signs the manager in and checks
+    /// permission itself, so they never need an app sign-in and never open
+    /// the coach-only My Coaching, even for an admin who also coaches.
     private func consumePendingStaffRosterRoute() {
         guard let target = StaffRosterPushNavigation.consumePending() else { return }
-        if let notificationID = target.notificationID {
-            staffRoster.noteOpenedFromNotification(notificationID)
+        switch target.destination {
+        case .coaching(let link):
+            if let notificationID = target.notificationID {
+                staffRoster.noteOpenedFromNotification(notificationID)
+            }
+            openMemberRoute(.coaching(link), source: .pushNotification)
+        case .managerConsole(let link):
+            StaffRosterManagerConsole.open(link, using: openURL)
         }
-        openMemberRoute(.coaching(target.link), source: .pushNotification)
         XertHaptics.play(.mediumImpact)
     }
 }

@@ -1,5 +1,80 @@
 import Foundation
 
+/// The coach roster entry points My Coaching calls. `XertAPI` is the only
+/// production implementation; DEBUG UI-test fixture mode
+/// (`-XertRosterFixtures`) swaps in an in-memory one that never contacts
+/// Supabase.
+protocol StaffRosterService: AnyObject {
+    func staffRosterMe(session auth: AuthSession) async throws -> StaffRosterMe
+    func staffRosterMonthClasses(session auth: AuthSession, monthKey: String) async throws -> [StaffRosterMonthClass]
+    func staffRosterSaveUsualWeek(
+        session auth: AuthSession,
+        pattern: [StaffWeeklyWindow],
+        expectedVersion: Int
+    ) async throws -> StaffRosterVersionResult
+    func staffRosterSaveAvailabilityDraft(
+        session auth: AuthSession,
+        monthKey: String,
+        payload: StaffAvailabilityPayload,
+        expectedVersion: Int
+    ) async throws -> StaffRosterVersionResult
+    func staffRosterSubmitAvailability(
+        session auth: AuthSession,
+        monthKey: String,
+        payload: StaffAvailabilityPayload,
+        requestID: UUID
+    ) async throws -> StaffRosterSubmitResult
+    func staffRosterRequestChange(
+        session auth: AuthSession,
+        monthKey: String,
+        message: String,
+        requestID: UUID
+    ) async throws -> StaffRosterIDResult
+    func staffRosterConfirmSession(
+        session auth: AuthSession,
+        sessionID: UUID,
+        status: String,
+        requestID: UUID
+    ) async throws -> StaffRosterStatusResult
+    func staffRosterMyRoster(session auth: AuthSession, from: String, to: String) async throws -> StaffRosterMyRoster
+    func staffRosterAcknowledge(session auth: AuthSession, revisionID: UUID) async throws -> StaffRosterAcknowledgeResult
+    func staffRosterRequestAbsence(
+        session auth: AuthSession,
+        starts: Date,
+        ends: Date,
+        kind: String,
+        reason: String?,
+        requestID: UUID
+    ) async throws -> StaffRosterAbsenceResult
+    func staffRosterWithdraw(session auth: AuthSession, kind: String, id: UUID, requestID: UUID) async throws -> StaffRosterStatusResult
+    func staffRosterRequestCover(
+        session auth: AuthSession,
+        assignmentID: UUID,
+        reason: String?,
+        requestID: UUID
+    ) async throws -> StaffRosterStatusResult
+    func staffRosterCoverBoard(session auth: AuthSession) async throws -> [StaffRosterCoverBoardItem]
+    func staffRosterOfferCover(session auth: AuthSession, coverID: UUID, requestID: UUID) async throws -> StaffRosterStatusResult
+    func staffRosterMyRequests(session auth: AuthSession) async throws -> StaffRosterMyRequests
+    func staffRosterMyNotifications(session auth: AuthSession, limit: Int) async throws -> [StaffRosterNotification]
+    func staffRosterMarkNotificationsRead(session auth: AuthSession, ids: [UUID]) async throws -> Int
+}
+
+extension XertAPI: StaffRosterService {}
+
+enum StaffRosterServiceFactory {
+    /// The real roster API, except in a DEBUG build launched for UI tests
+    /// with `-XertRosterFixtures`. Release builds have no fixture code at all.
+    static func make() -> StaffRosterService {
+        #if DEBUG
+        if XertUITestFixtures.isActive {
+            return StaffRosterFixtureService.shared
+        }
+        #endif
+        return XertAPI()
+    }
+}
+
 /// A short confirmation or failure shown at the top of My Coaching.
 struct StaffRosterBanner: Identifiable, Equatable {
     let id = UUID()
@@ -28,13 +103,13 @@ final class StaffRosterStore: ObservableObject {
     @Published private(set) var requestedLink = XertCoachingLink()
     @Published private(set) var linkSequence: UInt = 0
 
-    private let api: XertAPI
+    private let api: StaffRosterService
     private var sessionProvider: (@MainActor () async throws -> AuthSession)?
     private var userID: UUID?
     private var generation = 0
     private var pendingViewedNotificationIDs: Set<UUID> = []
 
-    init(api: XertAPI = XertAPI()) {
+    init(api: StaffRosterService = StaffRosterServiceFactory.make()) {
         self.api = api
     }
 
