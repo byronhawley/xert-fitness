@@ -20,6 +20,9 @@
 -- (certificate files are personal records; export them first).
 -- Website coach profiles approved from coach drafts stay in public.coaches.
 --
+-- Refuses to run while PT booking (capability `pt_booking`) is installed: its
+-- tables reference staff_members and would be broken by the cascade.
+--
 -- If the push dispatch schedule was ever activated
 -- (docs/staff-roster/push-dispatch-schedule.sql), unschedule it FIRST:
 --   select cron.unschedule('staff-roster-push-dispatch');
@@ -30,6 +33,18 @@
 -- capabilities, or the release gate will report them missing.
 
 begin;
+
+-- PT booking (pt_* tables) hangs off staff_members. Dropping the roster would
+-- cascade into it and leave PT booking broken, so remove PT booking first with
+-- its own rollback, then run this.
+do $guard$
+begin
+  if to_regclass('public.xert_schema_capabilities') is not null
+     and exists (select 1 from public.xert_schema_capabilities where capability = 'pt_booking') then
+    raise exception 'PT booking is installed. Remove it with its own rollback before removing the roster.';
+  end if;
+end;
+$guard$;
 
 drop trigger if exists class_sessions_staff_roster_changes on public.class_sessions;
 
