@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, Loader2, RefreshCw, Users } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarDays, List, Loader2, RefreshCw, Users } from 'lucide-react';
 import PublicNav from '@/components/public/PublicNav';
 import PublicFooter from '@/components/public/PublicFooter';
 import PageHeader from '@/components/public/PageHeader';
 import Skeleton from '@/components/public/Skeleton';
+import PublicClassCalendar from '@/components/public/PublicClassCalendar';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { getAvailableSessions, bookSession, joinSessionWaitlist, getMyBookings,
 } from '@/lib/bookingData';
@@ -15,6 +16,14 @@ import { PLATFORM_PROVIDERS, resolvePlatformProvider } from '@/lib/platformProvi
 import { BOOKING_DEFAULTS } from '@/lib/contentDefaults';
 import { activeBookingsBySession, bookingTimeConflict, classActionLabel, classIsClosedToBooking } from '@/lib/bookingUi';
 import { clearPendingWebCheckout } from '@/lib/webCheckoutRecovery';
+import { gymDateKey, gymDayLabel, gymTimeLabel } from '@/lib/gymTime';
+
+// The same two views the public timetable offers, so a member can pick any day
+// rather than scroll a list that starts at whichever day happens to be next.
+const VIEW_OPTIONS = [
+  { key: 'calendar', label: 'Calendar', icon: CalendarDays },
+  { key: 'list', label: 'List', icon: List },
+];
 
 const nativeSteps = [
   'Pay for a casual visit, a Three Day Pass or three months upfront — or sign up for a membership.',
@@ -39,12 +48,14 @@ const alertCardStyle = { borderColor: 'var(--state-danger-text-30)', backgroundC
 const rowButtonClasses = 'inline-flex min-h-[52px] w-full sm:w-auto items-center justify-center gap-2 px-5 font-display text-base uppercase tracking-wide';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The gym's clock, as on the timetable: the calendar files a class under its
+// Brisbane day, so the list and the toast must not use the viewer's own clock.
 function formatDay(iso) {
-  return new Date(iso).toLocaleDateString('en-AU', { weekday: 'long', day: 'numeric', month: 'long' });
+  return gymDayLabel(iso);
 }
 
 function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' });
+  return gymTimeLabel(iso);
 }
 
 export default function Booking() {
@@ -61,6 +72,7 @@ export default function Booking() {
   const [loading, setLoading] = useState(true);
   const [bookingId, setBookingId] = useState(null);
   const [loadErrors, setLoadErrors] = useState([]);
+  const [view, setView] = useState('calendar');
   const requestedSession = searchParams.get('session');
   const targetSessionId = requestedSession && UUID_PATTERN.test(requestedSession)
     ? requestedSession.toLowerCase()
@@ -114,6 +126,12 @@ export default function Booking() {
     }
     return Array.from(groups.entries());
   }, [sessions]);
+
+  // A link to one class (?session=) opens the calendar on that class's day.
+  const targetSession = useMemo(
+    () => (targetSessionId ? sessions.find(item => item.id?.toLowerCase() === targetSessionId) || null : null),
+    [sessions, targetSessionId],
+  );
 
   const memberBookingsBySession = useMemo(() => activeBookingsBySession(myBookings), [myBookings]);
   const timetableUnavailable = loadErrors.some(error => error.startsWith('Timetable:'));
@@ -212,6 +230,70 @@ export default function Booking() {
     }
   };
 
+  const renderSessionRow = s => {
+    const queued = Number(s.waiting_count) > 0;
+    const full = classIsClosedToBooking(s);
+    const existingBooking = memberBookingsBySession.get(s.id);
+    const isInterestOnly = s.booking_mode === 'interest_only';
+    const isRequest = s.booking_mode === 'request_to_book';
+    // Computed even for a full class: joining its waitlist
+    // would still land the member in two classes at once.
+    const timeConflict = existingBooking ? null : bookingTimeConflict(s, myBookings);
+    const actionLabel = classActionLabel({ booking: existingBooking, conflict: timeConflict, full, bookingMode: s.booking_mode });
+    return (
+      <div
+        key={s.id}
+        id={`class-session-${s.id.toLowerCase()}`}
+        tabIndex={-1}
+        className="xert-card p-4 sm:p-5 flex flex-wrap items-center gap-4 focus:outline-none focus:ring-2 focus:ring-xert-steel"
+      >
+        <p className="font-display text-2xl leading-none uppercase tabular-nums shrink-0 text-xert-steel">
+          {formatTime(s.start_time)}
+        </p>
+        <div className="flex-1 min-w-[12rem]">
+          <p className="font-display text-xl uppercase leading-tight text-xert-offwhite">
+            {s.title || s.class_type || 'XERT Class'}
+          </p>
+          <p className="font-body text-xs mt-0.5 text-xert-pale/55">
+            {[s.coach_name && `Coach ${s.coach_name}`, s.intensity_level, s.duration_minutes && `${s.duration_minutes} min`]
+              .filter(Boolean).join(' · ')}
+          </p>
+          {isRequest && (
+            <p className="font-body text-xs mt-1 text-xert-steel/75">
+              Staff confirmation required
+            </p>
+          )}
+          {timeConflict && (
+            <p id={`booking-conflict-${s.id}`} className="font-body text-xs mt-1" style={{ color: 'var(--state-danger-text)' }}>
+              Overlaps {timeConflict.title || timeConflict.class_type || 'another active booking'}
+            </p>
+          )}
+        </div>
+        {s.spots_left !== null && (
+          <span className={`xert-chip shrink-0 ${full ? 'opacity-70' : ''}`}>
+            {queued && s.spots_left > 0
+              ? `${s.waiting_count} waiting`
+              : full ? 'Full' : `${s.spots_left} spot${s.spots_left === 1 ? '' : 's'} left`}
+          </span>
+        )}
+        {isInterestOnly ? (
+          <Link to="/timetable"
+            className={`xert-btn-ghost ${rowButtonClasses} shrink-0`}>
+            Register interest
+          </Link>
+        ) : (
+          <button
+            onClick={() => handleBook(s)}
+            disabled={Boolean(existingBooking) || Boolean(timeConflict) || bookingId === s.id}
+            aria-describedby={timeConflict ? `booking-conflict-${s.id}` : undefined}
+            className={`xert-btn-primary ${rowButtonClasses} disabled:opacity-40 shrink-0`}>
+            {bookingId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : actionLabel}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-xert-navy">
       <PublicNav />
@@ -292,10 +374,24 @@ export default function Booking() {
 
           {/* Timetable */}
           <section id="timetable" className="mt-16">
-            <h2 className="font-display text-3xl uppercase text-xert-offwhite mb-2">Book A Class</h2>
-            <p className="font-body text-sm mb-8 text-xert-pale/60">
-              Ask for a spot and XERT confirms it. All sessions are scalable to your current level.
-            </p>
+            <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="font-display text-3xl uppercase text-xert-offwhite mb-2">Book A Class</h2>
+                <p className="font-body text-sm text-xert-pale/60">
+                  Ask for a spot and XERT confirms it. All sessions are scalable to your current level.
+                </p>
+              </div>
+              <div className="inline-flex self-start rounded-full border border-xert-steel/20 bg-white/[0.03] p-1 sm:self-auto" role="group" aria-label="Timetable view">
+                {VIEW_OPTIONS.map(option => (
+                  <button key={option.key} type="button" onClick={() => setView(option.key)} aria-pressed={view === option.key}
+                    className={`inline-flex min-h-11 items-center gap-1.5 rounded-full px-4 font-body text-xs uppercase tracking-wider transition-colors
+                      ${view === option.key ? 'bg-xert-steel text-xert-navy' : 'text-xert-pale/60 hover:text-xert-offwhite'}`}>
+                    <option.icon className="w-3.5 h-3.5" aria-hidden="true" />
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {loading ? (
               <div role="status" className="space-y-8">
@@ -332,6 +428,12 @@ export default function Booking() {
                   your interest and XERT will let you know the moment they go live.
                 </p>
               </div>
+            ) : view === 'calendar' ? (
+              <PublicClassCalendar
+                sessions={sessions}
+                renderSession={renderSessionRow}
+                initialDayKey={targetSession ? gymDateKey(targetSession.start_time) : null}
+              />
             ) : (
               <div className="space-y-8">
                 {sessionsByDay.map(([day, list]) => (
@@ -341,69 +443,7 @@ export default function Booking() {
                       <h3 className="font-display text-xl uppercase text-xert-pale/85">{day}</h3>
                     </div>
                     <div className="space-y-2">
-                      {list.map(s => {
-                        const queued = Number(s.waiting_count) > 0;
-                        const full = classIsClosedToBooking(s);
-                        const existingBooking = memberBookingsBySession.get(s.id);
-                        const isInterestOnly = s.booking_mode === 'interest_only';
-                        const isRequest = s.booking_mode === 'request_to_book';
-                        // Computed even for a full class: joining its waitlist
-                        // would still land the member in two classes at once.
-                        const timeConflict = existingBooking ? null : bookingTimeConflict(s, myBookings);
-                        const actionLabel = classActionLabel({ booking: existingBooking, conflict: timeConflict, full, bookingMode: s.booking_mode });
-                        return (
-                          <div
-                            key={s.id}
-                            id={`class-session-${s.id.toLowerCase()}`}
-                            tabIndex={-1}
-                            className="xert-card p-4 sm:p-5 flex flex-wrap items-center gap-4 focus:outline-none focus:ring-2 focus:ring-xert-steel"
-                          >
-                            <p className="font-display text-2xl leading-none uppercase tabular-nums shrink-0 text-xert-steel">
-                              {formatTime(s.start_time)}
-                            </p>
-                            <div className="flex-1 min-w-[12rem]">
-                              <p className="font-display text-xl uppercase leading-tight text-xert-offwhite">
-                                {s.title || s.class_type || 'XERT Class'}
-                              </p>
-                              <p className="font-body text-xs mt-0.5 text-xert-pale/55">
-                                {[s.coach_name && `Coach ${s.coach_name}`, s.intensity_level, s.duration_minutes && `${s.duration_minutes} min`]
-                                  .filter(Boolean).join(' · ')}
-                              </p>
-                              {isRequest && (
-                                <p className="font-body text-xs mt-1 text-xert-steel/75">
-                                  Staff confirmation required
-                                </p>
-                              )}
-                              {timeConflict && (
-                                <p id={`booking-conflict-${s.id}`} className="font-body text-xs mt-1" style={{ color: 'var(--state-danger-text)' }}>
-                                  Overlaps {timeConflict.title || timeConflict.class_type || 'another active booking'}
-                                </p>
-                              )}
-                            </div>
-                            {s.spots_left !== null && (
-                              <span className={`xert-chip shrink-0 ${full ? 'opacity-70' : ''}`}>
-                                {queued && s.spots_left > 0
-                                  ? `${s.waiting_count} waiting`
-                                  : full ? 'Full' : `${s.spots_left} spot${s.spots_left === 1 ? '' : 's'} left`}
-                              </span>
-                            )}
-                            {isInterestOnly ? (
-                              <Link to="/timetable"
-                                className={`xert-btn-ghost ${rowButtonClasses} shrink-0`}>
-                                Register interest
-                              </Link>
-                            ) : (
-                              <button
-                                onClick={() => handleBook(s)}
-                                disabled={Boolean(existingBooking) || Boolean(timeConflict) || bookingId === s.id}
-                                aria-describedby={timeConflict ? `booking-conflict-${s.id}` : undefined}
-                                className={`xert-btn-primary ${rowButtonClasses} disabled:opacity-40 shrink-0`}>
-                                {bookingId === s.id ? <Loader2 className="w-4 h-4 animate-spin" /> : actionLabel}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {list.map(renderSessionRow)}
                     </div>
                   </div>
                 ))}
