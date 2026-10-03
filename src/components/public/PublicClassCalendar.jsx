@@ -28,12 +28,17 @@ function dayNumberClasses({ isSelected, isToday, hasSessions }) {
   return 'text-xert-pale/45';
 }
 
-export default function PublicClassCalendar({ sessions, bookingsEnabled, onBook, fitbox = null, availability = {}, initialDayKey = null }) {
-  const [month, setMonth] = useState(() => monthOf(new Date()));
-  const [selectedDayKey, setSelectedDayKey] = useState(() => gymDateKey(new Date()) || localDateKey(new Date()));
+// `renderSession` lets a page draw its own row for each class on the chosen
+// day (the members' booking page has its own Book buttons); without it the
+// public sign-up card is used.
+export default function PublicClassCalendar({ sessions, bookingsEnabled = false, onBook = null, fitbox = null, availability = {}, initialDayKey = null, renderSession = null }) {
+  // A day known at mount (a link to one class) is selected on the first paint,
+  // so the page can scroll straight to that class without waiting a render.
+  const [month, setMonth] = useState(() => monthOf(dateFromKey(initialDayKey) || new Date()));
+  const [selectedDayKey, setSelectedDayKey] = useState(() => (dateFromKey(initialDayKey) ? initialDayKey : null) || gymDateKey(new Date()) || localDateKey(new Date()));
   const detailRef = useRef(null);
   const gridRef = useRef(null);
-  const hasAutoFocused = useRef(false);
+  const hasAutoFocused = useRef(Boolean(dateFromKey(initialDayKey)));
   const skipInitialScroll = useRef(true);
   // The whole month used to sit in the tab order — up to 42 stops before the
   // class cards and their Sign up buttons. One roving stop, arrow keys inside.
@@ -227,9 +232,9 @@ export default function PublicClassCalendar({ sessions, bookingsEnabled, onBook,
           </div>
         ) : (
           <div className="space-y-3">
-            {selectedSessions.map(session => (
+            {selectedSessions.map(session => (renderSession ? renderSession(session) : (
               <ClassSessionCard key={session.id} session={session} bookingsEnabled={bookingsEnabled} onBook={onBook} fitbox={fitbox} availability={availability[session.id]} />
-            ))}
+            )))}
           </div>
         )}
       </div>
