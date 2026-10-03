@@ -43,7 +43,7 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
   useEffect(() => { getAllCoaches().then(setPublicCoaches).catch(() => setPublicCoaches([])); }, []);
 
   const search = async () => {
-    const result = await onMutate(client => client.linkCandidates(query), null, { reload: false });
+    const result = await onMutate(client => client.linkCandidates(query), null, { reload: false, failTitle: 'Couldn’t search sign-ins' });
     if (result) setCandidates(result);
   };
   const save = async () => {
@@ -54,11 +54,14 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
     const before = JSON.stringify(capabilityRows(row));
     const next = capabilities.filter(item => item.capability.trim());
     if (JSON.stringify(next) !== before) {
-      await onMutate(client => client.setCapabilities(saved.id, next.map(item => ({
+      const kept = await onMutate(client => client.setCapabilities(saved.id, next.map(item => ({
         capability: item.capability.trim().toLowerCase().replace(/\s+/g, '_'),
         valid_from: item.valid_from ? `${item.valid_from}T00:00:00+10:00` : null,
         valid_until: item.valid_until ? `${item.valid_until}T00:00:00+10:00` : null,
-      }))), 'Qualifications saved');
+      }))), 'Qualifications saved', { failTitle: 'Coach saved, qualifications not saved' });
+      // An existing coach keeps the editor open so the typed qualifications
+      // aren't lost; a new coach now exists, so saving again would add a twin.
+      if (!kept && row) return;
     }
     onClose(undefined, row ? null : saved);
   };
@@ -264,7 +267,7 @@ export default function CoachesPanel({ data, onMutate, focusStaffId, intent = nu
   const [notice, setNotice] = useState(null);
   const staff = snapshot.staff || [];
   const loadInvites = useCallback(async () => {
-    const rows = await onMutate(client => client.listInvites(), null, { reload: false });
+    const rows = await onMutate(client => client.listInvites(), null, { reload: false, failTitle: 'Couldn’t load invite links' });
     if (Array.isArray(rows)) setInvites(Object.fromEntries(rows.map(item => [item.staff_id, item])));
   }, [onMutate]);
   useEffect(() => { loadInvites(); }, [loadInvites]);

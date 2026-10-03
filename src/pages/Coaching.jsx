@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { authPathWithNext } from '@/lib/authRedirect';
 import { gymDateKey } from '@/lib/gymTime';
 import { staffRoster } from '@/lib/staffRosterData';
+import { answerableMonths } from '@/lib/staffRoster/coachHome';
 import { Banner, GHOST } from '@/components/coaching/coachingUi';
 import CoachHome from '@/components/coaching/CoachHome';
 import CoachRoster from '@/components/coaching/CoachRoster';
@@ -25,7 +26,7 @@ const TABS = [
   { key: 'home', label: 'Home' },
   { key: 'roster', label: 'My classes' },
   { key: 'availability', label: 'Availability' },
-  { key: 'requests', label: 'Requests' },
+  { key: 'requests', label: 'Time off' },
   { key: 'inbox', label: 'Inbox' },
   { key: 'profile', label: 'Profile' },
   { key: 'pt', label: 'PT', when: 'pt' },
@@ -73,6 +74,9 @@ export default function Coaching({ client: injected = null }) {
     if (!client) return;
     try { setMe(await client.me()); setError(null); } catch (failure) { setError(failure); }
   }, [client]);
+  // A failed refresh after the page has loaded keeps the page and says so; only
+  // a first load that fails (or an access change) replaces the whole page.
+  const blocking = error && (!me || BLOCKED[error.code]);
   useEffect(() => { if (session || injected) loadMe(); }, [session, injected, loadMe]);
 
   const notify = useCallback((message, tone) => toast({ title: message, variant: tone === 'error' ? 'destructive' : undefined }), [toast]);
@@ -90,13 +94,13 @@ export default function Coaching({ client: injected = null }) {
       </Shell>
     );
   }
-  if (error) {
+  if (blocking) {
     const [title, detail] = BLOCKED[error.code] || ['Couldn’t open coach screens', error.message];
     return <Shell><Banner tone={BLOCKED[error.code] ? 'info' : 'danger'} title={title} action={BLOCKED[error.code] ? null : <button type="button" className={GHOST} onClick={loadMe}>Try again</button>}>{detail}</Banner></Shell>;
   }
   if (!me) return <Shell><p className="font-body text-sm text-xert-pale/60" role="status">Loading…</p></Shell>;
 
-  const pendingAvailability = (me.periods || []).filter(period => period.is_open && !period.deadline_passed && !period.submission).length;
+  const pendingAvailability = answerableMonths(me).filter(period => !period.submission || period.reopened).length;
   const counts = { roster: me.pending_acknowledgements?.length || 0, availability: pendingAvailability, inbox: Number(me.unread_notifications) || 0 };
 
   return (
@@ -112,8 +116,9 @@ export default function Coaching({ client: injected = null }) {
           </button>
         ))}
       </div>
+      {error && <div className="mb-4"><Banner tone="warning" title="Couldn’t refresh" action={<button type="button" className={GHOST} onClick={loadMe}>Try again</button>}>{error.message} Showing what was last loaded.</Banner></div>}
       <section id="coach-panel" role="tabpanel" aria-labelledby={`coach-tab-${tab}`}>
-        {tab === 'home' && <CoachHome client={client} me={me} today={today} joined={location.state?.joined || null} counts={counts} />}
+        {tab === 'home' && <CoachHome client={client} me={me} today={today} joined={location.state?.joined || null} />}
         {tab === 'roster' && <CoachRoster client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'availability' && <CoachAvailability client={client} me={me} monthParam={params.get('month') || ''} setMonthParam={value => setParam('month', value)} notify={notify} onChanged={loadMe} />}
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}

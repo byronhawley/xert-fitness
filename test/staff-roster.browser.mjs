@@ -303,7 +303,7 @@ try {
     }
     if (shots) await page.screenshot({ path: `${shots}/05-publish-review.png` });
     await publish.click();
-    await page.getByText(/^Version 1 published/).first().waitFor();
+    await page.getByText(/ roster published$/).first().waitFor();
     const { rows } = await db.query(`select state, number from public.staff_roster_revisions`);
     assert.deepEqual(rows.map(row => row.state), ['published']);
     const notices = await db.query(`select count(*)::int as n, count(*) filter (where email_status <> 'not_requested')::int as emailed from public.staff_notifications where kind = 'roster_published'`);
@@ -443,7 +443,7 @@ try {
   await step('manager approves the volunteer: one new published version, original coach released', async () => {
     await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterTab=requests`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: `Approve ${volunteer.name}` }).click();
-    await page.getByText(/approved\. A new roster version is published/).first().waitFor();
+    await page.getByText(/approved\. The published roster now shows them/).first().waitFor();
     const revisions = await db.query(`select number, state from public.staff_roster_revisions order by number`);
     assert.deepEqual(revisions.rows.map(row => `${row.number}:${row.state}`), ['1:superseded', '2:published']);
     const holder = await db.query(`select m.display_name from public.staff_assignments a join public.staff_roster_revisions r on r.id = a.revision_id and r.state = 'published'
@@ -458,8 +458,8 @@ try {
     await jordan.page.getByRole('button', { name: 'I need time away' }).click();
     const sheet = jordan.page.getByRole('dialog', { name: 'Time away' });
     await sheet.getByRole('radio', { name: 'Can’t make it (urgent)' }).click();
-    await sheet.getByLabel('From', { exact: true }).fill(firstMonday);
-    await sheet.getByLabel('Until', { exact: true }).fill(firstMonday);
+    await sheet.getByLabel('First day away', { exact: true }).fill(firstMonday);
+    await sheet.getByLabel('Last day away', { exact: true }).fill(firstMonday);
     await sheet.getByRole('button', { name: 'Tell the manager now' }).click();
     await jordan.page.getByText(/The manager has been told/).first().waitFor();
     await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterView=week&rosterDate=${firstMonday}`, { waitUntil: 'networkidle' });
@@ -467,7 +467,16 @@ try {
     await attention.getByRole('heading').waitFor();
     const firstItem = (await attention.getByRole('button').first().textContent()) || '';
     assert.match(firstItem, /Jordan Synthetic reported an urgent absence/, `first Needs Attention item was: ${firstItem}`);
+    // The Requests tab says a decision is waiting, from any tab.
+    await page.getByRole('radio', { name: /^Requests \(\d+\)$/ }).waitFor();
     if (shots) await page.screenshot({ path: `${shots}/10-manager-needs-attention.png`, fullPage: true });
+  });
+
+  await step('five sections: an old Activity link opens Settings with the history showing', async () => {
+    await page.goto(`${origin}/admin/roster?rosterMonth=${MONTH}&rosterTab=activity`, { waitUntil: 'networkidle' });
+    await page.getByRole('radio', { name: 'Settings', checked: true }).waitFor();
+    assert.equal(await page.getByRole('radio', { name: 'Activity' }).count(), 0);
+    await page.locator('details[open] > summary', { hasText: 'History' }).waitFor();
   });
 
   // Manager push destinations open /admin/roster?rosterTab=…&rosterMonth=… in
@@ -663,7 +672,9 @@ try {
     await phone.goto(`${origin}/coaching`, { waitUntil: 'networkidle' });
     await phone.getByRole('heading', { name: 'Hours coached' }).waitFor();
     await phone.getByText(/Not a timesheet or payroll record/).waitFor();
-    await phone.getByText('Coach profile for the website').waitFor();
+    await phone.getByText('Coach profile for the website').waitFor({ state: 'attached' });
+    await phone.getByRole('heading', { name: /^To do/ }).waitFor();
+    assert.equal(await phone.getByRole('navigation', { name: 'Coach shortcuts' }).count(), 0, 'Home no longer repeats the tabs as shortcuts');
     if (shots) await phone.screenshot({ path: `${shots}/20-coach-home-dashboard-phone.png`, fullPage: true });
   });
 
@@ -836,7 +847,7 @@ try {
     await dialog.getByRole('heading', { name: 'Classes still without a coach' }).waitFor();
     if (await dialog.getByText(/required spots? (is|are) still open/).count()) await dialog.getByLabel(/Why publish with empty spots/).fill('Synthetic demo: texts check');
     await dialog.getByRole('button', { name: /^Publish/ }).click();
-    await dialog.getByText(/^Version \d+ of .* is published$/).waitFor();
+    await dialog.getByText(/^.* roster is published$/).waitFor();
     return { dialog, staffId: target.staff_id };
   };
 

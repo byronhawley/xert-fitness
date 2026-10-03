@@ -146,6 +146,11 @@ export function rosterSmsReason(reason) {
   return 'not delivered';
 }
 
+/** Names of coaches whose failed text may still have arrived (no answer from the SMS service). */
+export function maybeDelivered(messages = []) {
+  return (Array.isArray(messages) ? messages : []).filter(row => row.status === 'failed' && /^UNCONFIRMED/.test(row.reason || '')).map(row => row.name || 'a coach');
+}
+
 /**
  * "4 sent, 1 no mobile number (Cam)" for a revision's texts
  * (`staff_roster_sms_status(...).messages`).
@@ -166,5 +171,5 @@ export function rosterSmsSummary(messages = []) {
     groups.get(key).push(row.name || 'a coach');
   }
   for (const [label, names] of groups) parts.push(`${names.length} ${label} (${names.join(', ')})`);
-  return parts.length ? parts.join(', ') : 'No texts for this version';
+  return parts.length ? parts.join(', ') : 'No texts for this publish';
 }

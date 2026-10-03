@@ -127,14 +127,20 @@ export default function RosterBoard({ month, today, data, settings, filters, set
     if (coach && !(ctx.bySession.get(session.id) || []).some(item => item.staffId === coach)) return false;
     return true;
   };
-  const monthSessionIds = useMemo(() => [...ctx.sessions.values()].filter(session => session.inMonth).map(session => session.id), [ctx]);
+  // Coverage counts classes still to come, like the month steps, so the two never disagree mid-month.
+  const monthSessionIds = useMemo(() => [...ctx.sessions.values()].filter(session => session.inMonth && session.start > ctx.now).map(session => session.id), [ctx]);
   const coverage = useMemo(() => coverageReport(ctx, monthSessionIds), [ctx, monthSessionIds]);
   const shortageIds = useMemo(() => new Set(coverage.shortages.flatMap(item => item.sessionIds)), [coverage]);
   const attention = useMemo(() => needsAttention(snapshot, { today, now: ctx.now }), [snapshot, today, ctx.now]);
   const plannable = session => session.inMonth && session.start > ctx.now && LIVE_SESSION_STATUSES.includes(session.status);
   const viewSessionIds = dates.flatMap(date => sessionsByDate.get(date) || []).filter(plannable).map(session => session.id);
   const monthPlannableIds = useMemo(() => [...ctx.sessions.values()].filter(session => session.inMonth && session.start > ctx.now && LIVE_SESSION_STATUSES.includes(session.status)).map(session => session.id), [ctx]);
-  const suggestIds = suggestWholeMonth ? monthPlannableIds : selected.size ? [...selected] : viewSessionIds;
+  // Memoised: a new array each render would re-run the suggestion on every re-render.
+  const viewKey = viewSessionIds.join(',');
+  const suggestIds = useMemo(() => (suggestWholeMonth ? monthPlannableIds : selected.size ? [...selected] : viewKey ? viewKey.split(',') : []),
+    [suggestWholeMonth, monthPlannableIds, selected, viewKey]);
+  // A preview or selection belongs to the days it was made on.
+  useEffect(() => { setCopyPreview(null); setSelected(current => (current.size ? new Set() : current)); }, [anchor, view]);
 
   useEffect(() => {
     if (!intent) return;
@@ -163,7 +169,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
     const previous = thisWeek.map(date => addDays(date, -7));
     const from = [...ctx.sessions.values()].filter(session => previous.includes(gymDateOf(session.start))).map(session => session.id);
     const to = thisWeek.flatMap(date => sessionsByDate.get(date) || []).filter(plannable).map(session => session.id);
-    setCopyPreview(copyWeekSuggestions(ctx, { fromSessionIds: from, toSessionIds: to, offsetMs: 7 * DAY_MS }));
+    setCopyPreview({ ...copyWeekSuggestions(ctx, { fromSessionIds: from, toSessionIds: to, offsetMs: 7 * DAY_MS }), noSource: from.length === 0, otherMonth: previous.some(date => date.slice(0, 7) !== month) });
   };
   const drawerSession = drawer ? ctx.sessions.get(drawer.sessionId) : null;
   const drawerReadOnly = drawerSession && !plannable(drawerSession)
@@ -175,7 +181,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
   return (
     <div className="space-y-4">
       <Notice tone={draft ? 'warning' : published ? 'success' : 'info'}
-        title={draft ? 'Draft — coaches can’t see these changes yet' : published ? 'Published — coaches can see this roster' : 'Nothing published for this month yet'}
+        title={draft ? 'Draft — coaches can’t see these changes yet' : published ? (settings?.enabled === false ? 'Published — coaches will see it once coach screens are on' : 'Published — coaches can see this roster') : 'Nothing published for this month yet'}
         action={<div className="flex flex-wrap gap-2">
           {draft && <AdminButton variant="ghost" disabled={busy} onClick={onDiscard}>Discard draft</AdminButton>}
           <AdminButton disabled={busy || !draft} onClick={() => setPublishOpen(true)} aria-describedby={!draft ? 'roster-publish-why' : undefined}>Review & publish</AdminButton>
@@ -212,7 +218,7 @@ export default function RosterBoard({ month, today, data, settings, filters, set
       <div className="staff-roster-layout">
         <div className="min-w-0 space-y-3">
           <p className={ADMIN_TEXT.lede} aria-live="polite">
-            {coverage.totals.filledPositions} of {coverage.totals.requiredPositions} coaching spots filled across {coverage.totals.sessions} classes in {monthLabel(month)}.
+            {coverage.totals.filledPositions} of {coverage.totals.requiredPositions} coaching spots filled across {coverage.totals.sessions} upcoming {coverage.totals.sessions === 1 ? 'class' : 'classes'} in {monthLabel(month)}.
             {coverage.dependencies.length > 0 && ` ${coverage.dependencies.length} ${coverage.dependencies.length === 1 ? 'class has' : 'classes have'} only one coach who can take ${coverage.dependencies.length === 1 ? 'it' : 'them'}.`}
           </p>
           {coverage.shortages.length > 0 && (
@@ -242,16 +248,18 @@ export default function RosterBoard({ month, today, data, settings, filters, set
             </div>
           ) : (
             <div className="staff-roster-week-frame"><div className="staff-roster-week" style={view === 'day' ? { gridTemplateColumns: 'minmax(0, 1fr)' } : undefined}>
-              {dates.map(date => {
+              {dates.map((date, index) => {
                 const list = (sessionsByDate.get(date) || []).filter(visible);
                 const other = date.slice(0, 7) !== month;
+                // Say "part of another month" once per run of such days, not on each.
+                const firstOther = other && (index === 0 || dates[index - 1].slice(0, 7) === month);
                 return (
                   <section key={date} className="staff-roster-day" data-other-month={other} aria-label={dayLabel(date)}>
                     <div className="staff-roster-day-heading" data-today={date === today}>
                       <h3 className="font-body text-sm font-semibold text-xert-offwhite">{dayLabel(date)}</h3>
                       {view === 'week' && <button type="button" className="font-body text-xs text-xert-pale/60 underline min-h-11" onClick={() => setFilters({ view: 'day', date })}>Day</button>}
                     </div>
-                    {other && <p className="font-body text-xs text-xert-pale/50">Part of {monthLabel(date.slice(0, 7))}. Switch month to plan it.</p>}
+                    {firstOther && <p className="font-body text-xs text-xert-pale/50">Part of {monthLabel(date.slice(0, 7))}. Switch month to plan it.</p>}
                     {!other && list.length === 0 && <p className="font-body text-xs text-xert-pale/45">No classes{filters.gapsOnly === '1' || coach ? ' match' : ''}.</p>}
                     {list.map(session => (
                       <SessionCard key={session.id} ctx={ctx} session={session} coverage={coverage.bySession[session.id]} shortage={shortageIds.has(session.id)}
@@ -305,7 +313,8 @@ export default function RosterBoard({ month, today, data, settings, filters, set
             {copyPreview.proposals.slice(0, 8).map(item => <li key={item.id}>+ {staffName(ctx, item.staffId)} · {sessionLabel(ctx.sessions.get(item.sessionId))}</li>)}
             {copyPreview.skipped.slice(0, 8).map(item => <li key={item.id} className="text-status-warning-200">{staffName(ctx, item.staffId)} · {sessionLabel(ctx.sessions.get(item.sessionId))}: {item.reason}</li>)}
           </ul>
-          Only the same coach in the same class time is copied, and only where they’re still available and free.
+          {copyPreview.noSource ? (copyPreview.otherMonth ? `Last week is part of the ${monthLabel(addMonths(month, -1))} roster, so there’s nothing here to copy from. Use Suggest coaches for this week instead.` : 'Last week had no classes with coaches to copy.')
+            : 'Only the same coach in the same class time is copied, and only where they’re still available and free.'}
         </Notice>
       )}
     </div>

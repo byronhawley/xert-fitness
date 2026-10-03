@@ -64,8 +64,8 @@ test('Publish dialog: "Texts: 4 sent, 1 no mobile number (Cam)" and a resend but
 test('Publish dialog after publishing: the notice count, then the texts', async () => {
   const { PublishedView } = await server.ssrLoadModule('/src/components/admin/staffRoster/PublishDialog.jsx');
   const html = renderToStaticMarkup(React.createElement(PublishedView, { result: { ok: true, number: 2, affected_staff: ['a', 'b'] }, month: '2026-12', client: null }));
-  assert.match(html, /Version 2 of December 2026 is published/);
-  assert.match(html, /2 coaches have a notice in their app inbox/);
+  assert.match(html, /December 2026 roster is published/);
+  assert.match(html, /2 coaches have a notice in their coach inbox/);
 });
 
 test('Coaches tab: "No mobile" only for active, signed-in coaches without a valid Australian mobile', async () => {

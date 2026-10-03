@@ -30,6 +30,9 @@ test('checklist: submitted, past-deadline and no-period months read honestly', (
   const closed = coachChecklist(me({ periods: [period('2026-12', { deadline_passed: true })] }));
   assert.equal(closed[1].done, null, 'a missed deadline is not a to-do the coach can act on');
   assert.equal(answerableMonths(me({ periods: [period('2026-12', { deadline_passed: true, reopened: true })] })).length, 1, 'a reopened month is answerable');
+  const reopened = coachChecklist(me({ periods: [period('2026-12', { deadline_passed: true, reopened: true, submission: { version: 1 } })] }));
+  assert.equal(reopened[1].done, false, 'a month the manager reopened is a to-do even with an earlier submission');
+  assert.match(reopened[1].detail, /reopened it for you/);
   const acks = coachChecklist(me({ pending_acknowledgements: [{ month: '2026-12-01', revision_id: 'r', number: 2 }] }));
   assert.equal(acks.find(row => row.key === 'roster').done, false);
 });
@@ -98,20 +101,21 @@ const server = await createServer({ configFile: false, resolve: { alias: { '@': 
   optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true, watch: null }, appType: 'custom' });
 after(() => server.close());
 
-test('Home renders the checklist, next classes and shortcuts', async () => {
+test('Home renders what needs the coach, then next classes; done items fold away', async () => {
   const { CoachHomeView, tabHref } = await server.ssrLoadModule('/src/components/coaching/CoachHome.jsx');
   const { MemoryRouter } = await server.ssrLoadModule('react-router-dom');
   const render = props => renderToStaticMarkup(React.createElement(MemoryRouter, null, React.createElement(CoachHomeView, props)));
   const upcoming = [{ assignment_id: 'a1', start: '2026-12-02T19:15:00Z', end: '2026-12-02T20:00:00Z', title: 'Synthetic Strength', role: 'lead', colleagues: [{ display_name: 'Other Coach' }] }];
   const html = render({ me: me({ periods: [period('2026-12')], unread_notifications: 1 }), today: '2026-12-01', upcoming, joined: 'Synthetic Coach', counts: { availability: 1, inbox: 1 } });
   assert.match(html, /Welcome to the XERT coach roster, Synthetic Coach/);
-  assert.match(html, /Getting set up · 2 to do/);
+  assert.match(html, /To do · 2/);
+  assert.match(html, /<details[^>]*><summary[^>]*>Done and up to date \(2\)/);
   assert.match(html, /Availability for December 2026/);
   assert.match(html, /href="\/coaching\?tab=availability&amp;month=2026-12"/);
   assert.match(html, /Synthetic Strength/);
   assert.match(html, /with Other Coach/);
-  assert.match(html, /aria-label="Coach shortcuts"/);
-  for (const tab of ['availability', 'roster', 'requests', 'inbox']) assert.ok(html.includes(`href="${tabHref(tab).replace('&', '&amp;')}"`), tab);
+  assert.doesNotMatch(html, /Coach shortcuts/);
+  for (const tab of ['roster', 'inbox']) assert.ok(html.includes(`href="${tabHref(tab).replace('&', '&amp;')}"`), tab);
   assert.doesNotMatch(html, /Welcome to the XERT coach roster.*Welcome/);
   const loading = render({ me: me(), today: '2026-12-01', upcoming: null });
   assert.match(loading, /Loading your classes/);

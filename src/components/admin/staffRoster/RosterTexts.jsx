@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminButton } from '@/components/admin/ui';
-import { rosterSmsSummary } from '@/lib/staffRoster/sms';
+import { maybeDelivered, rosterSmsSummary } from '@/lib/staffRoster/sms';
 import { Notice } from './rosterBits';
 
 /**
@@ -9,6 +9,9 @@ import { Notice } from './rosterBits';
  * Presentational only; `RosterTexts` below loads and sends.
  */
 export function RosterTextsSummary({ status, sending = false, result = null, busy = false, onRetry = null }) {
+  // Texts the SMS service never answered for may already be on the coach's
+  // phone, so resending them asks first instead of texting twice silently.
+  const [confirming, setConfirming] = useState(false);
   if (!status) return sending ? <p className="font-body text-sm text-xert-pale/70" role="status">Sending texts…</p> : null;
   if (!status.enabled) {
     return <p className="font-body text-xs text-xert-pale/55">Texts are off. Turn on “Text coaches when you publish” in Settings to also text coaches their classes.</p>;
@@ -19,17 +22,24 @@ export function RosterTextsSummary({ status, sending = false, result = null, bus
   }
   const messages = status.messages || [];
   const waiting = (status.counts?.pending || 0) > 0;
+  const maybeSent = maybeDelivered(messages);
   const tone = (status.counts?.failed || 0) > 0 ? 'danger' : messages.some(row => row.status === 'skipped') || waiting ? 'warning' : 'success';
   return (
     <div className="space-y-2">
-      <Notice tone={messages.length ? tone : 'info'} title={messages.length ? `Texts: ${rosterSmsSummary(messages)}` : 'No texts for this version'}
-        action={onRetry && status.retryable > 0 ? <AdminButton variant="ghost" disabled={busy || sending} onClick={onRetry}>Resend failed texts</AdminButton> : null}>
+      <Notice tone={messages.length ? tone : 'info'} title={messages.length ? `Texts: ${rosterSmsSummary(messages)}` : 'No texts for this publish'}
+        action={onRetry && status.retryable > 0 && !confirming ? <AdminButton variant="ghost" disabled={busy || sending} onClick={() => (maybeSent.length ? setConfirming(true) : onRetry())}>Resend failed texts</AdminButton> : null}>
         {sending && 'Sending texts…'}
         {!sending && result?.configured === false && 'Texts are waiting: SMS is not set up on the server yet (Twilio settings in Vercel).'}
         {!sending && result?.error && `${result.error} `}
         {!sending && waiting && result?.configured !== false && 'Some texts haven’t gone yet. They’re tried again the next time you open the roster.'}
         {!sending && !waiting && !messages.length && 'Nobody’s classes changed, so nobody was texted.'}
       </Notice>
+      {confirming && (
+        <Notice tone="warning" title="Some of these may already have arrived"
+          action={<span className="flex gap-2"><AdminButton disabled={busy || sending} onClick={() => { setConfirming(false); onRetry(); }}>Resend anyway</AdminButton><AdminButton variant="ghost" onClick={() => setConfirming(false)}>Cancel</AdminButton></span>}>
+          The SMS service didn’t answer for {maybeSent.join(', ')}, so they may get the text twice. Check with them first if you can.
+        </Notice>
+      )}
       {status.retryable > 0 && <p className="font-body text-xs text-xert-pale/55">Fix missing mobile numbers in the coach’s XERT account (Account details), then resend.</p>}
     </div>
   );

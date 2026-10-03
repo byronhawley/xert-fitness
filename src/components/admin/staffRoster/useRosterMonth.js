@@ -40,9 +40,12 @@ export function useRosterMonth(month, { client: injected = null } = {}) {
 
   useEffect(() => { reload(); }, [reload]);
 
-  const now = useMemo(() => Date.now(), [snapshot]);
-  const draftCtx = useMemo(() => (snapshot ? planningContext(snapshot, { view: 'draft', now }) : null), [snapshot, now]);
-  const publishedCtx = useMemo(() => (snapshot ? planningContext(snapshot, { view: 'published', now }) : null), [snapshot, now]);
+  // While another month loads, the last month's snapshot must never be shown
+  // (or edited) under the new month's name.
+  const current = snapshot && (!snapshot.month || String(snapshot.month).slice(0, 7) === month) ? snapshot : null;
+  const now = useMemo(() => Date.now(), [current]);
+  const draftCtx = useMemo(() => (current ? planningContext(current, { view: 'draft', now }) : null), [current, now]);
+  const publishedCtx = useMemo(() => (current ? planningContext(current, { view: 'published', now }) : null), [current, now]);
 
   /** Runs a mutation, then reloads. Stale versions reload and rethrow so the caller can say so. */
   const mutate = useCallback(async action => {
@@ -59,5 +62,5 @@ export function useRosterMonth(month, { client: injected = null } = {}) {
     }
   }, [client, reload]);
 
-  return { client, snapshot, draftCtx, publishedCtx, error, loading, busy, reload, mutate, now };
+  return { client, snapshot: current, draftCtx, publishedCtx, error, loading, busy, reload, mutate, now };
 }

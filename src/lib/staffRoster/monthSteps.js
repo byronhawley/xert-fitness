@@ -138,7 +138,7 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
     const done = spots.required > 0 ? spots.open === 0 : spots.classes > 0;
     let summary;
     let action;
-    if (spots.classes === 0) { summary = 'No upcoming classes on the timetable for this month.'; action = null; }
+    if (spots.classes === 0) { summary = 'No upcoming classes on the timetable for this month yet. Add them on the class calendar, then come back.'; action = { kind: 'calendar', label: 'Open the class calendar' }; }
     else if (spots.open === 0) { summary = `All ${plural(spots.required, 'coaching spot')} filled across ${plural(spots.classes, 'class', 'classes')}.`; action = { kind: 'roster', label: 'Look over the roster' }; }
     else if (spots.assigned === 0) { summary = `${plural(spots.classes, 'class', 'classes')} need coaches. Suggest fills them from coaches’ answers; you check it first.`; action = { kind: 'suggest', label: 'Suggest a roster' }; }
     else { summary = `${spots.filled} of ${spots.required} spots filled. ${plural(spots.open, 'spot')} still need a coach.`; action = { kind: 'suggest', label: `Fill ${plural(spots.open, 'open spot')}` }; }
@@ -154,7 +154,7 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
     let action = null;
     const target = period?.publish_target_on ? ` Aim to publish by ${dateLabel(period.publish_target_on)}.` : '';
     if (draft) { summary = `You have changes coaches can’t see yet.${target}`; action = { kind: 'publish', label: published ? 'Publish the changes' : 'Publish the roster' }; }
-    else if (published) summary = `Published. Coaches can see their classes${published.gap_count ? `, with ${plural(published.gap_count, 'open spot')}` : ''}.`;
+    else if (published) summary = snapshot.settings?.enabled === false ? 'Published, but coach screens are off, so coaches can’t see it yet.' : `Published. Coaches can see their classes${published.gap_count ? `, with ${plural(published.gap_count, 'open spot')}` : ''}.`;
     else summary = `Nothing published yet.${target}`;
     steps.push({ key: 'publish', title: 'Publish', done, attention: false, summary,
       why: 'Coaches only see the roster once it is published, and get a notice when their classes change.', action });

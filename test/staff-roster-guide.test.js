@@ -202,3 +202,18 @@ test('the Coaches tab names each coach’s state and next step in words', async 
   assert.equal(coachRowState({ status: 'active', profile_id: null }, { status: 'expired' }).label, 'Invite expired');
   assert.equal(coachRowState({ status: 'inactive', profile_id: 'p' }).label, 'Inactive');
 });
+
+test('a month with no classes points at the class calendar instead of a dead end', () => {
+  const result = steps(snapshot({ staff: [coachRow('a')], sessions: [] }));
+  assert.deepEqual(step(result, 'build').action, { kind: 'calendar', label: 'Open the class calendar' });
+  assert.match(step(result, 'build').summary, /Add them on the class calendar/);
+});
+
+test('published with coach screens off never says coaches can see it', () => {
+  const published = { id: 'r1', number: 1, gap_count: 0 };
+  const off = steps(snapshot({ staff: [coachRow('a')], settings: { enabled: false, version: 1 }, published }));
+  assert.match(step(off, 'publish').summary, /coach screens are off/);
+  assert.doesNotMatch(step(off, 'publish').summary, /Coaches can see/);
+  const on = steps(snapshot({ staff: [coachRow('a')], published }));
+  assert.match(step(on, 'publish').summary, /Coaches can see their classes/);
+});
