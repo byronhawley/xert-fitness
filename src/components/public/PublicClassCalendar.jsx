@@ -31,7 +31,7 @@ function dayNumberClasses({ isSelected, isToday, hasSessions }) {
 // `renderSession` lets a page draw its own row for each class on the chosen
 // day (the members' booking page has its own Book buttons); without it the
 // public sign-up card is used.
-export default function PublicClassCalendar({ sessions, bookingsEnabled, onBook, fitbox = null, availability = {}, initialDayKey = null, renderSession = null }) {
+export default function PublicClassCalendar({ sessions, bookingsEnabled = false, onBook = null, fitbox = null, availability = {}, initialDayKey = null, renderSession = null }) {
   // A day known at mount (a link to one class) is selected on the first paint,
   // so the page can scroll straight to that class without waiting a render.
   const [month, setMonth] = useState(() => monthOf(dateFromKey(initialDayKey) || new Date()));
