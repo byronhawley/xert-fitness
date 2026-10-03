@@ -15,6 +15,14 @@ function GeneralSettings({ settings, month, busy, onMutate, children = null }) {
   const [cycle, setCycle] = useState(() => normalizeCycle(settings.cycle));
   const [reminders, setReminders] = useState(() => normalizeReminders(settings.reminders || DEFAULT_REMINDERS));
   const [newPreset, setNewPreset] = useState('');
+  // The reminder boxes keep what's typed and are checked on save, so a
+  // half-typed value is never snapped back or silently replaced.
+  const [daysText, setDaysText] = useState(() => reminders.daysBeforeDue.join(', '));
+  const [sendText, setSendText] = useState(() => clockLabel(reminders.sendMinute));
+  const days = daysText.split(',').map(item => item.trim()).filter(Boolean).map(Number);
+  const daysError = days.some(day => !Number.isInteger(day) || day < 1 || day > 31) ? 'Use whole days from 1 to 31, separated by commas.' : null;
+  const sendMinute = parseClock(sendText);
+  const sendError = sendMinute === null ? 'Use a time like 09:00.' : sendMinute < 6 * 60 || sendMinute > 20 * 60 ? 'Pick a time between 06:00 and 20:00.' : null;
   const parsed = presets.map(parseClock);
   const presetError = parsed.some(value => value === null || value >= 1440) ? 'Use 24-hour times like 05:15 or 17:30.'
     : new Set(parsed).size !== parsed.length ? 'Each preset must be a different time.' : null;
@@ -98,10 +106,11 @@ function GeneralSettings({ settings, month, busy, onMutate, children = null }) {
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <AdminFormField label="Also remind this many days before it’s due" helper="Comma separated, e.g. 3, 1"><input value={reminders.daysBeforeDue.join(', ')} onChange={event => setReminders(current => ({ ...current, daysBeforeDue: event.target.value.split(',').map(item => Number(item.trim())).filter(Number.isInteger) }))} /></AdminFormField>
-          <AdminFormField label="Send at" helper="Gym time, between 06:00 and 20:00"><input value={clockLabel(reminders.sendMinute)} onChange={event => { const minute = parseClock(event.target.value); if (minute !== null) setReminders(current => ({ ...current, sendMinute: minute })); }} /></AdminFormField>
+          <AdminFormField label="Also remind this many days before it’s due" helper="Comma separated, e.g. 3, 1"><input value={daysText} onChange={event => setDaysText(event.target.value)} /></AdminFormField>
+          <AdminFormField label="Send at" helper="Gym time, between 06:00 and 20:00" error={sendError}><input type="time" min="06:00" max="20:00" value={sendText} onChange={event => setSendText(event.target.value)} /></AdminFormField>
         </div>
-        <AdminButton disabled={busy} onClick={() => save({ reminders: normalizeReminders(reminders) }, 'Reminders saved')}>Save reminders</AdminButton>
+        <AdminButton disabled={busy || Boolean(sendError) || Boolean(daysError)} onClick={() => save({ reminders: normalizeReminders({ ...reminders, daysBeforeDue: days, sendMinute: sendMinute }) }, 'Reminders saved')}>Save reminders</AdminButton>
+        {daysError && <p className="font-body text-xs text-status-danger-200">{daysError}</p>}
       </section>
 
       <section className="space-y-3" aria-labelledby="roster-rules">
@@ -151,7 +160,7 @@ function ClassTypeStaffing({ snapshot, busy, onSaveStaffing }) {
                 </div>
                 <p className="font-body text-xs text-xert-pale/60">{staffing.slots.map(slot => `${slot.required ? '' : 'optional '}${slot.role}`).join(', ')}{staffing.prepMinutes || staffing.wrapMinutes ? ` · ${staffing.prepMinutes}/${staffing.wrapMinutes} min before/after` : ''}</p>
                 {editing === type && <StaffingEditor staffing={staffing} busy={busy} allowReset={Boolean(row)} resetLabel="Back to one lead coach"
-                  onSave={async value => { await onSaveStaffing('class_type', type, value, row?.version ?? 0); setEditing(null); }} />}
+                  onSave={async value => { if (await onSaveStaffing('class_type', type, value, row?.version ?? 0)) setEditing(null); }} />}
               </div>
             </li>
           );

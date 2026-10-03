@@ -46,9 +46,13 @@ test('manager roster notices open only the allowlisted web console path', async 
   const workspace = await read('src/components/admin/staffRoster/StaffRosterWorkspace.jsx');
   const aasa = await read('public/.well-known/apple-app-site-association');
 
+  // Every tab the app may name must open in the web workspace: a current tab,
+  // or an older name the workspace still maps (Activity now opens Settings).
   const webTabs = [...workspace.match(/const TABS = \[([\s\S]*?)\];/)[1].matchAll(/value: '([a-z]+)'/g)].map(m => m[1]);
+  const aliases = [...workspace.match(/const TAB_ALIASES = \{([^}]*)\}/)[1].matchAll(/([a-z]+): '([a-z]+)'/g)];
+  for (const [, from, to] of aliases) assert.ok(webTabs.includes(to), `alias ${from} opens a real tab`);
   const nativeTabs = [...links.match(/static let allowedTabs: \[String\] = \[([^\]]*)\]/)[1].matchAll(/"([a-z]+)"/g)].map(m => m[1]);
-  assert.deepEqual(nativeTabs, webTabs, 'native console tabs mirror the web workspace tabs');
+  assert.deepEqual([...nativeTabs].sort(), [...webTabs, ...aliases.map(match => match[1])].sort(), 'native console tabs are exactly the tabs the web workspace opens');
 
   assert.match(links, /static let path = "\/admin\/roster"/);
   assert.match(links, /static let audienceKey = "audience"/);

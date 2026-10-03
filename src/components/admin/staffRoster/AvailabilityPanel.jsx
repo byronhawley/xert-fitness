@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AdminButton, AdminFormField, AdminStatCard, ADMIN_TEXT } from '@/components/admin/ui';
 import { defaultPeriodDates, partMonthStartRange, planPartMonthOpening, planPeriodOpening } from '@/lib/staffRoster/cycle';
 import { suggestedOpening } from '@/lib/staffRoster/monthSteps';
-import { addDays, compareDateKeys, dateInMonth, gymDateOf } from '@/lib/staffRoster/time';
+import { addDays, compareDateKeys, dateInMonth, daysInMonth as daysInMonthOf, gymDateOf } from '@/lib/staffRoster/time';
 import { submissionProgress } from '@/lib/staffRoster/snapshot';
 import { LIVE_SESSION_STATUSES } from '@/lib/staffRoster/validate';
 import { dayLabel, monthLabel, SUBMISSION_LABELS, SUBMISSION_TONE, timeLabel } from './rosterFormat';
@@ -75,7 +75,8 @@ function OpenPartMonth({ month, today, busy, onOpen }) {
   const [publishTargetOn, setPublishTargetOn] = useState('');
   const [editing, setEditing] = useState(false);
   if (!range) {
-    return <Notice tone="warning" title={`It’s too late to ask for ${monthLabel(month)} availability`}>Today is the last day of the month, so there are no classes left to ask about. You can still choose coaches for each class on the Roster tab.</Notice>;
+    const over = today > dateInMonth(month, daysInMonthOf(month));
+    return <Notice tone="warning" title={`It’s too late to ask for ${monthLabel(month)} availability`}>{over ? `${monthLabel(month)} has finished, so there are no classes left to ask about.` : 'Today is the last day of the month, so there are no classes left to ask about.'} You can still choose coaches for each class on the Roster tab.</Notice>;
   }
   let chosen = null;
   let dateProblem = null;

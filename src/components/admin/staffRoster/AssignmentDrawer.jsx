@@ -116,11 +116,11 @@ export default function AssignmentDrawer({ open, onOpenChange, ctx, session, slo
           <section aria-labelledby="roster-staffing">
             <div className="flex items-center justify-between gap-2">
               <h3 id="roster-staffing" className={ADMIN_TEXT.sectionHeading}>Staffing for this class</h3>
-              <AdminButton variant="ghost" aria-expanded={editingStaffing} onClick={() => setEditingStaffing(value => !value)}>{editingStaffing ? 'Close' : 'Change positions'}</AdminButton>
+              <AdminButton variant="ghost" aria-expanded={editingStaffing} onClick={() => setEditingStaffing(value => !value)}>{editingStaffing ? 'Close' : 'Change coaches needed'}</AdminButton>
             </div>
             {!editingStaffing && <p className="font-body text-sm text-xert-pale/60 mt-2">{staffing.slots.map(item => `${item.required ? '' : 'optional '}${ROLE_LABELS[item.role].toLowerCase()}`).join(', ')}{staffing.prepMinutes || staffing.wrapMinutes ? ` · ${staffing.prepMinutes} min before, ${staffing.wrapMinutes} min after` : ''}</p>}
             {editingStaffing && <StaffingEditor staffing={staffing} busy={busy} allowReset resetLabel="Use the class type’s staffing"
-              onSave={async value => { await onSaveStaffing('session', session.id, value, staffingVersion); setEditingStaffing(false); }} />}
+              onSave={async value => { if (await onSaveStaffing('session', session.id, value, staffingVersion)) setEditingStaffing(false); }} />}
           </section>
         )}
       </div>

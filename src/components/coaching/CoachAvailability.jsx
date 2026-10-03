@@ -183,6 +183,9 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
   const [saveState, setSaveState] = useState('idle');
   const [classes, setClasses] = useState([]);
   const [classesReady, setClassesReady] = useState(false);
+  // A failed timetable load must not look like "no classes this month".
+  const [classesError, setClassesError] = useState(null);
+  const [classesTry, setClassesTry] = useState(0);
   const [sheet, setSheet] = useState(null);
   const [step, setStep] = useState('answer');
   const [mode, setMode] = useState('available');
@@ -279,11 +282,12 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
     if (!month) return;
     let live = true;
     setClassesReady(false);
+    setClassesError(null);
     client.monthClasses(month)
       .then(rows => { if (live) { setClasses(monthClassSessions(rows)); setClassesReady(true); } })
-      .catch(() => { if (live) { setClasses([]); setClassesReady(true); } });
+      .catch(failure => { if (live) { setClasses([]); setClassesError(failure); } });
     return () => { live = false; };
-  }, [client, month]);
+  }, [client, month, classesTry]);
 
   const update = next => {
     if (next === payload) return;
@@ -337,7 +341,7 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
       // draft save lands after the submission.
       await flushRef.current();
       const result = await client.submitAvailability(month, payload);
-      notify(`${monthName(month)} submitted${result?.version > 1 ? ` (version ${result.version})` : ''}. You can change it until ${dateName(period.due_on)}.`);
+      notify(period.deadline_passed ? `${monthName(month)} sent to the manager.` : `${monthName(month)} sent to the manager. You can change it until ${dateName(period.due_on)}.`);
       onChanged?.();
     } catch (failure) {
       notify(failure.message, 'error');
@@ -381,7 +385,7 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
 
       {phase === 'closed' && (
         <Banner tone="warning" title="Need to change something?" action={period.change_request_open ? <Pill tone="info">Request sent</Pill> : <button type="button" className={GHOST} onClick={() => setSheet('change')}>Ask the manager</button>}>
-          After the due date the manager has to reopen your availability. If you can’t make a class, use Requests to ask for time away or cover.
+          After the due date the manager has to reopen your availability. If you can’t make a class, use Time off to ask for time away or cover.
         </Banner>
       )}
 
@@ -400,6 +404,11 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
 
           {!payload.noAvailability && (
             <>
+              {classesError && (
+                <Banner tone="danger" title="Couldn’t load the class timetable" action={<button type="button" className={GHOST} onClick={() => setClassesTry(count => count + 1)}>Try again</button>}>
+                  Your answers so far are kept. Try again before choosing days, so you can see which classes are on.
+                </Banner>
+              )}
               <section className="space-y-2" aria-labelledby="days-heading">
                 <h3 id="days-heading" className="coaching-step-heading">1. Your days in {monthName(month)}</h3>
                 <MonthCalendar month={month} states={states} mode={mode} setMode={setMode} selected={selected} ready={classesReady} startsOn={startsOn}
@@ -444,7 +453,7 @@ export default function CoachAvailability({ client, me, monthParam, setMonthPara
           )}
           <div className="coaching-submit-bar">
             {summary && local.errors.length === 0 && <p className="font-body text-xs text-xert-pale/75" aria-live="polite">{summary.sentence}</p>}
-            <button type="button" className={`${BUTTON} w-full`} disabled={local.errors.length > 0} onClick={() => setStep('review')}>Review and submit</button>
+            <button type="button" className={`${BUTTON} w-full`} disabled={local.errors.length > 0 || (!payload.noAvailability && !classesReady)} onClick={() => setStep('review')}>Review and submit</button>
           </div>
         </>
       )}

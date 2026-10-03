@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildRosterSms, rosterSmsLine, rosterSmsLink, rosterSmsReason, rosterSmsSummary, smsSafeText, smsWhen } from '../src/lib/staffRoster/sms.js';
+import { buildRosterSms, maybeDelivered, rosterSmsLine, rosterSmsLink, rosterSmsReason, rosterSmsSummary, smsSafeText, smsWhen } from '../src/lib/staffRoster/sms.js';
 import { smsSegments } from '../src/lib/smsCampaigns.js';
 import { gymInstantIso } from '../src/lib/staffRoster/time.js';
 
@@ -98,7 +98,8 @@ test('the publish dialog summary reads plainly', () => {
     { name: 'Ava', status: 'pending' }, { name: 'Ben', status: 'failed', reason: 'TWILIO_400:21211: invalid' },
     { name: 'Dee', status: 'skipped', reason: 'OPTED_OUT' }, { name: 'Eve', status: 'failed', reason: 'RETRIES_EXHAUSTED:NETWORK: x' },
   ]), '1 sending, 1 failed, not delivered (Ben), 1 turned texts off (Dee), 1 failed, failed after 3 tries (Eve)');
-  assert.equal(rosterSmsSummary([]), 'No texts for this version');
+  assert.equal(rosterSmsSummary([]), 'No texts for this publish');
+  assert.deepEqual(maybeDelivered([{ status: 'failed', reason: 'UNCONFIRMED: timeout', name: 'Ana' }, { status: 'failed', reason: 'NO_MOBILE', name: 'Cam' }, { status: 'sent', name: 'Bo' }]), ['Ana']);
 });
 
 // ─── Sender ─────────────────────────────────────────────────────────────────
