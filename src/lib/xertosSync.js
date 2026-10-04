@@ -2,7 +2,8 @@
 //
 // XERT Fitness is in charge of its class timetable; XertOS keeps a mirror.
 // - The dispatcher, called by pg_cron, sends changed classes to XertOS and,
-//   once a day, the next four weeks as a complete list.
+//   once a day, the next four weeks as a complete list (retried hourly until
+//   XertOS takes it). One class XertOS can't take never holds up the rest.
 // - XertOS sends staff's edits here, signed. They are applied through the same
 //   checks the admin calendar uses, and the class as it now stands is the
 //   answer. A refusal is worded for the staff member who made the edit.
@@ -117,6 +118,8 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
   }
   if (!edit.requestId) edit.requestId = requestHeader(request, 'x-xertos-request-id');
+  // XertOS's connection test: the signature checked out, nothing to change.
+  if (edit.action === 'ping') return json({ ok: true, provider: config.provider }, 200);
 
   const { data, error } = await admin.rpc('xertos_sync_apply_edit', { p_edit: edit });
   if (error) {
@@ -179,6 +182,45 @@ export function summarizeXertosOutcomes(body) {
   }, {});
 }
 
+/** Classes XertOS answered `rejected`, with its reason, for the queue to keep. */
+export function rejectedClasses(body) {
+  const results = Array.isArray(body?.results) ? body.results : [];
+  return results
+    .filter(result => result?.outcome === 'rejected' && typeof result.externalId === 'string')
+    .map(result => ({ externalId: result.externalId, problem: typeof result.problem === 'string' ? result.problem.slice(0, 500) : null }));
+}
+
+/**
+ * The classes a refused push names (`errors[].path` like `classes.3.title`),
+ * so only those wait and the rest go again. Empty when it names none.
+ */
+export function refusedClassIds(result, classes) {
+  if (![400, 422].includes(result?.status)) return [];
+  const errors = Array.isArray(result.body?.errors) ? result.body.errors : [];
+  const ids = new Set();
+  for (const error of errors) {
+    const match = /^classes\.(\d+)(\.|$)/.exec(String(error?.path || ''));
+    const id = match ? classes[Number(match[1])]?.externalId : null;
+    if (typeof id === 'string') ids.add(id);
+  }
+  return [...ids];
+}
+
+async function sendWindow(admin, config, token, trace, fetchImpl) {
+  const { data, error } = await admin.rpc('xertos_sync_window', {});
+  if (error) return { ok: false, status: 500, body: { error: 'Could not read the timetable.' } };
+  if (!data) return { ok: true, status: 200, body: { action: 'window', sent: 0, off: true } };
+  const result = await sendClassesToXertos(config, token, data, `xert-window-${randomUUID()}`, fetchImpl).catch(error => ({ ok: false, status: 0, body: { error: { code: 'UNREACHABLE', message: error.message } } }));
+  await admin.rpc('xertos_sync_window_mark', { p_ok: result.ok });
+  if (!result.ok) {
+    console.error('XertOS window push refused.', { requestId: trace.requestId, problem: xertosProblem(result) });
+    return { ok: false, status: 502, body: { error: 'XertOS did not take the timetable.', problem: xertosProblem(result) } };
+  }
+  const rejected = rejectedClasses(result.body);
+  if (rejected.length) console.warn('XertOS rejected classes.', { requestId: trace.requestId, rejected });
+  return { ok: true, status: 200, body: { action: 'window', sent: data.classes?.length || 0, outcomes: summarizeXertosOutcomes(result.body) } };
+}
+
 /** XERT → XertOS: pg_cron calls this with `Authorization: Bearer <XERTOS_SYNC_DISPATCH_SECRET>`. */
 export async function handleXertosDispatch(request, admin, trace, env = process.env, fetchImpl = fetch) {
   const { json } = trace;
@@ -206,15 +248,8 @@ export async function handleXertosDispatch(request, admin, trace, env = process.
   }
 
   if (action === 'window') {
-    const { data, error } = await admin.rpc('xertos_sync_window', {});
-    if (error) return json({ error: 'Could not read the timetable.' }, 500);
-    if (!data) return json({ action, sent: 0, off: true });
-    const result = await sendClassesToXertos(config, token, data, `xert-window-${randomUUID()}`, fetchImpl).catch(error => ({ ok: false, status: 0, body: { error: { code: 'UNREACHABLE', message: error.message } } }));
-    if (!result.ok) {
-      console.error('XertOS window push refused.', { requestId: trace.requestId, problem: xertosProblem(result) });
-      return json({ error: 'XertOS did not take the timetable.', problem: xertosProblem(result) }, 502);
-    }
-    return json({ action, sent: data.classes?.length || 0, outcomes: summarizeXertosOutcomes(result.body) });
+    const sent = await sendWindow(admin, config, token, trace, fetchImpl);
+    return json(sent.body, sent.status);
   }
 
   const totals = { action, sent: 0, failed: 0, outcomes: {} };
@@ -225,6 +260,8 @@ export async function handleXertosDispatch(request, admin, trace, env = process.
     const classes = Array.isArray(claim.classes) ? claim.classes : [];
     let ok = true;
     let problem = null;
+    let rejected = [];
+    let failedIds = [];
     if (classes.length > 0) {
       const result = await sendClassesToXertos(config, token, { classes }, `xert-push-${claim.lease}`, fetchImpl)
         .catch(error => ({ ok: false, status: 0, body: { error: { code: 'UNREACHABLE', message: error.message } } }));
@@ -233,18 +270,36 @@ export async function handleXertosDispatch(request, admin, trace, env = process.
         for (const [outcome, count] of Object.entries(summarizeXertosOutcomes(result.body))) {
           totals.outcomes[outcome] = (totals.outcomes[outcome] || 0) + count;
         }
+        rejected = rejectedClasses(result.body);
       } else {
         problem = xertosProblem(result);
+        failedIds = refusedClassIds(result, classes);
       }
     }
-    await admin.rpc('xertos_sync_settle', { p_lease: claim.lease, p_ok: ok, p_error: problem });
+    await admin.rpc('xertos_sync_settle', {
+      p_lease: claim.lease,
+      p_ok: ok,
+      p_error: problem,
+      ...(rejected.length ? { p_rejected: rejected } : {}),
+      ...(failedIds.length ? { p_failed: failedIds } : {}),
+    });
+    if (rejected.length) console.warn('XertOS rejected classes.', { requestId: trace.requestId, rejected });
     if (!ok) {
-      totals.failed += classes.length;
+      totals.failed += failedIds.length || classes.length;
       console.error('XertOS push refused.', { requestId: trace.requestId, problem });
+      // Only the named classes wait; the rest go again in the next round.
+      if (failedIds.length && failedIds.length < classes.length) continue;
       break;
     }
     totals.sent += classes.length;
     if (classes.length < CLAIM_LIMIT) break;
+  }
+
+  // A daily window that didn't reach XertOS is tried again here, hourly.
+  const windowDue = await admin.rpc('xertos_sync_window_due', {});
+  if (windowDue?.data === true) {
+    const sent = await sendWindow(admin, config, token, trace, fetchImpl);
+    totals.window = sent.ok ? sent.body.outcomes || {} : { failed: true };
   }
   return json(totals, totals.failed ? 502 : 200);
 }

@@ -5,6 +5,8 @@ import { readFile } from 'node:fs/promises';
 import {
   handleXertosDispatch,
   handleXertosEdit,
+  refusedClassIds,
+  rejectedClasses,
   summarizeXertosOutcomes,
   verifyXertosSignature,
   xertosEditRefusal,
@@ -115,6 +117,33 @@ test('an unsigned or wrongly addressed edit changes nothing', async () => {
   assert.equal(admin.calls.length, 0);
 });
 
+test('a signed ping from XertOS is answered and changes nothing', async () => {
+  const body = JSON.stringify({ action: 'ping', requestId: 'r-ping' });
+  const admin = fakeAdmin({});
+  const result = await handleXertosEdit(
+    request({ body, headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': sign(body) } }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, { ok: true, provider: 'xert_fitness' });
+  assert.equal(admin.calls.length, 0);
+  const unsigned = await handleXertosEdit(
+    request({ body, headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': sign(body, NOW, 'wrong-secret-entirely') } }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(unsigned.status, 401);
+});
+
+test('during a secret rotation either signature is enough', async () => {
+  const body = JSON.stringify({ action: 'ping', requestId: 'r-rot' });
+  const header = `v1,k2=${createHmac('sha256', 'the-new-secret-value-123').update(`${NOW}.${body}`).digest('hex')} ${sign(body)}`;
+  const result = await handleXertosEdit(
+    request({ body, headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': header } }),
+    fakeAdmin({}), trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 200);
+});
+
 test('a refused edit comes back as XertOS shows it', async () => {
   const body = JSON.stringify({ action: 'update', externalId: 'a', changes: { capacity: 1 }, requestId: 'r2' });
   const admin = fakeAdmin({ xertos_sync_apply_edit: { data: null, error: { message: 'CAPACITY_BELOW_ACTIVE:2', code: 'P0001' } } });
@@ -168,7 +197,7 @@ test('the dispatcher sends what is due and settles it', async () => {
   assert.equal(calls[1].init.headers.Authorization, 'Bearer tok');
   assert.equal(calls[1].init.headers['Idempotency-Key'], 'xert-push-lease-1');
   assert.deepEqual(calls[1].body, { classes });
-  assert.deepEqual(admin.calls.at(-1), { name: 'xertos_sync_settle', args: { p_lease: 'lease-1', p_ok: true, p_error: null } });
+  assert.deepEqual(admin.calls.find(call => call.name === 'xertos_sync_settle'), { name: 'xertos_sync_settle', args: { p_lease: 'lease-1', p_ok: true, p_error: null } });
 });
 
 test('a refused push is retried later with the reason kept', async () => {
@@ -182,15 +211,86 @@ test('a refused push is retried later with the reason kept', async () => {
   ]);
   const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
   assert.equal(result.status, 502);
-  assert.deepEqual(admin.calls.at(-1), {
+  assert.deepEqual(admin.calls.find(call => call.name === 'xertos_sync_settle'), {
     name: 'xertos_sync_settle',
     args: { p_lease: 'lease-2', p_ok: false, p_error: 'SITE_PAUSED: The connection is paused.' },
   });
 });
 
+test('a class XertOS rejects is settled with its reason and holds nothing up', async () => {
+  const classes = [{ externalId: 'a' }, { externalId: 'b' }];
+  const admin = fakeAdmin({
+    xertos_sync_claim: { data: { lease: 'lease-3', classes }, error: null },
+    xertos_sync_settle: { data: 2, error: null },
+  });
+  const { fetchImpl } = fakeXertos([
+    { status: 200, body: { accessToken: 'tok' } },
+    { status: 200, body: { results: [{ externalId: 'a', outcome: 'rejected', problem: 'The class ends before it starts.' }, { externalId: 'b', outcome: 'created' }] } },
+  ]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  assert.equal(result.status, 200);
+  assert.deepEqual(admin.calls.find(call => call.name === 'xertos_sync_settle').args, {
+    p_lease: 'lease-3',
+    p_ok: true,
+    p_error: null,
+    p_rejected: [{ externalId: 'a', problem: 'The class ends before it starts.' }],
+  });
+});
+
+test('a push refused because of one class retries the others at once', async () => {
+  const first = [{ externalId: 'a' }, { externalId: 'bad' }, { externalId: 'c' }];
+  let claims = 0;
+  const admin = fakeAdmin({
+    xertos_sync_claim: () => {
+      claims += 1;
+      if (claims === 1) return { data: { lease: 'lease-4', classes: first }, error: null };
+      if (claims === 2) return { data: { lease: 'lease-5', classes: [first[0], first[2]] }, error: null };
+      return { data: { lease: null, classes: [] }, error: null };
+    },
+    xertos_sync_settle: { data: 1, error: null },
+  });
+  const { fetchImpl, calls } = fakeXertos([
+    { status: 200, body: { accessToken: 'tok' } },
+    { status: 400, body: { code: 'VALIDATION_FAILED', errors: [{ path: 'classes.1.title', message: 'too long' }] } },
+    { status: 200, body: { results: [{ externalId: 'a', outcome: 'updated' }, { externalId: 'c', outcome: 'updated' }] } },
+  ]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  const settles = admin.calls.filter(call => call.name === 'xertos_sync_settle').map(call => call.args);
+  assert.deepEqual(settles[0], { p_lease: 'lease-4', p_ok: false, p_error: 'VALIDATION_FAILED', p_failed: ['bad'] });
+  assert.deepEqual(settles[1], { p_lease: 'lease-5', p_ok: true, p_error: null });
+  assert.equal(calls.length, 3);
+  assert.equal(result.body.sent, 2);
+  assert.equal(result.body.failed, 1);
+});
+
+test('refused and rejected classes are read from XertOS answers', () => {
+  assert.deepEqual(refusedClassIds({ status: 400, body: { errors: [{ path: 'classes.0.capacity' }, { path: 'window.from' }] } }, [{ externalId: 'x' }]), ['x']);
+  assert.deepEqual(refusedClassIds({ status: 409, body: { errors: [{ path: 'classes.0' }] } }, [{ externalId: 'x' }]), []);
+  assert.deepEqual(rejectedClasses({ results: [{ externalId: 'x', outcome: 'rejected' }, { outcome: 'rejected' }] }), [{ externalId: 'x', problem: null }]);
+});
+
+test('a missed daily window is sent again from the minute run', async () => {
+  const window = { classes: [{ externalId: 'a' }], window: { from: 'f', to: 't', asOf: 'n' } };
+  const admin = fakeAdmin({
+    xertos_sync_claim: { data: { lease: null, classes: [] }, error: null },
+    xertos_sync_window_due: { data: true, error: null },
+    xertos_sync_window: { data: window, error: null },
+    xertos_sync_window_mark: { data: null, error: null },
+  });
+  const { fetchImpl, calls } = fakeXertos([
+    { status: 200, body: { accessToken: 'tok' } },
+    { status: 200, body: { results: [{ outcome: 'unchanged' }] } },
+  ]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.window, { unchanged: 1 });
+  assert.deepEqual(calls[1].body, window);
+  assert.deepEqual(admin.calls.at(-1), { name: 'xertos_sync_window_mark', args: { p_ok: true } });
+});
+
 test('the daily run sends the window as one complete list', async () => {
   const window = { classes: [{ externalId: 'a' }, { externalId: 'b' }], window: { from: '2026-10-04T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' } };
-  const admin = fakeAdmin({ xertos_sync_window: { data: window, error: null } });
+  const admin = fakeAdmin({ xertos_sync_window: { data: window, error: null }, xertos_sync_window_mark: { data: null, error: null } });
   const { fetchImpl, calls } = fakeXertos([
     { status: 200, body: { accessToken: 'tok' } },
     { status: 200, body: { results: [{ outcome: 'unchanged' }, { outcome: 'created' }] } },
@@ -226,4 +326,7 @@ test('the migration keeps one copy of the admin calendar rules and stays off by 
   assert.match(sql, /'public\.xertos_sync_apply_edit\(jsonb\)'/);
   assert.doesNotMatch(sql, /grant execute on function public\.xertos_sync_apply_edit\(jsonb\) to authenticated/);
   assert.match(sql, /exception when others then\s+raise warning 'XertOS sync: class/);
+  // The window says when it was read, so XertOS never removes a class made after it.
+  assert.match(sql, /'asOf', public\.xertos_iso\(now\(\)\)/);
+  assert.match(sql, /'public\.xertos_sync_settle\(uuid, boolean, text, jsonb, text\[\]\)'/);
 });

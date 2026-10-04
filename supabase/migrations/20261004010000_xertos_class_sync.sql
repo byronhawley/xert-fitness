@@ -32,6 +32,10 @@ create table if not exists public.xertos_sync_settings (
   id boolean primary key default true check (id),
   enabled boolean not null default false,
   window_days integer not null default 28 check (window_days between 1 and 62),
+  -- The complete window last reached XertOS, and when it was last tried, so a
+  -- missed daily send is retried within the hour rather than the next day.
+  window_sent_at timestamptz,
+  window_tried_at timestamptz,
   updated_at timestamptz not null default now()
 );
 insert into public.xertos_sync_settings (id) values (true) on conflict (id) do nothing;
@@ -236,6 +240,36 @@ $class_bookings$;
 
 -- ── 4. The dispatcher's side of the queue ──────────────────────────────────
 
+-- Whether the complete window is overdue: none has reached XertOS for a day,
+-- and none was tried in the last hour.
+create or replace function public.xertos_sync_window_due()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select coalesce((
+    select enabled
+       and (window_sent_at is null or window_sent_at < now() - interval '25 hours')
+       and (window_tried_at is null or window_tried_at < now() - interval '1 hour')
+      from public.xertos_sync_settings where id
+  ), false);
+$$;
+
+-- Records a window send: tried now, and sent now when XertOS took it.
+create or replace function public.xertos_sync_window_mark(p_ok boolean)
+returns void
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+  update public.xertos_sync_settings
+     set window_tried_at = now(),
+         window_sent_at = case when p_ok then now() else window_sent_at end
+   where id;
+$$;
+
 -- Whether the scheduler has anything to send. Cheap; pg_cron calls it every minute.
 create or replace function public.xertos_sync_due()
 returns boolean
@@ -245,11 +279,14 @@ security definer
 set search_path = public, pg_temp
 as $$
   select coalesce((select enabled from public.xertos_sync_settings where id), false)
-     and exists (
-       select 1 from public.xertos_class_outbox
-        where sent_changed_at is distinct from changed_at
-          and next_attempt_at <= now()
-          and (leased_until is null or leased_until < now())
+     and (
+       exists (
+         select 1 from public.xertos_class_outbox
+          where sent_changed_at is distinct from changed_at
+            and next_attempt_at <= now()
+            and (leased_until is null or leased_until < now())
+       )
+       or public.xertos_sync_window_due()
      );
 $$;
 
@@ -301,7 +338,19 @@ end;
 $$;
 
 -- Marks a claim sent, or due again later with the reason it wasn't.
-create or replace function public.xertos_sync_settle(p_lease uuid, p_ok boolean, p_error text default null)
+--   p_rejected: classes XertOS answered `rejected` ([{externalId, problem}]).
+--     They count as sent (sending the same copy again can't help) and keep
+--     the problem in last_error, so someone can see why XertOS lacks them.
+--   p_failed: when XertOS refused the whole push because of some classes
+--     (their ids), only those wait and retry; the rest go again straight
+--     away, so one bad class never holds up the others.
+create or replace function public.xertos_sync_settle(
+  p_lease uuid,
+  p_ok boolean,
+  p_error text default null,
+  p_rejected jsonb default null,
+  p_failed text[] default null
+)
 returns integer
 language plpgsql
 security definer
@@ -312,12 +361,29 @@ declare
 begin
   if p_lease is null then return 0; end if;
   if p_ok then
-    update public.xertos_class_outbox
+    update public.xertos_class_outbox box
        set sent_changed_at = claimed_changed_at,
            sent_at = now(),
            attempts = 0,
-           last_error = null,
+           last_error = (
+             select left('XertOS rejected this class: ' || coalesce(item ->> 'problem', 'no reason given'), 1000)
+               from jsonb_array_elements(case when jsonb_typeof(p_rejected) = 'array' then p_rejected else '[]'::jsonb end) item
+              where item ->> 'externalId' = box.session_id::text
+              limit 1
+           ),
            lease_id = null,
+           leased_until = null
+     where lease_id = p_lease;
+  elsif p_failed is not null and cardinality(p_failed) > 0 then
+    update public.xertos_class_outbox
+       set attempts = attempts + 1,
+           next_attempt_at = now() + least(interval '1 minute' * power(2, least(attempts, 6)), interval '1 hour'),
+           last_error = left(coalesce(p_error, 'XertOS did not accept this class.'), 1000),
+           lease_id = null,
+           leased_until = null
+     where lease_id = p_lease and session_id::text = any(p_failed);
+    update public.xertos_class_outbox
+       set lease_id = null,
            leased_until = null
      where lease_id = p_lease;
   else
@@ -356,9 +422,15 @@ begin
     from public.class_sessions s
     cross join lateral public.class_places_held(s.id) as places
    where s.start_time >= v_from and s.start_time < v_to;
+  -- asOf: when this list was read. XertOS leaves alone a class changed after
+  -- it (made since, or by an edit from XertOS) rather than removing it.
   return jsonb_build_object(
     'classes', v_classes,
-    'window', jsonb_build_object('from', public.xertos_iso(v_from), 'to', public.xertos_iso(v_to))
+    'window', jsonb_build_object(
+      'from', public.xertos_iso(v_from),
+      'to', public.xertos_iso(v_to),
+      'asOf', public.xertos_iso(now())
+    )
   );
 end;
 $$;
@@ -720,9 +792,11 @@ begin
     'public.xertos_queue_class(uuid, boolean, jsonb)',
     'public.xertos_class_changed()',
     'public.xertos_booking_changed()',
+    'public.xertos_sync_window_due()',
+    'public.xertos_sync_window_mark(boolean)',
     'public.xertos_sync_due()',
     'public.xertos_sync_claim(integer)',
-    'public.xertos_sync_settle(uuid, boolean, text)',
+    'public.xertos_sync_settle(uuid, boolean, text, jsonb, text[])',
     'public.xertos_sync_window(integer)',
     'public.xertos_sync_apply_edit(jsonb)',
     'public.class_session_update_core(uuid, jsonb)',
@@ -732,9 +806,11 @@ begin
   end loop;
   foreach v_fn in array array[
     'public.xertos_class_payload(uuid)',
+    'public.xertos_sync_window_due()',
+    'public.xertos_sync_window_mark(boolean)',
     'public.xertos_sync_due()',
     'public.xertos_sync_claim(integer)',
-    'public.xertos_sync_settle(uuid, boolean, text)',
+    'public.xertos_sync_settle(uuid, boolean, text, jsonb, text[])',
     'public.xertos_sync_window(integer)',
     'public.xertos_sync_apply_edit(jsonb)'
   ] loop

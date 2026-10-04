@@ -14,12 +14,15 @@
 --        XERTOS_SYNC_DISPATCH_SECRET  a random value of at least 32 characters
 --                                     (openssl rand -hex 32), the scheduler's only identity
 --      and the release containing src/lib/xertosSync.js is live;
---   4. pg_cron and pg_net are enabled (they already are for the roster).
+--   4. pg_cron and pg_net are enabled (they already are for the roster);
+--   5. XertOS's connection test passes: POST /v1/connected-sites/xert_fitness/test
+--      answers ok: true, which proves the write URL and secret match.
 --
 -- What it does: every minute, only when xertos_sync_due() says a class has
 -- changed, ONE HTTPS call sends the changes to XertOS. Once a day at 3:10 am
 -- Brisbane time it sends the next four weeks as a complete list, so anything
--- missed heals itself. XERT Fitness stays in charge: XertOS only mirrors.
+-- missed heals itself; if that list doesn't reach XertOS, the minute job tries
+-- again hourly until it does. XERT Fitness stays in charge: XertOS only mirrors.
 
 -- ── Activate ────────────────────────────────────────────────────────────────
 
@@ -73,7 +76,7 @@ select cron.schedule(
 
 -- ── Check ───────────────────────────────────────────────────────────────────
 
--- select enabled from public.xertos_sync_settings;
+-- select enabled, window_sent_at, window_tried_at from public.xertos_sync_settings;
 -- select count(*) filter (where sent_changed_at is distinct from changed_at) as waiting,
 --        max(last_error) as last_error, max(sent_at) as last_sent
 --   from public.xertos_class_outbox;
