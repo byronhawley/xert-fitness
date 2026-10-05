@@ -37,6 +37,7 @@ import {
   summarizeFitboxMirror,
   toolResultRows,
 } from '../src/lib/fitboxMcp.js';
+import { handleXertosDispatch, handleXertosEdit } from '../src/lib/xertosSync.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1036,6 +1037,9 @@ export default async function handler(request, response) {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   if (requestService(request) === 'callback') return handleFitboxCallback(request, admin, trace);
   if (requestService(request) === 'event') return handleFitboxEvent(request, admin, trace);
+  // XertOS class sync lives here too: the Hobby plan allows twelve functions.
+  if (requestService(request) === 'xertos_edit') return handleXertosEdit(request, admin, trace);
+  if (requestService(request) === 'xertos_dispatch') return handleXertosDispatch(request, admin, trace);
   if (!['GET', 'POST'].includes(request.method)) return json({ error: 'Method not allowed' }, 405);
   const access = await requireAdmin(request, admin);
   if (access.error) return json({ error: access.error }, access.status);
