@@ -53,7 +53,7 @@ export function createFormDraft(type = 'survey', title = '') {
     header_media_type: null, header_media_url: '', header_media_caption: '',
     collect_name: true, collect_name_required: false, collect_email: true,
     collect_email_required: false, collect_phone: false, collect_phone_required: false,
-    one_response_per_email: false, notify_admin: true, email_copy_to_respondent: false,
+    one_response_per_email: false, notify_admin: true, email_copy_to_respondent: false, email_pdf_copy: false,
     tags: [], prerequisite_form_id: null,
   };
 }
@@ -128,7 +128,7 @@ export async function saveOwnerForm(form) {
     'thank_you_message', 'redirect_url', 'header_media_type', 'header_media_url',
     'header_media_caption', 'collect_name', 'collect_name_required', 'collect_email',
     'collect_email_required', 'collect_phone', 'collect_phone_required',
-    'one_response_per_email', 'notify_admin', 'email_copy_to_respondent',
+    'one_response_per_email', 'notify_admin', 'email_copy_to_respondent', 'email_pdf_copy',
     'tags', 'prerequisite_form_id',
   ];
   const payload = Object.fromEntries(allowed.map(key => [key, form[key]]));

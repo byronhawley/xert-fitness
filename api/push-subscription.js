@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { requestHeader, requestJson, sendJson } from '../src/lib/serverHttp.js';
 import { STAFF_ROSTER_PUSH_ACTION, staffRosterPushHandler } from '../src/lib/staffRosterPush.js';
+import { SIGNED_DOCUMENT_ACTION, signedDocumentHandler } from '../src/lib/signedDocumentServer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -35,6 +36,9 @@ export default async function handler(request, response) {
   // with GET ?action=staff_roster_push and its own secret; that handler
   // refuses GET for anyone else.
   if (request.method === 'GET' && queryAction(request) === STAFF_ROSTER_PUSH_ACTION) return staffRosterPushHandler(request, response);
+  // Signed form PDFs share this function for the same reason; the database
+  // posts here when a form that sends one is submitted.
+  if (request.method === 'POST' && queryAction(request) === SIGNED_DOCUMENT_ACTION) return signedDocumentHandler(request, response);
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   let body = null;
   let bodyError = null;
