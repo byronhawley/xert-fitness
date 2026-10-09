@@ -151,9 +151,13 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
   }
-  if (!edit.requestId) edit.requestId = requestHeader(request, 'x-xertos-request-id');
   // XertOS's connection test: the signature checked out, nothing to change.
   if (edit.action === 'ping') return json({ ok: true, provider: config.provider }, 200);
+  // The idempotency key must be inside the signed body. An unsigned transport
+  // header must never choose which durable receipt a write mutates or replays.
+  if (typeof edit.requestId !== 'string' || !edit.requestId.trim()) {
+    return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
+  }
 
   let fingerprint;
   try {

@@ -120,6 +120,39 @@ test('a signed edit is applied and answered with the class as it now stands', as
   }]);
 });
 
+test('write request ids must come from the signed body, not an unsigned header', async () => {
+  const edit = { action: 'update', externalId: 'a', expectedUpdatedAt: '2026-10-04T01:02:03.000Z', changes: { capacity: 10 } };
+  const body = JSON.stringify(edit);
+  const admin = fakeAdmin({});
+  const result = await handleXertosEdit(
+    request({
+      body: JSON.parse(body),
+      headers: {
+        'x-xertos-site': 'xert_fitness',
+        'x-webhook-timestamp': String(NOW),
+        'x-webhook-signature': sign(body),
+        'x-xertos-request-id': 'caller-chosen-id',
+      },
+    }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 422);
+  assert.equal(result.body.error.code, 'INVALID_EDIT');
+  assert.equal(admin.calls.length, 0);
+});
+
+test('calendar edits fail closed without the actual authenticated target', async () => {
+  const edit = { action: 'update', externalId: 'a', expectedUpdatedAt: '2026-10-04T01:02:03.000Z', changes: { capacity: 10 }, requestId: 'r1' };
+  const body = JSON.stringify(edit);
+  const admin = fakeAdmin({});
+  const req = request({ body: JSON.parse(body), headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': sign(body) } });
+  delete req.target;
+  const result = await handleXertosEdit(req, admin, trace(), ENV, NOW);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.error.code, 'INVALID_REQUEST_FINGERPRINT');
+  assert.equal(admin.calls.length, 0);
+});
+
 test('request fingerprints commit to method, target and exact body bytes', () => {
   const target = '/api/xertos-edit?provider=xert_fitness';
   const base = xertosRequestFingerprint({ method: 'post', target, rawBody: '{"a":1}' });
@@ -363,6 +396,15 @@ test('the migration keeps one copy of the admin calendar rules and stays off by 
   // The window says when it was read, so XertOS never removes a class made after it.
   assert.match(sql, /'asOf', public\.xertos_iso\(now\(\)\)/);
   assert.match(sql, /'public\.xertos_sync_settle\(uuid, boolean, text, jsonb, text\[\]\)'/);
+});
+
+test('the legacy edit route retires instead of bypassing exact-byte fingerprints', async () => {
+  const handler = await readFile(new URL('../api/admin-fitbox-integration.js', import.meta.url), 'utf8');
+  const routeIndex = handler.indexOf("requestService(request) === 'xertos_edit'");
+  const legacyCallIndex = handler.indexOf('handleXertosEdit(');
+  assert.ok(routeIndex > 0);
+  assert.equal(legacyCallIndex, -1);
+  assert.match(handler, /ROUTE_RETIRED[\s\S]*\/api\/xertos-webhook/);
 });
 
 test('the fingerprint migration closes the action-only bypass and preserves legacy evidence', async () => {

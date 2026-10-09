@@ -163,7 +163,7 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
   const replayRequest = {
     method: request.method,
     headers: request.headers,
-    target: request.url || '/api/xertos-webhook?provider=xertos',
+    target: request.url,
     text: async () => rawBody,
   };
   return runEdit(replayRequest, response, { now: Math.floor(Date.now() / 1000) });

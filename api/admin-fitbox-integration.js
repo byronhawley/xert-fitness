@@ -37,7 +37,7 @@ import {
   summarizeFitboxMirror,
   toolResultRows,
 } from '../src/lib/fitboxMcp.js';
-import { handleXertosDispatch, handleXertosEdit } from '../src/lib/xertosSync.js';
+import { handleXertosDispatch } from '../src/lib/xertosSync.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1037,8 +1037,12 @@ export default async function handler(request, response) {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   if (requestService(request) === 'callback') return handleFitboxCallback(request, admin, trace);
   if (requestService(request) === 'event') return handleFitboxEvent(request, admin, trace);
-  // XertOS class sync lives here too: the Hobby plan allows twelve functions.
-  if (requestService(request) === 'xertos_edit') return handleXertosEdit(request, admin, trace);
+  // The exact-byte /api/xertos-webhook route now owns signed calendar edits.
+  // This legacy route cannot prove the original target/body bytes for the
+  // receipt fingerprint, so it must fail closed rather than bypass enforcement.
+  if (requestService(request) === 'xertos_edit') {
+    return json({ error: { code: 'ROUTE_RETIRED', message: 'Use /api/xertos-webhook for XertOS calendar edits.' } }, 410);
+  }
   if (requestService(request) === 'xertos_dispatch') return handleXertosDispatch(request, admin, trace);
   if (!['GET', 'POST'].includes(request.method)) return json({ error: 'Method not allowed' }, 405);
   const access = await requireAdmin(request, admin);
