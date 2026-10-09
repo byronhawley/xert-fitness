@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import handler, {
+  client0CalendarWritesEnabled,
   verifyXertosSignature,
   xertosWebhookConfigError,
 } from '../src/lib/xertosWebhook.js';
@@ -235,6 +236,108 @@ test('create, update, and cancel remain deterministic 501 no-op responses', asyn
         message: 'XertOS class edits are not enabled on this endpoint yet.',
       },
     }, payload.action);
+  }
+});
+
+test('Client-0 calendar write gates cannot be partially enabled', () => {
+  assert.equal(client0CalendarWritesEnabled({}), false);
+  assert.equal(client0CalendarWritesEnabled({
+    CLIENT0_SYNC_ENABLED: 'true',
+    CLIENT0_CALENDAR_WRITES_ENABLED: 'false',
+  }), false);
+  assert.equal(client0CalendarWritesEnabled({
+    CLIENT0_SYNC_ENABLED: 'TRUE',
+    CLIENT0_CALENDAR_WRITES_ENABLED: 'True',
+  }), false);
+  assert.equal(client0CalendarWritesEnabled({
+    CLIENT0_SYNC_ENABLED: ' true ',
+    CLIENT0_CALENDAR_WRITES_ENABLED: 'true ',
+  }), false);
+  assert.equal(client0CalendarWritesEnabled({
+    CLIENT0_SYNC_ENABLED: '1',
+    CLIENT0_CALENDAR_WRITES_ENABLED: 'yes',
+  }), false);
+});
+
+test('signed calendar edits stay fail-closed without both write gates and route handler', async () => {
+  const rawBody = JSON.stringify({ action: 'update', externalId: 'class-1', requestId: 'disabled-edit' });
+  let called = false;
+  const res = mockResponse();
+  await handler(
+    request({ rawBody, headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
+    res,
+    { runEdit: () => { called = true; } },
+  );
+  assert.equal(res.statusCode, 501);
+  assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+  assert.equal(called, false);
+});
+
+test('both write gates forward the exact authenticated bytes to the guarded edit handler', async () => {
+  const original = { ...process.env };
+  const rawBody = JSON.stringify({
+    action: 'update',
+    externalId: 'class-1',
+    expectedUpdatedAt: '2026-10-09T01:02:03.000Z',
+    changes: { capacity: 10 },
+    requestId: 'enabled-edit',
+  });
+  try {
+    Object.assign(process.env, {
+      CLIENT0_SYNC_ENABLED: 'true',
+      CLIENT0_CALENDAR_WRITES_ENABLED: 'true',
+    });
+    let received;
+    const res = mockResponse();
+    await handler(
+      request({ rawBody, headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
+      res,
+      {
+        runEdit: async (replayRequest, response, context) => {
+          received = {
+            method: replayRequest.method,
+            body: await replayRequest.text(),
+            provider: replayRequest.headers['x-xertos-site'],
+            nowType: typeof context.now,
+          };
+          return response.status(200).json({ class: { externalId: 'class-1' } });
+        },
+      },
+    );
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, { class: { externalId: 'class-1' } });
+    assert.equal(received.method, 'POST');
+    assert.equal(received.body, rawBody);
+    assert.equal(received.provider, 'xert_fitness');
+    assert.equal(received.nowType, 'number');
+  } finally {
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
+  }
+});
+
+test('the shared handler does not supply production calendar writes by default', async () => {
+  const original = { ...process.env };
+  try {
+    Object.assign(process.env, {
+      CLIENT0_SYNC_ENABLED: 'true',
+      CLIENT0_CALENDAR_WRITES_ENABLED: 'true',
+    });
+    const rawBody = JSON.stringify({ action: 'update', externalId: 'class-1', requestId: 'route-no-handler' });
+    const res = mockResponse();
+    await handler(
+      request({ rawBody, headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
+      res,
+    );
+    assert.equal(res.statusCode, 501);
+    assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+  } finally {
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
   }
 });
 

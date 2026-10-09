@@ -5,6 +5,8 @@ import { requestText, sendJson } from './serverHttp.js';
 export const XERTOS_PROVIDER = 'xert_fitness';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
 
+const CLIENT0_WRITABLE_ACTIONS = new Set(['create', 'update', 'cancel']);
+
 function strictPositiveVersion(value) {
   const text = String(value ?? '').trim();
   if (!/^\d+$/.test(text)) return null;
@@ -43,6 +45,12 @@ function equalHex(left, right) {
 
 export function xertosSecretsAreConfigured(environment = process.env) {
   return configuredSecrets(environment).length > 0;
+}
+
+/** Client-0 calendar edits stay inert unless both explicit gates are true. */
+export function client0CalendarWritesEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true'
+    && environment.CLIENT0_CALENDAR_WRITES_ENABLED === 'true';
 }
 
 export function verifyXertosSignature({
@@ -91,7 +99,7 @@ export function xertosWebhookConfigError(environment = process.env) {
   return null;
 }
 
-export default async function xertosWebhookHandler(request, response) {
+export default async function xertosWebhookHandler(request, response, { runEdit } = {}) {
   if (request.method !== 'POST') return sendJson(response, { error: 'Method not allowed' }, 405);
 
   const configError = xertosWebhookConfigError(process.env);
@@ -127,13 +135,35 @@ export default async function xertosWebhookHandler(request, response) {
 
   if (payload?.action === 'ping') return sendJson(response, { ok: true });
 
-  // Ping-only is the first fail-closed adapter slice. The next slice adds
-  // update/create/cancel through the site's existing booking guards, without
-  // bypassing active booking or cancellation rules.
-  return sendJson(response, {
-    error: {
-      code: 'ACTION_NOT_READY',
-      message: 'XertOS class edits are not enabled on this endpoint yet.',
-    },
-  }, 501);
+  // Unknown verbs never reach the database. The first write slice is exactly
+  // create/update/cancel through the site's existing booking guards.
+  if (!CLIENT0_WRITABLE_ACTIONS.has(payload?.action)) {
+    return sendJson(response, {
+      error: {
+        code: 'ACTION_NOT_READY',
+        message: 'XertOS class edits are not enabled on this endpoint yet.',
+      },
+    }, 501);
+  }
+
+  // The calendar adapter remains fail-closed unless both deployment gates are
+  // explicitly true and the API route supplies its own guarded write handler.
+  if (!client0CalendarWritesEnabled(process.env) || typeof runEdit !== 'function') {
+    return sendJson(response, {
+      error: {
+        code: 'ACTION_NOT_READY',
+        message: 'XertOS class edits are not enabled on this endpoint yet.',
+      },
+    }, 501);
+  }
+
+  // requestText already consumed the stream to authenticate exact bytes. Give
+  // the write handler the same authenticated text without re-reading or
+  // framework re-serialization.
+  const replayRequest = {
+    method: request.method,
+    headers: request.headers,
+    text: async () => rawBody,
+  };
+  return runEdit(replayRequest, response, { now: Math.floor(Date.now() / 1000) });
 }
