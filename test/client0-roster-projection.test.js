@@ -148,6 +148,43 @@ test('rejects every non-published revision state and contradictory supersession'
     }),
     error => error.code === 'REVISION_NOT_PUBLISHED',
   );
+
+  assert.throws(
+    () => projectClient0RosterRevision({
+      revision: {
+        ...publishedRevision,
+        supersededAt: null,
+        superseded_at: '2026-01-01T00:00:00.000Z',
+      },
+      assignments: [],
+      staffPublicNames,
+    }),
+    error => error.code === 'REVISION_FIELD_CONFLICT',
+  );
+});
+
+test('allows empty assignments to project without any staff mapping', () => {
+  const projection = projectClient0RosterRevision({
+    revision: publishedRevision,
+    assignments: [],
+  });
+
+  assert.deepEqual(projection.assignments, []);
+  assert.equal(projectClient0RosterRevision({
+    revision: publishedRevision,
+    assignments: [],
+    staffPublicNames: [],
+  }).assignments.length, 0);
+});
+
+test('requires a staff mapping only when assignments are present', () => {
+  assert.throws(
+    () => projectClient0RosterRevision({
+      revision: publishedRevision,
+      assignments: unsortedAssignments(),
+    }),
+    error => error.code === 'STAFF_MAPPING_REQUIRED',
+  );
 });
 
 test('rejects missing, ambiguous, and invalid staff mappings', () => {
@@ -174,6 +211,62 @@ test('rejects missing, ambiguous, and invalid staff mappings', () => {
       staffPublicNames: [...staffPublicNames, { staffId: staffA, publicCoachName: ' Padded ' }],
     }),
     error => error.code === 'STAFF_MAPPING_INVALID',
+  );
+});
+
+test('fails closed on conflicting and null-bearing staff assignment aliases', () => {
+  const conflictingStaffId = [
+    { sourceStaffId: staffA, staff_id: staffB },
+    { sourceStaffId: null, staff_id: staffA },
+  ];
+  for (const assignment of conflictingStaffId) {
+    assert.throws(
+      () => projectClient0RosterRevision({
+        revision: publishedRevision,
+        assignments: [{
+          ...assignment,
+          session_id: sessionA,
+          slot_key: 'lead',
+          role: 'lead',
+        }],
+        staffPublicNames,
+      }),
+      error => ['REVISION_FIELD_CONFLICT', 'REVISION_FIELD_INVALID'].includes(error.code),
+    );
+  }
+
+  assert.throws(
+    () => projectClient0RosterRevision({
+      revision: publishedRevision,
+      assignments: unsortedAssignments(),
+      staffPublicNames: [
+        { staffId: staffA, publicCoachName: 'Ada Coach', public_coach_name: 'Bo Coach' },
+        { staffId: staffB, publicCoachName: 'Bo Coach' },
+      ],
+    }),
+    error => error.code === 'REVISION_FIELD_CONFLICT',
+  );
+  assert.throws(
+    () => projectClient0RosterRevision({
+      revision: publishedRevision,
+      assignments: unsortedAssignments(),
+      staffPublicNames: [
+        { staffId: staffA, publicCoachName: null, public_coach_name: 'Bo Coach' },
+        { staffId: staffB, publicCoachName: 'Bo Coach' },
+      ],
+    }),
+    error => error.code === 'STAFF_MAPPING_INVALID',
+  );
+  assert.throws(
+    () => projectClient0RosterRevision({
+      revision: publishedRevision,
+      assignments: unsortedAssignments(),
+      staffPublicNames: [
+        { staffId: staffA, sourceStaffId: null, publicCoachName: 'Ada Coach' },
+        { staffId: staffB, publicCoachName: 'Bo Coach' },
+      ],
+    }),
+    error => error.code === 'REVISION_FIELD_INVALID',
   );
 });
 

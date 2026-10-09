@@ -168,8 +168,36 @@ function readAliasedField(source, aliases, normalize) {
   return present[0].value;
 }
 
-function normalizeStaffPublicNames(value) {
-  if (!value) {
+function readOptionalAliasedField(source, aliases, normalize) {
+  const presentAliases = aliases
+    .filter(alias => Object.prototype.hasOwnProperty.call(source, alias) && source[alias] !== undefined);
+  if (presentAliases.length === 0) return null;
+  const hasNull = presentAliases.some(alias => source[alias] === null);
+  const hasNonNull = presentAliases.some(alias => source[alias] !== null);
+  if (hasNull && hasNonNull) {
+    throw new Client0RosterProjectionError(
+      'REVISION_FIELD_CONFLICT',
+      'Client-0 roster projection input has conflicting field aliases.',
+      { fields: presentAliases },
+    );
+  }
+  const present = presentAliases
+    .map(alias => ({ alias, value: normalize(source[alias], alias) }));
+  for (const item of present.slice(1)) {
+    if (item.value !== present[0].value) {
+      throw new Client0RosterProjectionError(
+        'REVISION_FIELD_CONFLICT',
+        'Client-0 roster projection input has conflicting field aliases.',
+        { fields: present.map(item => item.alias) },
+      );
+    }
+  }
+  return present[0].value;
+}
+
+function normalizeStaffPublicNames(value, required) {
+  if (value === undefined || value === null) {
+    if (!required) return new Map();
     throw new Client0RosterProjectionError(
       'STAFF_MAPPING_REQUIRED',
       'Client-0 roster projection requires a staff public-name mapping.',
@@ -195,10 +223,18 @@ function normalizeStaffPublicNames(value) {
         { index },
       );
     }
-    const staffId = normalizeUuid(entry.staffId ?? entry.sourceStaffId ?? entry.staff_id, `staffPublicNames.${index}.staffId`);
-    const publicCoachName = normalizePublicCoachName(
-      entry.publicCoachName ?? entry.public_coach_name,
-      `staffPublicNames.${index}.publicCoachName`,
+    const staffId = readAliasedField(
+      entry,
+      ['staffId', 'sourceStaffId', 'staff_id'],
+      (value, field) => normalizeUuid(value, `staffPublicNames.${index}.${field}`),
+    );
+    const publicCoachName = readAliasedField(
+      entry,
+      ['publicCoachName', 'public_coach_name'],
+      (value, field) => normalizePublicCoachName(
+        value,
+        `staffPublicNames.${index}.publicCoachName`,
+      ),
     );
     if (staffByName.has(staffId)) {
       throw new Client0RosterProjectionError(
@@ -275,7 +311,11 @@ function projectionRevision(revision) {
     'state',
   );
   normalizeOptionalSupersededAt(
-    revision.supersededAt === undefined ? revision.superseded_at : revision.supersededAt,
+    readOptionalAliasedField(
+      revision,
+      ['supersededAt', 'superseded_at'],
+      normalizeOptionalSupersededAt,
+    ),
     'supersededAt',
   );
 
@@ -318,9 +358,6 @@ export function projectClient0RosterRevision({
   assignments,
   staffPublicNames,
 } = {}) {
-  const staffByName = normalizeStaffPublicNames(staffPublicNames);
-  const projectedRevision = projectionRevision(revision);
-
   if (!Array.isArray(assignments)) {
     throw new Client0RosterProjectionError(
       'ASSIGNMENTS_REQUIRED',
@@ -334,6 +371,9 @@ export function projectClient0RosterRevision({
       { limit: CLIENT0_ROSTER_PROJECTION_MAX_ASSIGNMENTS, received: assignments.length },
     );
   }
+
+  const staffByName = normalizeStaffPublicNames(staffPublicNames, assignments.length > 0);
+  const projectedRevision = projectionRevision(revision);
 
   const projectedAssignments = assignments.map((assignment, index) => projectionAssignment(
     assignment,
