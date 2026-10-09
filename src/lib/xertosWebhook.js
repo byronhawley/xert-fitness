@@ -49,8 +49,8 @@ export function xertosSecretsAreConfigured(environment = process.env) {
 
 /** Client-0 calendar edits stay inert unless both explicit gates are true. */
 export function client0CalendarWritesEnabled(environment = process.env) {
-  return String(environment.CLIENT0_SYNC_ENABLED || '').trim().toLowerCase() === 'true'
-    && String(environment.CLIENT0_CALENDAR_WRITES_ENABLED || '').trim().toLowerCase() === 'true';
+  return environment.CLIENT0_SYNC_ENABLED === 'true'
+    && environment.CLIENT0_CALENDAR_WRITES_ENABLED === 'true';
 }
 
 export function verifyXertosSignature({

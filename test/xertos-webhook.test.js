@@ -248,7 +248,11 @@ test('Client-0 calendar write gates cannot be partially enabled', () => {
   assert.equal(client0CalendarWritesEnabled({
     CLIENT0_SYNC_ENABLED: 'TRUE',
     CLIENT0_CALENDAR_WRITES_ENABLED: 'True',
-  }), true);
+  }), false);
+  assert.equal(client0CalendarWritesEnabled({
+    CLIENT0_SYNC_ENABLED: ' true ',
+    CLIENT0_CALENDAR_WRITES_ENABLED: 'true ',
+  }), false);
   assert.equal(client0CalendarWritesEnabled({
     CLIENT0_SYNC_ENABLED: '1',
     CLIENT0_CALENDAR_WRITES_ENABLED: 'yes',
@@ -307,7 +311,10 @@ test('both write gates forward the exact authenticated bytes to the guarded edit
     assert.equal(received.provider, 'xert_fitness');
     assert.equal(received.nowType, 'number');
   } finally {
-    Object.assign(process.env, original);
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
   }
 });
 
@@ -327,7 +334,10 @@ test('the shared handler does not supply production calendar writes by default',
     assert.equal(res.statusCode, 501);
     assert.equal(res.body.error.code, 'ACTION_NOT_READY');
   } finally {
-    Object.assign(process.env, original);
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
   }
 });
 
