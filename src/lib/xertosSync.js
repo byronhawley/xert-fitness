@@ -14,6 +14,7 @@ import { classSessionUpdateRpcError } from './scheduling.js';
 
 export const XERTOS_PROVIDER = 'xert_fitness';
 export const XERTOS_SIGNATURE_TOLERANCE_SECONDS = 300;
+export const XERTOS_FINGERPRINT_VERSION = 'xertos-calendar-request-v1';
 const EDIT_REQUEST_BYTES = 32_768;
 const XERTOS_TIMEOUT_MS = 20_000;
 const CLAIM_LIMIT = 200;
@@ -34,6 +35,30 @@ export function xertosSyncEnvironment(env = {}) {
     sendReady: /^https:\/\//.test(apiUrl) && Boolean(config.clientId && config.clientSecret) && config.dispatchSecret.length >= 32,
     editReady: config.siteSecret.length >= 16,
   };
+}
+
+/** Collapse only URL routing aliases; query order and bytes stay significant. */
+export function canonicalXertosRequestTarget(target) {
+  const value = String(target || '').trim();
+  if (!value) throw new Error('INVALID_REQUEST_FINGERPRINT');
+  const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://xert-fitness.invalid${value.startsWith('/') ? '' : '/'}${value}`);
+  return `${url.pathname}${url.search}`;
+}
+
+/**
+ * Commit to the exact authenticated HTTP request. Node decoded the captured
+ * bytes as UTF-8 for the HMAC boundary; no JSON reserialization occurs.
+ */
+export function xertosRequestFingerprint({ method, target, rawBody }) {
+  const normalizedMethod = String(method || '').trim().toUpperCase();
+  if (normalizedMethod !== 'POST') throw new Error('INVALID_REQUEST_FINGERPRINT');
+  const bodyHash = createHash('sha256').update(String(rawBody || ''), 'utf8').digest('hex');
+  return [
+    XERTOS_FINGERPRINT_VERSION,
+    normalizedMethod,
+    canonicalXertosRequestTarget(target),
+    bodyHash,
+  ].join('\n');
 }
 
 function hashMatch(received, expected) {
@@ -70,6 +95,15 @@ export function xertosEditRefusal(error) {
   }
   if (code === 'SYNC_OFF') {
     return refuse(409, code, "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness.");
+  }
+  if (code === 'IDEMPOTENCY_KEY_REUSED') {
+    return refuse(409, code, 'This request id was already used for a different change. Use a new id; do not retry the changed payload.');
+  }
+  if (code === 'IDEMPOTENCY_RECEIPT_UNVERIFIABLE') {
+    return refuse(409, code, 'XERT Fitness cannot prove what this earlier request id changed. Reconcile the previous outcome, then use a new id.');
+  }
+  if (code === 'INVALID_REQUEST_FINGERPRINT') {
+    return refuse(422, code, 'XERT Fitness could not prove the exact request identity, so nothing changed.');
   }
   if (code === 'SESSION_NOT_FOUND') return refuse(409, code, 'This class no longer exists on XERT Fitness.');
   if (code === 'SESSION_ALREADY_COMPLETED') {
@@ -117,11 +151,29 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
   }
-  if (!edit.requestId) edit.requestId = requestHeader(request, 'x-xertos-request-id');
   // XertOS's connection test: the signature checked out, nothing to change.
   if (edit.action === 'ping') return json({ ok: true, provider: config.provider }, 200);
+  // The idempotency key must be inside the signed body. An unsigned transport
+  // header must never choose which durable receipt a write mutates or replays.
+  if (typeof edit.requestId !== 'string' || !edit.requestId.trim()) {
+    return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
+  }
 
-  const { data, error } = await admin.rpc('xertos_sync_apply_edit', { p_edit: edit });
+  let fingerprint;
+  try {
+    fingerprint = xertosRequestFingerprint({
+      method: request.method,
+      target: request.target,
+      rawBody: body,
+    });
+  } catch {
+    return json({ error: { code: 'INVALID_REQUEST_FINGERPRINT', message: 'XERT Fitness could not prove the exact request identity, so nothing changed.' } }, 422);
+  }
+
+  const { data, error } = await admin.rpc('xertos_sync_apply_edit', {
+    p_edit: edit,
+    p_request_fingerprint: fingerprint,
+  });
   if (error) {
     const refusal = xertosEditRefusal(error);
     if (refusal) return json({ error: { code: refusal.code, message: refusal.message } }, refusal.status);

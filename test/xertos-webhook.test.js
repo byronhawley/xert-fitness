@@ -38,10 +38,11 @@ function mockResponse() {
   };
 }
 
-function request({ method = 'POST', rawBody = '', headers = {}, query } = {}) {
+function request({ method = 'POST', rawBody = '', headers = {}, query, url } = {}) {
   return {
     method,
     query,
+    url,
     headers,
     async *[Symbol.asyncIterator]() {
       if (rawBody) yield Buffer.from(rawBody);
@@ -208,6 +209,13 @@ test('security matrix rejects every unsigned, stale, malformed, or altered reque
 }
 });
 
+test('invalid UTF-8 request bytes fail closed before authentication or fingerprinting', async () => {
+  const res = mockResponse();
+  await handler(request({ rawBody: Buffer.from([0x7b, 0xff, 0x7d]) }), res);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.error.code, 'INVALID_ENCODING');
+});
+
 test('raw request bytes are authenticated before any parsed body is considered', async () => {
   const ping = JSON.stringify({ action: 'ping', requestId: 'req-4' });
   const maliciousParsedBody = JSON.stringify({ action: 'cancel', externalId: 'class-1' });
@@ -290,12 +298,13 @@ test('both write gates forward the exact authenticated bytes to the guarded edit
     let received;
     const res = mockResponse();
     await handler(
-      request({ rawBody, headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
+      request({ rawBody, url: 'https://xert.test/api/stripe-webhook?provider=xertos', headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
       res,
       {
         runEdit: async (replayRequest, response, context) => {
           received = {
             method: replayRequest.method,
+            target: replayRequest.target,
             body: await replayRequest.text(),
             provider: replayRequest.headers['x-xertos-site'],
             nowType: typeof context.now,
@@ -307,6 +316,7 @@ test('both write gates forward the exact authenticated bytes to the guarded edit
     assert.equal(res.statusCode, 200);
     assert.deepEqual(res.body, { class: { externalId: 'class-1' } });
     assert.equal(received.method, 'POST');
+    assert.equal(received.target, 'https://xert.test/api/stripe-webhook?provider=xertos');
     assert.equal(received.body, rawBody);
     assert.equal(received.provider, 'xert_fitness');
     assert.equal(received.nowType, 'number');

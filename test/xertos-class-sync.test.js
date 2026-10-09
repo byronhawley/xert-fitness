@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
+  canonicalXertosRequestTarget,
   handleXertosDispatch,
   handleXertosEdit,
   refusedClassIds,
@@ -10,6 +11,7 @@ import {
   summarizeXertosOutcomes,
   verifyXertosSignature,
   xertosEditRefusal,
+  xertosRequestFingerprint,
   xertosSyncEnvironment,
 } from '../src/lib/xertosSync.js';
 
@@ -34,7 +36,12 @@ function trace() {
 }
 
 function request({ method = 'POST', body, headers = {} }) {
-  return { method, body, headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])) };
+  return {
+    method,
+    body,
+    target: '/api/xertos-edit?provider=xert_fitness',
+    headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
+  };
 }
 
 function fakeAdmin(answers) {
@@ -77,6 +84,13 @@ test('refusals are worded for staff and keep XERT rules', () => {
   assert.equal(xertosEditRefusal({ message: 'STALE_CLASS' }).status, 409);
   assert.match(xertosEditRefusal({ message: 'SESSION_OVERLAPS_BLACKOUT' }).message, /blackout/);
   assert.match(xertosEditRefusal({ message: 'SYNC_OFF' }).message, /Make this change on XERT Fitness/);
+  assert.deepEqual(xertosEditRefusal({ message: 'IDEMPOTENCY_KEY_REUSED' }), {
+    status: 409,
+    code: 'IDEMPOTENCY_KEY_REUSED',
+    message: 'This request id was already used for a different change. Use a new id; do not retry the changed payload.',
+  });
+  assert.equal(xertosEditRefusal({ message: 'IDEMPOTENCY_RECEIPT_UNVERIFIABLE' }).status, 409);
+  assert.equal(xertosEditRefusal({ message: 'INVALID_REQUEST_FINGERPRINT' }).status, 422);
   assert.equal(xertosEditRefusal({ message: 'new row violates check constraint', code: '23514' }).status, 422);
   assert.equal(xertosEditRefusal({ message: 'INVALID_EDIT' }).status, 422);
   assert.equal(xertosEditRefusal({ message: 'something unexpected', code: 'XX000' }), null);
@@ -95,7 +109,60 @@ test('a signed edit is applied and answered with the class as it now stands', as
   );
   assert.equal(result.status, 200);
   assert.deepEqual(result.body, answer);
-  assert.deepEqual(admin.calls, [{ name: 'xertos_sync_apply_edit', args: { p_edit: edit } }]);
+  const expectedFingerprint = xertosRequestFingerprint({
+    method: 'POST',
+    target: '/api/xertos-edit?provider=xert_fitness',
+    rawBody: JSON.stringify(JSON.parse(body)),
+  });
+  assert.deepEqual(admin.calls, [{
+    name: 'xertos_sync_apply_edit',
+    args: { p_edit: edit, p_request_fingerprint: expectedFingerprint },
+  }]);
+});
+
+test('write request ids must come from the signed body, not an unsigned header', async () => {
+  const edit = { action: 'update', externalId: 'a', expectedUpdatedAt: '2026-10-04T01:02:03.000Z', changes: { capacity: 10 } };
+  const body = JSON.stringify(edit);
+  const admin = fakeAdmin({});
+  const result = await handleXertosEdit(
+    request({
+      body: JSON.parse(body),
+      headers: {
+        'x-xertos-site': 'xert_fitness',
+        'x-webhook-timestamp': String(NOW),
+        'x-webhook-signature': sign(body),
+        'x-xertos-request-id': 'caller-chosen-id',
+      },
+    }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 422);
+  assert.equal(result.body.error.code, 'INVALID_EDIT');
+  assert.equal(admin.calls.length, 0);
+});
+
+test('calendar edits fail closed without the actual authenticated target', async () => {
+  const edit = { action: 'update', externalId: 'a', expectedUpdatedAt: '2026-10-04T01:02:03.000Z', changes: { capacity: 10 }, requestId: 'r1' };
+  const body = JSON.stringify(edit);
+  const admin = fakeAdmin({});
+  const req = request({ body: JSON.parse(body), headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': sign(body) } });
+  delete req.target;
+  const result = await handleXertosEdit(req, admin, trace(), ENV, NOW);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.error.code, 'INVALID_REQUEST_FINGERPRINT');
+  assert.equal(admin.calls.length, 0);
+});
+
+test('request fingerprints commit to method, target and exact body bytes', () => {
+  const target = '/api/xertos-edit?provider=xert_fitness';
+  const base = xertosRequestFingerprint({ method: 'post', target, rawBody: '{"a":1}' });
+  assert.match(base, /^xertos-calendar-request-v1\nPOST\n\/api\/xertos-edit\?provider=xert_fitness\n[0-9a-f]{64}$/);
+  assert.notEqual(base, xertosRequestFingerprint({ method: 'POST', target, rawBody: '{"a": 1}' }));
+  assert.notEqual(base, xertosRequestFingerprint({ method: 'POST', target: '/other', rawBody: '{"a":1}' }));
+  assert.throws(() => xertosRequestFingerprint({ method: 'GET', target, rawBody: '{"a":1}' }), /INVALID_REQUEST_FINGERPRINT/);
+  assert.equal(canonicalXertosRequestTarget('https://xert.test/api/x?b=2&a=1'), '/api/x?b=2&a=1', 'query order is not silently normalized');
+  assert.throws(() => xertosRequestFingerprint({ method: 'POST', target: '', rawBody: '{}' }), /INVALID_REQUEST_FINGERPRINT/);
+  assert.equal(xertosRequestFingerprint({ method: 'POST', target, rawBody: '' }).endsWith(`\n${createHash('sha256').update('').digest('hex')}`), true, 'empty body has a deterministic hash');
 });
 
 test('an unsigned or wrongly addressed edit changes nothing', async () => {
@@ -329,4 +396,24 @@ test('the migration keeps one copy of the admin calendar rules and stays off by 
   // The window says when it was read, so XertOS never removes a class made after it.
   assert.match(sql, /'asOf', public\.xertos_iso\(now\(\)\)/);
   assert.match(sql, /'public\.xertos_sync_settle\(uuid, boolean, text, jsonb, text\[\]\)'/);
+});
+
+test('the legacy edit route retires instead of bypassing exact-byte fingerprints', async () => {
+  const handler = await readFile(new URL('../api/admin-fitbox-integration.js', import.meta.url), 'utf8');
+  const routeIndex = handler.indexOf("requestService(request) === 'xertos_edit'");
+  const legacyCallIndex = handler.indexOf('handleXertosEdit(');
+  assert.ok(routeIndex > 0);
+  assert.equal(legacyCallIndex, -1);
+  assert.match(handler, /ROUTE_RETIRED[\s\S]*\/api\/xertos-webhook/);
+});
+
+test('the fingerprint migration closes the action-only bypass and preserves legacy evidence', async () => {
+  const sql = await readFile(new URL('../supabase/migrations/20261009010000_xertos_receipt_fingerprint.sql', import.meta.url), 'utf8');
+  assert.match(sql, /add column if not exists request_fingerprint text/);
+  assert.match(sql, /v_receipt\.request_fingerprint is null then\s+raise exception 'IDEMPOTENCY_RECEIPT_UNVERIFIABLE'/);
+  assert.match(sql, /v_receipt\.request_fingerprint <> v_fingerprint then\s+raise exception 'IDEMPOTENCY_KEY_REUSED'/);
+  assert.match(sql, /insert into public\.xertos_edit_receipts \(request_id, action, session_id, answer, request_fingerprint\)/);
+  assert.match(sql, /create or replace function public\.xertos_sync_apply_edit\(p_edit jsonb\)[\s\S]*raise exception 'IDEMPOTENCY_RECEIPT_UNVERIFIABLE'/);
+  assert.doesNotMatch(sql, /grant execute on function public\.xertos_sync_apply_edit\(jsonb(, text)?\)\s+to (public|anon|authenticated)/);
+  assert.match(sql, /grant execute on function public\.xertos_sync_apply_edit\(jsonb, text\) to service_role/);
 });

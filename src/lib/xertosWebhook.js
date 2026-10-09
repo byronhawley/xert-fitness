@@ -37,6 +37,19 @@ function signaturePayload(secret, timestamp, body) {
   return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex');
 }
 
+/**
+ * Keep the authenticated bytes lossless. A fatal decoder rejects invalid UTF-8;
+ * re-encoding catches any platform decoder that silently alters input.
+ */
+function exactAuthenticatedText(input) {
+  const bytes = Buffer.isBuffer(input) ? input : Buffer.from(String(input ?? ''), 'utf8');
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  if (!Buffer.from(text, 'utf8').equals(bytes)) {
+    throw new Error('NON_LOSSLESS_UTF8');
+  }
+  return text;
+}
+
 function equalHex(left, right) {
   const a = Buffer.from(left, 'utf8');
   const b = Buffer.from(right, 'utf8');
@@ -108,12 +121,16 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
   // Signature verification needs the exact bytes as sent. Do not let framework
   // body parsing reorder or reserialize the JSON before HMAC verification.
   let rawBody;
-  if (typeof request.text === 'function') {
-    rawBody = await request.text();
-  } else {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    rawBody = Buffer.concat(chunks).toString('utf8');
+  try {
+    if (typeof request.text === 'function') {
+      rawBody = exactAuthenticatedText(await request.text());
+    } else {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
+      rawBody = exactAuthenticatedText(Buffer.concat(chunks));
+    }
+  } catch {
+    return sendJson(response, { error: { code: 'INVALID_ENCODING', message: 'Request body must be lossless UTF-8.' } }, 400);
   }
 
   const timestamp = request.headers['x-webhook-timestamp'] || '';
@@ -163,6 +180,7 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
   const replayRequest = {
     method: request.method,
     headers: request.headers,
+    target: request.url,
     text: async () => rawBody,
   };
   return runEdit(replayRequest, response, { now: Math.floor(Date.now() / 1000) });
