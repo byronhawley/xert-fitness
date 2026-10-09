@@ -1,4 +1,4 @@
-import { requestText, sendJson } from '../src/lib/serverHttp.js';
+import { sendJson } from '../src/lib/serverHttp.js';
 import {
   XERTOS_PROVIDER,
   verifyXertosSignature,
@@ -11,7 +11,16 @@ export default async function handler(request, response) {
   const configError = xertosWebhookConfigError(process.env);
   if (configError) return sendJson(response, { error: { code: 'NOT_CONFIGURED', message: configError } }, 500);
 
-  const rawBody = await requestText(request);
+  // Signature verification needs the exact bytes as sent. Do not let framework
+  // body parsing reorder or reserialize the JSON before HMAC verification.
+  let rawBody;
+  if (typeof request.text === 'function') {
+    rawBody = await request.text();
+  } else {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    rawBody = Buffer.concat(chunks).toString('utf8');
+  }
   const timestamp = request.headers['x-webhook-timestamp'] || '';
   const signature = request.headers['x-webhook-signature'] || '';
   if (!verifyXertosSignature({ signatureHeader: signature, timestampHeader: timestamp, rawBody })) {
