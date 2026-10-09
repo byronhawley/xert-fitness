@@ -98,16 +98,68 @@ test('answers a signed ping and refuses unsafe methods', async () => {
   assert.equal(res.statusCode, 405);
 });
 
-test('rejects invalid signatures and does not claim class edit support yet', async () => {
-  const ping = JSON.stringify({ action: 'ping', requestId: 'req-2' });
-  let res = mockResponse();
-  await handler(request({ rawBody: ping, headers: signedHeaders(ping, 'wrong-secret') }), res);
-  assert.equal(res.statusCode, 401);
-  assert.equal(res.body.error.code, 'INVALID_SIGNATURE');
+test('security matrix rejects every unsigned, stale, malformed, or altered request', async () => {
+  const ping = '{ "action": "ping", "requestId": "req-2" }';
+  const now = Math.floor(Date.now() / 1000);
+  const valid = signedHeaders(ping, 'current-secret', 7, now);
+  const cases = [
+    ['wrong secret', signedHeaders(ping, 'wrong-secret', 7, now), ping],
+    ['missing signature', { 'x-webhook-timestamp': String(now) }, ping],
+    ['malformed signature', { 'x-webhook-timestamp': String(now), 'x-webhook-signature': 'v1,k7=zz' }, ping],
+    ['missing timestamp', { 'x-webhook-signature': valid['x-webhook-signature'] }, ping],
+    ['invalid timestamp', { ...valid, 'x-webhook-timestamp': 'not-a-time' }, ping],
+    ['timestamp too old', signedHeaders(ping, 'current-secret', 7, now - 301), ping],
+    ['timestamp too new', signedHeaders(ping, 'current-secret', 7, now + 301), ping],
+    ['raw body mutated', valid, JSON.stringify({ action: 'ping', requestId: 'req-2', extra: true })],
+    ['raw body re-encoded', valid, JSON.stringify(JSON.parse(ping))],
+  ];
 
-  const update = JSON.stringify({ action: 'update', requestId: 'req-3' });
-  res = mockResponse();
-  await handler(request({ rawBody: update, headers: signedHeaders(update) }), res);
-  assert.equal(res.statusCode, 501);
-  assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+  for (const [label, headers, rawBody] of cases) {
+    const res = mockResponse();
+    await handler(request({ rawBody, headers }), res);
+    assert.equal(res.statusCode, 401, label);
+    assert.equal(res.body.error.code, 'INVALID_SIGNATURE', label);
+  }
+});
+
+test('raw request bytes are authenticated before any parsed body is considered', async () => {
+  const ping = JSON.stringify({ action: 'ping', requestId: 'req-4' });
+  const maliciousParsedBody = JSON.stringify({ action: 'cancel', externalId: 'class-1' });
+  const req = request({ rawBody: ping, headers: signedHeaders(ping) });
+  req.body = JSON.parse(maliciousParsedBody);
+  const res = mockResponse();
+  await handler(req, res);
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true });
+});
+
+test('create, update, and cancel remain deterministic 501 no-op responses', async () => {
+  const actions = [
+    { action: 'create', class: {}, requestId: 'create-1' },
+    { action: 'update', externalId: 'class-1', requestId: 'update-1' },
+    { action: 'cancel', externalId: 'class-1', requestId: 'cancel-1' },
+  ];
+  for (const payload of actions) {
+    const rawBody = JSON.stringify(payload);
+    const res = mockResponse();
+    await handler(request({ rawBody, headers: signedHeaders(rawBody) }), res);
+    assert.equal(res.statusCode, 501, payload.action);
+    assert.deepEqual(res.body, {
+      error: {
+        code: 'ACTION_NOT_READY',
+        message: 'XertOS class edits are not enabled on this endpoint yet.',
+      },
+    }, payload.action);
+  }
+});
+
+test('error responses expose neither signing secrets nor signature material', async () => {
+  const rawBody = JSON.stringify({ action: 'update', requestId: 'secret-safety' });
+  const headers = signedHeaders(rawBody, 'wrong-secret');
+  const res = mockResponse();
+  await handler(request({ rawBody, headers }), res);
+  const serialized = JSON.stringify(res.body);
+  for (const forbidden of ['current-secret', 'old-secret', headers['x-webhook-signature']]) {
+    assert.equal(serialized.includes(forbidden), false);
+  }
 });
