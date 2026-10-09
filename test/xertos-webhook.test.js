@@ -91,6 +91,65 @@ test('configuration fails closed without the current secret', () => {
   assert.equal(xertosWebhookConfigError(environment), null);
 });
 
+test('rotation configuration fails closed instead of inheriting or guessing versions', () => {
+  const cases = [
+    ['previous only', {
+      XERTOS_PREVIOUS_WRITE_SECRET: 'old-secret',
+      XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '6',
+    }, 'XERTOS_WRITE_SECRET is not configured'],
+    ['current without version', {
+      XERTOS_WRITE_SECRET: 'current-secret',
+    }, 'XERTOS_WRITE_SECRET_VERSION must be a positive safe integer'],
+    ['malformed current version', {
+      XERTOS_WRITE_SECRET: 'current-secret',
+      XERTOS_WRITE_SECRET_VERSION: 'abc',
+    }, 'XERTOS_WRITE_SECRET_VERSION must be a positive safe integer'],
+    ['zero current version', {
+      XERTOS_WRITE_SECRET: 'current-secret',
+      XERTOS_WRITE_SECRET_VERSION: '0',
+    }, 'XERTOS_WRITE_SECRET_VERSION must be a positive safe integer'],
+    ['unsafe current version', {
+      XERTOS_WRITE_SECRET: 'current-secret',
+      XERTOS_WRITE_SECRET_VERSION: '99999999999999999999',
+    }, 'XERTOS_WRITE_SECRET_VERSION must be a positive safe integer'],
+    ['previous without version', {
+      ...environment,
+      XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '',
+    }, 'XERTOS_PREVIOUS_WRITE_SECRET_VERSION must be a positive safe integer when XERTOS_PREVIOUS_WRITE_SECRET is configured'],
+    ['malformed previous version', {
+      ...environment,
+      XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '6junk',
+    }, 'XERTOS_PREVIOUS_WRITE_SECRET_VERSION must be a positive safe integer when XERTOS_PREVIOUS_WRITE_SECRET is configured'],
+    ['duplicate versions', {
+      XERTOS_WRITE_SECRET: 'current-secret',
+      XERTOS_WRITE_SECRET_VERSION: '7',
+      XERTOS_PREVIOUS_WRITE_SECRET: 'old-secret',
+      XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '7',
+    }, 'XERTOS_WRITE_SECRET_VERSION and XERTOS_PREVIOUS_WRITE_SECRET_VERSION must not match'],
+  ];
+  for (const [label, env, expected] of cases) {
+    assert.equal(xertosWebhookConfigError(env), expected, label);
+  }
+});
+
+test('previous-only configuration cannot authenticate requests', async () => {
+  const original = { ...process.env };
+  try {
+    Object.assign(process.env, {
+      XERTOS_WRITE_SECRET: '',
+      XERTOS_PREVIOUS_WRITE_SECRET: 'old-secret',
+      XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '6',
+    });
+    const ping = JSON.stringify({ action: 'ping', requestId: 'previous-only' });
+    const res = mockResponse();
+    await handler(request({ rawBody: ping, headers: signedHeaders(ping, 'old-secret', 6) }), res);
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.body.error.code, 'NOT_CONFIGURED');
+  } finally {
+    Object.assign(process.env, original);
+  }
+});
+
 test('XertOS rides the existing webhook function within the Hobby ceiling', () => {
   const vercelConfig = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
   assert.deepEqual(
@@ -132,6 +191,8 @@ test('security matrix rejects every unsigned, stale, malformed, or altered reque
     ['malformed signature', { 'x-webhook-timestamp': String(now), 'x-webhook-signature': 'v1,k7=zz' }, ping],
     ['missing timestamp', { 'x-webhook-signature': valid['x-webhook-signature'] }, ping],
     ['invalid timestamp', { ...valid, 'x-webhook-timestamp': 'not-a-time' }, ping],
+    ['timestamp with trailing junk', { ...valid, 'x-webhook-timestamp': `${now}junk` }, ping],
+    ['timestamp with leading junk', { ...valid, 'x-webhook-timestamp': ` ${now}` }, ping],
     ['timestamp too old', signedHeaders(ping, 'current-secret', 7, now - 301), ping],
     ['timestamp too new', signedHeaders(ping, 'current-secret', 7, now + 301), ping],
     ['raw body mutated', valid, JSON.stringify({ action: 'ping', requestId: 'req-2', extra: true })],

@@ -5,18 +5,30 @@ import { requestText, sendJson } from './serverHttp.js';
 export const XERTOS_PROVIDER = 'xert_fitness';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
 
+function strictPositiveVersion(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const version = Number(text);
+  return Number.isSafeInteger(version) && version > 0 ? version : null;
+}
+
 function configuredSecrets(environment) {
   const secrets = [];
   const current = String(environment.XERTOS_WRITE_SECRET || '').trim();
-  const currentVersion = Number.parseInt(environment.XERTOS_WRITE_SECRET_VERSION || '1', 10);
-  if (current) secrets.push({ version: Number.isInteger(currentVersion) && currentVersion > 0 ? currentVersion : 1, secret: current });
+  const currentVersion = strictPositiveVersion(environment.XERTOS_WRITE_SECRET_VERSION);
+  if (current && currentVersion !== null) secrets.push({ version: currentVersion, secret: current });
 
   const previous = String(environment.XERTOS_PREVIOUS_WRITE_SECRET || '').trim();
-  const previousVersion = Number.parseInt(environment.XERTOS_PREVIOUS_WRITE_SECRET_VERSION || '', 10);
-  if (previous && Number.isInteger(previousVersion) && previousVersion > 0) {
+  const previousVersion = strictPositiveVersion(environment.XERTOS_PREVIOUS_WRITE_SECRET_VERSION);
+  if (previous && previousVersion !== null) {
     secrets.push({ version: previousVersion, secret: previous });
   }
-  return secrets;
+  const seen = new Set();
+  return secrets.filter(secret => {
+    if (seen.has(secret.version)) return false;
+    seen.add(secret.version);
+    return true;
+  });
 }
 
 function signaturePayload(secret, timestamp, body) {
@@ -41,7 +53,9 @@ export function verifyXertosSignature({
   now = Math.floor(Date.now() / 1000),
   toleranceSeconds = SIGNATURE_TOLERANCE_SECONDS,
 } = {}) {
-  const timestamp = Number.parseInt(timestampHeader, 10);
+  const timestampText = String(timestampHeader ?? '');
+  if (!/^\d+$/.test(timestampText)) return false;
+  const timestamp = Number(timestampText);
   if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > toleranceSeconds) return false;
 
   return String(signatureHeader || '')
@@ -57,8 +71,23 @@ export function verifyXertosSignature({
 }
 
 export function xertosWebhookConfigError(environment = process.env) {
-  if (!xertosSecretsAreConfigured(environment)) return 'XERTOS_WRITE_SECRET is not configured';
-  if (String(environment.XERTOS_WRITE_SECRET_VERSION || '1').trim() === '') return 'XERTOS_WRITE_SECRET_VERSION is not configured';
+  if (!String(environment.XERTOS_WRITE_SECRET ?? '').trim()) return 'XERTOS_WRITE_SECRET is not configured';
+  if (strictPositiveVersion(environment.XERTOS_WRITE_SECRET_VERSION) === null) {
+    return 'XERTOS_WRITE_SECRET_VERSION must be a positive safe integer';
+  }
+
+  const previous = String(environment.XERTOS_PREVIOUS_WRITE_SECRET ?? '').trim();
+  if (previous && strictPositiveVersion(environment.XERTOS_PREVIOUS_WRITE_SECRET_VERSION) === null) {
+    return 'XERTOS_PREVIOUS_WRITE_SECRET_VERSION must be a positive safe integer when XERTOS_PREVIOUS_WRITE_SECRET is configured';
+  }
+
+  const currentVersion = strictPositiveVersion(environment.XERTOS_WRITE_SECRET_VERSION);
+  const previousVersion = strictPositiveVersion(environment.XERTOS_PREVIOUS_WRITE_SECRET_VERSION);
+  if (previous && currentVersion === previousVersion) {
+    return 'XERTOS_WRITE_SECRET_VERSION and XERTOS_PREVIOUS_WRITE_SECRET_VERSION must not match';
+  }
+
+  const secrets = configuredSecrets(environment);
   return null;
 }
 
