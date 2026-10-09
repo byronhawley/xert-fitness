@@ -24,7 +24,7 @@ const server = await createServer({
     resolveId(source) {
       // By alias from components, or next door from inside src/lib.
       if (/(^\.\/|\/src\/lib\/)supabase(\.js)?$/.test(source)) return '\0signup-supabase';
-      if (/(^\.\/|\/src\/lib\/)SupabaseAuthContext(\.jsx)?$/.test(source)) return '\0signup-auth';
+      if (/SupabaseAuthContext(?:\.jsx)?$/.test(source)) return '\0signup-auth';
       return null;
     },
     load(id) {

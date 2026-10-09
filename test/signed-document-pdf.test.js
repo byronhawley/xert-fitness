@@ -9,7 +9,7 @@ import {
 import { signedDocumentHandler } from '../src/lib/signedDocumentServer.js';
 import { XERT_CONTRACTOR_FORM_DEFINITION } from '../src/lib/xertContractorForm.js';
 
-const read = path => readFile(new URL(path, import.meta.url), 'utf8');
+const read = async path => (await readFile(new URL(path, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 
 /** A 2x2 PNG, enough to prove a signature is embedded rather than described. */
 const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8//8/AzJgYkAD'

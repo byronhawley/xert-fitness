@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const root = new URL('../', import.meta.url);
-const read = (relative) => readFile(new URL(relative, root), 'utf8');
+const normalizeSource = (source) => source.replace(/\r\n/g, '\n');
+const read = async (relative) => normalizeSource(await readFile(new URL(relative, root), 'utf8'));
 const appDir = fileURLToPath(new URL('ios/XertFitnessApp/XertFitnessApp/', root));
 
 async function swiftFiles(dir) {
@@ -121,7 +122,7 @@ test('UI-test fixtures compile only into DEBUG builds and block the network', as
 
   const fixtureSymbols = /XertUITestFixtures|StaffRosterFixtureService|XertUITestHooks|XertUITestHookOverlay/;
   for (const file of await swiftFiles(appDir)) {
-    const source = await readFile(file, 'utf8');
+    const source = normalizeSource(await readFile(file, 'utf8'));
     const leaks = linesOutsideDebug(source).filter(line => fixtureSymbols.test(line) && !line.trim().startsWith('//') && !line.trim().startsWith('///'));
     assert.deepEqual(leaks, [], `${path.basename(file)} uses fixture code outside #if DEBUG`);
   }
