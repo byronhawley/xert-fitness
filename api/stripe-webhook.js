@@ -6,6 +6,7 @@ import {
 } from '../src/lib/commerceRuntime.js';
 import { createXertStripeClient } from '../src/lib/serverStripeClient.js';
 import { casualVisitPaymentFromCheckout } from '../src/lib/casualVisit.js';
+import xertosWebhookHandler from '../src/lib/xertosWebhook.js';
 
 // Stripe calls this after a successful checkout. We verify the signature,
 // record the paid order, and grant the member their session credits.
@@ -484,6 +485,13 @@ export async function processStripeEvent(admin, event, {
 }
 
 export default async function handler(request, response) {
+  // XertOS rewrites /api/xertos-webhook here so the Hobby deployment keeps its
+  // existing twelve-function ceiling. Branch before any Stripe environment or
+  // payment client is touched.
+  if (request.query?.provider === 'xertos') {
+    return xertosWebhookHandler(request, response);
+  }
+
   const trace = createRequestTrace(response);
   const { json, text } = trace;
   if (request.method !== 'POST') return text('Method not allowed', 405);
