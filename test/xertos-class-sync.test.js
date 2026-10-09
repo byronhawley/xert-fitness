@@ -380,9 +380,11 @@ test('sync is served by an existing function, not a thirteenth', async () => {
   assert.match(vercel, /"\/api\/xertos\/classes"[\s\S]*?admin-fitbox-integration\?service=xertos_edit/);
   assert.match(vercel, /"\/api\/xertos\/dispatch"[\s\S]*?admin-fitbox-integration\?service=xertos_dispatch/);
   // Both are routed before the admin sign-in check: XertOS and pg_cron have no member session.
-  const adminCheck = handler.indexOf('await requireAdmin(request, admin)');
-  assert.ok(handler.indexOf("=== 'xertos_edit'") > 0 && handler.indexOf("=== 'xertos_edit'") < adminCheck);
-  assert.ok(handler.indexOf("=== 'xertos_dispatch'") > 0 && handler.indexOf("=== 'xertos_dispatch'") < adminCheck);
+  const handlerStart = handler.indexOf('export default async function handler');
+  const defaultAdminCheck = handler.indexOf('await requireAdmin(request, admin)', handlerStart);
+  assert.ok(handler.indexOf("=== 'xertos_edit'") > 0 && handler.indexOf("=== 'xertos_edit'") < defaultAdminCheck);
+  assert.ok(handler.indexOf("=== 'xertos_dispatch'") > 0 && handler.indexOf("=== 'xertos_dispatch'") < defaultAdminCheck);
+  assert.ok(defaultAdminCheck > handler.indexOf("=== 'xertos_dispatch'"));
 });
 
 test('the migration keeps one copy of the admin calendar rules and stays off by default', async () => {

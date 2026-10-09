@@ -38,6 +38,7 @@ import {
   toolResultRows,
 } from '../src/lib/fitboxMcp.js';
 import { handleXertosDispatch } from '../src/lib/xertosSync.js';
+import { client0OperatorHealthSnapshot } from '../src/lib/xertosOperatorHealth.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -271,6 +272,19 @@ function requestLeadID(request) {
 
 function requestQuery(request, key) {
   return request.query?.[key] ?? new URL(request.url, 'https://xert.invalid').searchParams.get(key);
+}
+
+/**
+ * Read-only, session-authenticated Client-0 health. This branch deliberately
+ * has no feature flag of its own: authentication and admin role are the gate,
+ * and the returned snapshot never arms or invokes either calendar direction.
+ */
+export async function handleXertosHealth(request, response, admin, trace = createRequestTrace(response)) {
+  const { json } = trace;
+  const access = await requireAdmin(request, admin);
+  if (access.error) return json({ error: access.error }, access.status);
+  if (request.method !== 'GET') return json({ error: 'Method not allowed.' }, 405);
+  return json({ ok: true, health: client0OperatorHealthSnapshot(process.env) }, 200);
 }
 
 function normalizeFitboxEventID(value) {
@@ -1037,6 +1051,7 @@ export default async function handler(request, response) {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   if (requestService(request) === 'callback') return handleFitboxCallback(request, admin, trace);
   if (requestService(request) === 'event') return handleFitboxEvent(request, admin, trace);
+  if (requestService(request) === 'xertos_health') return handleXertosHealth(request, response, admin, trace);
   // The exact-byte /api/xertos-webhook route now owns signed calendar edits.
   // This legacy route cannot prove the original target/body bytes for the
   // receipt fingerprint, so it must fail closed rather than bypass enforcement.

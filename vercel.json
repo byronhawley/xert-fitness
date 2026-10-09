@@ -89,6 +89,10 @@
       "destination": "/api/admin-fitbox-integration?service=xertos_dispatch"
     },
     {
+      "source": "/api/xertos/operator-health",
+      "destination": "/api/admin-fitbox-integration?service=xertos_health"
+    },
+    {
       "source": "/((?!api/|\\.well-known/).*)",
       "destination": "/index.html"
     }
