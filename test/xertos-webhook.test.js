@@ -7,6 +7,7 @@ import handler, {
   verifyXertosSignature,
   xertosWebhookConfigError,
 } from '../src/lib/xertosWebhook.js';
+import stripeWebhookHandler from '../api/stripe-webhook.js';
 
 const environment = {
   XERTOS_WRITE_SECRET: 'current-secret',
@@ -36,9 +37,10 @@ function mockResponse() {
   };
 }
 
-function request({ method = 'POST', rawBody = '', headers = {} } = {}) {
+function request({ method = 'POST', rawBody = '', headers = {}, query } = {}) {
   return {
     method,
+    query,
     headers,
     async *[Symbol.asyncIterator]() {
       if (rawBody) yield Buffer.from(rawBody);
@@ -97,6 +99,17 @@ test('XertOS rides the existing webhook function within the Hobby ceiling', () =
   );
 });
 
+test('the shared webhook handler routes provider=xertos before Stripe setup', async () => {
+  const ping = JSON.stringify({ action: 'ping', requestId: 'rewrite-1' });
+  const res = mockResponse();
+  await stripeWebhookHandler(
+    request({ rawBody: ping, headers: signedHeaders(ping), query: { provider: 'xertos' } }),
+    res,
+  );
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true });
+});
+
 test('answers a signed ping and refuses unsafe methods', async () => {
   const ping = JSON.stringify({ action: 'ping', requestId: 'req-1' });
   let res = mockResponse();
@@ -130,7 +143,7 @@ test('security matrix rejects every unsigned, stale, malformed, or altered reque
     await handler(request({ rawBody, headers }), res);
     assert.equal(res.statusCode, 401, label);
     assert.equal(res.body.error.code, 'INVALID_SIGNATURE', label);
-  }
+}
 });
 
 test('raw request bytes are authenticated before any parsed body is considered', async () => {
