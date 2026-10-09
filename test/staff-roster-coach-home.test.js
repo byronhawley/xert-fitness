@@ -89,11 +89,11 @@ test('the client sends the invite parameters the database expects', async () => 
 test('existing coach links still open the same screens', async () => {
   assert.equal(nativeTaskFallback('/open/coaching/roster'), '/coaching?tab=roster');
   assert.equal(nativeTaskFallback('/open/coaching'), '/coaching', 'the bare link opens the dashboard (now Home)');
-  const page = await readFile(new URL('../src/pages/Coaching.jsx', import.meta.url), 'utf8');
+  const page = (await readFile(new URL('../src/pages/Coaching.jsx', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   for (const tab of ['home', 'roster', 'availability', 'requests', 'inbox']) assert.match(page, new RegExp(`key: '${tab}'`));
   assert.match(page, /: 'home';\n/, 'Home is the default tab');
   assert.match(page, /ROSTER_DISABLED:/, 'the switched-off message is unchanged');
-  const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+  const app = (await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
   assert.match(app, /path="\/coach-invite"/);
 });
 

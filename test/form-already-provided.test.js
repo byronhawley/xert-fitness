@@ -8,7 +8,7 @@ import {
 import { answerValidationMessage } from '../src/lib/formAnswerValidation.js';
 import { XERT_CONTRACTOR_FORM_DEFINITION } from '../src/lib/xertContractorForm.js';
 
-const read = name => readFile(new URL(name, import.meta.url), 'utf8');
+const read = async name => (await readFile(new URL(name, import.meta.url), 'utf8')).replace(/\r\n/g, '\n');
 const email = { id: 'e', type: 'email', question: 'Email', allow_already_provided: true };
 
 test('the tick is only offered on fields whose answer is one piece of text', () => {
