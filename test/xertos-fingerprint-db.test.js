@@ -119,10 +119,20 @@ test('equivalent JSON bytes do not collide, and malformed or legacy fingerprints
     insert into public.xertos_edit_receipts (request_id, action, answer)
     values ($1, 'update', '{"class":{"externalId":"legacy"}}')
   `, [legacyId]);
+  // The retained two-argument execution path must reject null legacy evidence;
+  // the retired one-argument overload is only a separate fail-closed guard.
   await assert.rejects(
-    () => db.query('select public.xertos_sync_apply_edit($1::jsonb) as answer', [JSON.stringify({
-      action: 'update', externalId: '00000000-0000-4000-8000-00000000d1a5', requestId: legacyId,
-    })]),
+    () => db.query('select public.xertos_sync_apply_edit($1::jsonb, $2::text) as answer', [
+      JSON.stringify({
+        action: 'update', externalId: '00000000-0000-4000-8000-00000000d1a5',
+        expectedUpdatedAt: '2026-10-09T00:00:00Z', requestId: legacyId,
+      }),
+      fingerprint(edit({ capacity: 10 }, legacyId)),
+    ]),
     /IDEMPOTENCY_RECEIPT_UNVERIFIABLE/,
   );
+  const unchanged = await db.query(`select capacity from public.class_sessions where id = '00000000-0000-4000-8000-00000000d1a5'`);
+  assert.equal(unchanged.rows[0].capacity, 10, 'legacy rejection leaves the owner class at its current state');
+  const evidence = await db.query(`select request_fingerprint from public.xertos_edit_receipts where request_id = $1`, [legacyId]);
+  assert.equal(evidence.rows[0].request_fingerprint, null);
 });
