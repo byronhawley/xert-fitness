@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
-import handler from '../api/xertos-webhook.js';
-import { verifyXertosSignature, xertosWebhookConfigError } from '../src/lib/xertosWebhook.js';
+import handler, {
+  verifyXertosSignature,
+  xertosWebhookConfigError,
+} from '../src/lib/xertosWebhook.js';
 
 const environment = {
   XERTOS_WRITE_SECRET: 'current-secret',
@@ -84,6 +87,14 @@ test('rejects stale, unknown-version, and mismatched signatures', () => {
 test('configuration fails closed without the current secret', () => {
   assert.equal(xertosWebhookConfigError({}), 'XERTOS_WRITE_SECRET is not configured');
   assert.equal(xertosWebhookConfigError(environment), null);
+});
+
+test('XertOS rides the existing webhook function within the Hobby ceiling', () => {
+  const vercelConfig = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'));
+  assert.deepEqual(
+    vercelConfig.rewrites.find(rewrite => rewrite.source === '/api/xertos-webhook'),
+    { source: '/api/xertos-webhook', destination: '/api/stripe-webhook?provider=xertos' },
+  );
 });
 
 test('answers a signed ping and refuses unsafe methods', async () => {

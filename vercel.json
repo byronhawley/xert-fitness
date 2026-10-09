@@ -69,6 +69,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/xertos-webhook",
+      "destination": "/api/stripe-webhook?provider=xertos"
+    },
+    {
       "source": "/api/fitbox-prospect-result",
       "destination": "/api/admin-fitbox-integration?service=callback"
     },
