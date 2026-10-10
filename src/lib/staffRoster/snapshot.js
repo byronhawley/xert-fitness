@@ -9,7 +9,7 @@
  */
 import { checkAssignment, LIVE_SESSION_STATUSES } from './validate.js';
 import { withIndexes } from './coverage.js';
-import { toMs } from './time.js';
+import { gymInstant, toMs } from './time.js';
 
 export function monthDate(monthKey) {
   return `${monthKey}-01`;
@@ -62,11 +62,20 @@ function toAssignment(row, extra = {}) {
 }
 
 /**
+ * A part-month period (`period.starts_on`) rosters only the classes from that
+ * day. Earlier classes of the month are marked `beforeRosterStart` and treated
+ * like a neighbouring month's: not planned, not counted, never assigned.
  * @param {object} snapshot server snapshot
  * @param {{ view?: 'draft' | 'published', now?: number }} [options]
  */
 export function planningContext(snapshot, { view = 'draft', now = Date.now() } = {}) {
   const sessions = (snapshot.sessions || []).map(toSession);
+  const startsOn = snapshot.period?.starts_on || null;
+  const rosterStart = startsOn ? gymInstant(startsOn, 0) : null;
+  for (const session of sessions) {
+    session.beforeRosterStart = rosterStart != null && session.inMonth && session.start < rosterStart;
+    if (session.beforeRosterStart) session.inMonth = false;
+  }
   const staff = (snapshot.staff || []).map(toStaff);
   const usingDraft = view === 'draft' && snapshot.draft;
   const own = (usingDraft ? snapshot.draft_assignments : snapshot.published_assignments) || [];

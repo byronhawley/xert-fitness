@@ -94,11 +94,17 @@ test('building offers Suggest, then "Fill N open spots"; publishing follows a dr
   assert.ok(live.steps.every(item => item.status === 'done'));
 });
 
-test('a month that has already started skips asking instead of failing', () => {
-  const result = monthSteps({ snapshot: snapshot({ staff: [coachRow('a')] }), ctx: planningContext(snapshot({ staff: [coachRow('a')] }), { now: NOW }), today: '2026-12-03', month: MONTH });
-  assert.equal(step(result, 'ask').status, 'done');
-  assert.equal(step(result, 'ask').action, null);
-  assert.equal(step(result, 'answers').status, 'done');
+test('a month that has already started offers the rest of the month, and skips asking on its last day', () => {
+  const started = monthSteps({ snapshot: snapshot({ staff: [coachRow('a')] }), ctx: planningContext(snapshot({ staff: [coachRow('a')] }), { now: NOW }), today: '2026-12-03', month: MONTH });
+  assert.equal(step(started, 'ask').status, 'current');
+  assert.deepEqual(step(started, 'ask').action, { kind: 'availability', label: 'Ask coaches for the rest of December' });
+  assert.match(step(started, 'ask').summary, /December has started.*2026-12-10.*Earlier classes keep their current coach/);
+  assert.equal(step(started, 'answers').status, 'todo');
+  assert.equal(step(started, 'answers').summary, 'Starts once you ask.');
+  const lastDay = monthSteps({ snapshot: snapshot({ staff: [coachRow('a')] }), ctx: planningContext(snapshot({ staff: [coachRow('a')] }), { now: NOW }), today: '2026-12-31', month: MONTH });
+  assert.equal(step(lastDay, 'ask').status, 'done');
+  assert.equal(step(lastDay, 'ask').action, null);
+  assert.equal(step(lastDay, 'answers').status, 'done');
 });
 
 test('suggested dates: the usual cycle, a week from today when that has passed, and a plain refusal once the month starts', () => {
@@ -195,4 +201,19 @@ test('the Coaches tab names each coach’s state and next step in words', async 
   assert.equal(coachRowState({ status: 'active', profile_id: null }, { status: 'pending' }).label, 'Invite sent');
   assert.equal(coachRowState({ status: 'active', profile_id: null }, { status: 'expired' }).label, 'Invite expired');
   assert.equal(coachRowState({ status: 'inactive', profile_id: 'p' }).label, 'Inactive');
+});
+
+test('a month with no classes points at the class calendar instead of a dead end', () => {
+  const result = steps(snapshot({ staff: [coachRow('a')], sessions: [] }));
+  assert.deepEqual(step(result, 'build').action, { kind: 'calendar', label: 'Open the class calendar' });
+  assert.match(step(result, 'build').summary, /Add them on the class calendar/);
+});
+
+test('published with coach screens off never says coaches can see it', () => {
+  const published = { id: 'r1', number: 1, gap_count: 0 };
+  const off = steps(snapshot({ staff: [coachRow('a')], settings: { enabled: false, version: 1 }, published }));
+  assert.match(step(off, 'publish').summary, /coach screens are off/);
+  assert.doesNotMatch(step(off, 'publish').summary, /Coaches can see/);
+  const on = steps(snapshot({ staff: [coachRow('a')], published }));
+  assert.match(step(on, 'publish').summary, /Coaches can see their classes/);
 });

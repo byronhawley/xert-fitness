@@ -9,7 +9,7 @@
  * Steps are a guide, not a gate: the manager can build before every answer
  * is in. `current` is the first step that is not done.
  */
-import { planPeriodOpening } from './cycle.js';
+import { partMonthStartRange, planPeriodOpening } from './cycle.js';
 import { normalizeStaffing } from './duty.js';
 import { submissionProgress } from './snapshot.js';
 import { LIVE_SESSION_STATUSES } from './validate.js';
@@ -57,6 +57,8 @@ export function openSpots(ctx) {
 }
 
 const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const monthName = monthKey => MONTH_NAMES[Number(monthKey.slice(5, 7)) - 1];
 
 /**
  * @param {{ snapshot: object, ctx: object, today: string, month: string, dateLabel?: (date: string) => string }} input
@@ -71,6 +73,8 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
   const progress = submissionProgress(snapshot, today);
   const spots = openSpots(ctx);
   const started = compareDateKeys(today, dateInMonth(month, 1)) >= 0;
+  // A month that has started can still be asked about from a later day.
+  const restOfMonth = started && !period ? partMonthStartRange(month, today) : null;
   const steps = [];
 
   // 1 Add coaches: at least one active coach who can sign in.
@@ -98,8 +102,11 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
       action = { kind: 'switch-on', label: 'Switch on coach screens' };
       why = 'Coaches see only their own classes and availability. You can switch it off again in Settings.';
     } else if (period) {
-      summary = `Asked. Due by ${dateLabel(period.due_on)}${period.publish_target_on ? `; aim to publish by ${dateLabel(period.publish_target_on)}` : ''}.`;
+      summary = `Asked.${period.starts_on ? ` Roster starts ${dateLabel(period.starts_on)}.` : ''} Due by ${dateLabel(period.due_on)}${period.publish_target_on ? `; aim to publish by ${dateLabel(period.publish_target_on)}` : ''}.`;
       action = { kind: 'availability', label: 'Change the due date' };
+    } else if (restOfMonth) {
+      summary = `${monthName(month)} has started. You can still ask coaches about the classes from a later day, such as ${dateLabel(restOfMonth.suggested)}. Earlier classes keep their current coach.`;
+      action = { kind: 'availability', label: `Ask coaches for the rest of ${monthName(month)}` };
     } else if (started) {
       done = true;
       summary = 'This month has started, so there is nothing to ask. Build the roster from what you know.';
@@ -118,10 +125,10 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
     const pastDue = Boolean(period) && compareDateKeys(today, period.due_on) > 0;
     const done = Boolean(period) && (allIn || pastDue);
     let summary;
-    if (!period) summary = started ? 'Not needed this month.' : 'Starts once you ask.';
+    if (!period) summary = started && !restOfMonth ? 'Not needed this month.' : 'Starts once you ask.';
     else if (total === 0) summary = 'No coach can sign in yet, so nobody can answer.';
     else summary = `${progress.submitted} of ${total} in${progress.overdue ? `, ${progress.overdue} overdue` : allIn ? '' : `, due by ${dateLabel(period.due_on)}`}.`;
-    steps.push({ key: 'answers', title: 'Wait for answers', done: done || (!period && started), attention: progress.overdue > 0, summary,
+    steps.push({ key: 'answers', title: 'Wait for answers', done: done || (!period && started && !restOfMonth), attention: progress.overdue > 0, summary,
       counts: { submitted: progress.submitted, total },
       action: period ? { kind: 'availability', label: allIn ? 'See who can do what' : 'See who has answered' } : null });
   }
@@ -131,7 +138,7 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
     const done = spots.required > 0 ? spots.open === 0 : spots.classes > 0;
     let summary;
     let action;
-    if (spots.classes === 0) { summary = 'No upcoming classes on the timetable for this month.'; action = null; }
+    if (spots.classes === 0) { summary = 'No upcoming classes on the timetable for this month yet. Add them on the class calendar, then come back.'; action = { kind: 'calendar', label: 'Open the class calendar' }; }
     else if (spots.open === 0) { summary = `All ${plural(spots.required, 'coaching spot')} filled across ${plural(spots.classes, 'class', 'classes')}.`; action = { kind: 'roster', label: 'Look over the roster' }; }
     else if (spots.assigned === 0) { summary = `${plural(spots.classes, 'class', 'classes')} need coaches. Suggest fills them from coaches’ answers; you check it first.`; action = { kind: 'suggest', label: 'Suggest a roster' }; }
     else { summary = `${spots.filled} of ${spots.required} spots filled. ${plural(spots.open, 'spot')} still need a coach.`; action = { kind: 'suggest', label: `Fill ${plural(spots.open, 'open spot')}` }; }
@@ -147,7 +154,7 @@ export function monthSteps({ snapshot, ctx, today, month, dateLabel = date => da
     let action = null;
     const target = period?.publish_target_on ? ` Aim to publish by ${dateLabel(period.publish_target_on)}.` : '';
     if (draft) { summary = `You have changes coaches can’t see yet.${target}`; action = { kind: 'publish', label: published ? 'Publish the changes' : 'Publish the roster' }; }
-    else if (published) summary = `Published. Coaches can see their classes${published.gap_count ? `, with ${plural(published.gap_count, 'open spot')}` : ''}.`;
+    else if (published) summary = snapshot.settings?.enabled === false ? 'Published, but coach screens are off, so coaches can’t see it yet.' : `Published. Coaches can see their classes${published.gap_count ? `, with ${plural(published.gap_count, 'open spot')}` : ''}.`;
     else summary = `Nothing published yet.${target}`;
     steps.push({ key: 'publish', title: 'Publish', done, attention: false, summary,
       why: 'Coaches only see the roster once it is published, and get a notice when their classes change.', action });

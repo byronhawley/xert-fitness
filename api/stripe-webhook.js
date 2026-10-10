@@ -1,11 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
-import { createRequestTrace, requestHeader, requestText } from '../src/lib/serverHttp.js';
+import { createRequestTrace, requestHeader, requestText, sendJson } from '../src/lib/serverHttp.js';
 import {
   inspectCommerceRuntimeEnvironment,
   stripeModeForSecret,
 } from '../src/lib/commerceRuntime.js';
 import { createXertStripeClient } from '../src/lib/serverStripeClient.js';
 import { casualVisitPaymentFromCheckout } from '../src/lib/casualVisit.js';
+import xertosWebhookHandler from '../src/lib/xertosWebhook.js';
+import { handleXertosEdit } from '../src/lib/xertosSync.js';
 
 // Stripe calls this after a successful checkout. We verify the signature,
 // record the paid order, and grant the member their session credits.
@@ -25,6 +27,20 @@ const FAILURE_EVENT_TYPES = new Set([
 ]);
 const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+async function runXertosCalendarEdit(replayRequest, response, { now }) {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+    return sendJson(response, {
+      error: {
+        code: 'NOT_CONFIGURED',
+        message: 'XERT Fitness backend is not configured.',
+      },
+    }, 500);
+  }
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now);
+}
 
 export function validStripeSignatureHeader(value) {
   const header = String(value || '').trim();
@@ -484,6 +500,13 @@ export async function processStripeEvent(admin, event, {
 }
 
 export default async function handler(request, response) {
+  // XertOS rewrites /api/xertos-webhook here so the Hobby deployment keeps its
+  // existing twelve-function ceiling. Branch before any Stripe environment or
+  // payment client is touched.
+  if (request.query?.provider === 'xertos') {
+    return xertosWebhookHandler(request, response, { runEdit: runXertosCalendarEdit });
+  }
+
   const trace = createRequestTrace(response);
   const { json, text } = trace;
   if (request.method !== 'POST') return text('Method not allowed', 405);

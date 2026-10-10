@@ -69,12 +69,24 @@
   ],
   "rewrites": [
     {
+      "source": "/api/xertos-webhook",
+      "destination": "/api/stripe-webhook?provider=xertos"
+    },
+    {
       "source": "/api/fitbox-prospect-result",
       "destination": "/api/admin-fitbox-integration?service=callback"
     },
     {
       "source": "/api/fitbox-events",
       "destination": "/api/admin-fitbox-integration?service=event"
+    },
+    {
+      "source": "/api/xertos/classes",
+      "destination": "/api/admin-fitbox-integration?service=xertos_edit"
+    },
+    {
+      "source": "/api/xertos/dispatch",
+      "destination": "/api/admin-fitbox-integration?service=xertos_dispatch"
     },
     {
       "source": "/((?!api/|\\.well-known/).*)",

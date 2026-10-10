@@ -124,7 +124,7 @@ export default function RequestsPanel({ data, focus, onMutate, onShowSession }) 
                       {offers.map(offer => (
                         <li key={offer.id} className="flex flex-wrap items-center gap-2">
                           <span className="font-body text-sm">{staffName(ctx, offer.staff_id)} offered</span>
-                          {active && cover.current && <AdminButton disabled={busy} onClick={() => onMutate(client => client.approveCover(cover.id, offer.id, cover.version), `${staffName(ctx, offer.staff_id)} approved. A new roster version is published for this change.`)}>Approve {staffName(ctx, offer.staff_id)}</AdminButton>}
+                          {active && cover.current && <AdminButton disabled={busy} onClick={() => onMutate(client => client.approveCover(cover.id, offer.id, cover.version), `${staffName(ctx, offer.staff_id)} approved. The published roster now shows them on this class, and both coaches get a notice.`)}>Approve {staffName(ctx, offer.staff_id)}</AdminButton>}
                         </li>
                       ))}
                     </ul>

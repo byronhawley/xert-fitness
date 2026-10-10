@@ -17,11 +17,12 @@ export function answerableMonths(me) {
 export function coachChecklist(me, { monthLabel = month => month, dateLabel = date => date, dashboard = null } = {}) {
   const rows = [{ key: 'linked', label: 'Sign-in linked to the roster', done: true, detail: 'You can use the coach screens on the website and in the app.', tab: null }];
   const open = answerableMonths(me);
-  const waiting = open.find(period => !period.submission);
+  // A month the manager reopened needs answering again, even with an old submission.
+  const waiting = open.find(period => !period.submission || period.reopened);
   if (waiting) {
     const month = waiting.month.slice(0, 7);
     rows.push({ key: 'availability', label: `Availability for ${monthLabel(month)}`, done: false,
-      detail: `Due ${dateLabel(waiting.due_on)}. The manager plans the roster from your answers.`, tab: 'availability', month });
+      detail: waiting.reopened ? 'The manager reopened it for you. Check it and submit again.' : `Due ${dateLabel(waiting.due_on)}. The manager plans the roster from your answers.`, tab: 'availability', month });
   } else if (open.length) {
     const latest = open.at(-1);
     const month = latest.month.slice(0, 7);
@@ -30,7 +31,7 @@ export function coachChecklist(me, { monthLabel = month => month, dateLabel = da
     rows.push({ key: 'availability', label: 'Availability', done: null, detail: 'No month is open for availability right now. You’ll get a notice when one opens.', tab: 'availability' });
   }
   const acks = me?.pending_acknowledgements?.length || 0;
-  rows.push({ key: 'roster', label: 'Published roster checked', done: acks === 0,
+  rows.push({ key: 'roster', label: acks ? 'Check your changed roster' : 'Roster checked', done: acks === 0,
     detail: acks ? `${acks === 1 ? 'A roster has' : `${acks} rosters have`} changed since you last looked.` : 'You’re up to date.', tab: 'roster' });
   if (dashboard) {
     const certs = dashboard.certificates || {};
@@ -43,7 +44,7 @@ export function coachChecklist(me, { monthLabel = month => month, dateLabel = da
         : status === 'approved' || dashboard.profile?.on_website ? 'On the Coaches page.' : 'Add a photo and a few lines about you.', tab: 'profile' });
   }
   const unread = Number(me?.unread_notifications) || 0;
-  rows.push({ key: 'inbox', label: 'Notices read', done: unread === 0,
+  rows.push({ key: 'inbox', label: unread ? 'Read your notices' : 'Notices read', done: unread === 0,
     detail: unread ? `${unread} unread ${unread === 1 ? 'notice' : 'notices'}.` : 'Nothing unread.', tab: 'inbox' });
   return rows;
 }

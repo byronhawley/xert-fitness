@@ -6,6 +6,7 @@ import { publishImpact } from '@/lib/staffRoster/snapshot';
 import { toMs } from '@/lib/staffRoster/time';
 import { monthLabel, sessionLabel, staffName } from './rosterFormat';
 import { Notice, ProblemList } from './rosterBits';
+import RosterTexts from './RosterTexts';
 
 /** What publishing would do, computed from the draft; the server decides. */
 export function publishPreview(snapshot, ctx) {
@@ -24,12 +25,61 @@ export function publishPreview(snapshot, ctx) {
   return { blocked, gaps, impact: publishImpact(snapshot) };
 }
 
-export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx, busy, onPublish }) {
-  const preview = useMemo(() => (open ? publishPreview(snapshot, ctx) : null), [open, snapshot, ctx]);
+/**
+ * Open required spots to show: the server's count once it has refused for
+ * gaps (it returns a number), otherwise the screen's own preview.
+ */
+export function gapCount(serverResult, preview) {
+  if (serverResult?.reason === 'GAPS_NEED_ACKNOWLEDGEMENT') {
+    const gaps = serverResult.gaps;
+    if (Array.isArray(gaps)) return gaps.length;
+    const count = Number(gaps);
+    return Number.isFinite(count) && count >= 0 ? count : preview.gaps.length;
+  }
+  return preview.gaps.length;
+}
+
+/** "3 classes added, 1 taken off" for one coach's row. */
+export function changeSummary(row) {
+  const parts = [];
+  if (row.added.length) parts.push(`${row.added.length} ${row.added.length === 1 ? 'class' : 'classes'} added`);
+  if (row.removed.length) parts.push(`${row.removed.length} taken off`);
+  return parts.join(', ') || 'times changed';
+}
+
+/** After a publish: what coaches were told, and what happened to the texts. */
+export function PublishedView({ result, month, client, screensOn = true }) {
+  const affected = result.affected_staff?.length || 0;
+  return (
+    <div className="space-y-4">
+      <Notice tone="success" title={`${monthLabel(month)} roster is published`}>
+        {affected ? `${affected} ${affected === 1 ? 'coach has' : 'coaches have'} a notice in their coach inbox.` : 'No coach’s classes changed, so nobody was notified.'}
+      </Notice>
+      {!screensOn && <Notice tone="warning" title="Coaches can’t see it yet">Coach screens are switched off, so coaches can’t open their roster or notices until you switch them on (the month steps above, or Settings).</Notice>}
+      {client && <RosterTexts client={client} month={month} autoSend />}
+    </div>
+  );
+}
+
+export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx, busy, onPublish, client = null }) {
+  const [published, setPublished] = useState(null);
+  // With coach screens off, publishing still saves the roster, but coaches
+  // can't open it, so nothing here may say they can see it.
+  const screensOn = snapshot.settings?.enabled !== false;
+  const preview = useMemo(() => (open && !published ? publishPreview(snapshot, ctx) : null), [open, published, snapshot, ctx]);
   const [reason, setReason] = useState('');
   const [serverResult, setServerResult] = useState(null);
+  if (published) {
+    return (
+      <AdminDrawer open={open} onOpenChange={onOpenChange} title={`Publish ${monthLabel(month)}`} closeLabel="Close publish"
+        description={screensOn ? 'Coaches can see their classes now.' : 'Published, but coach screens are off.'}
+        footer={<AdminButton onClick={() => onOpenChange(false)}>Done</AdminButton>}>
+        <PublishedView result={published} month={month} client={client} screensOn={screensOn} />
+      </AdminDrawer>
+    );
+  }
   if (!preview) return null;
-  const gaps = serverResult?.reason === 'GAPS_NEED_ACKNOWLEDGEMENT' ? serverResult.gaps.length : preview.gaps.length;
+  const gaps = gapCount(serverResult, preview);
   const blocked = preview.blocked.length > 0 || serverResult?.reason === 'HARD_CONFLICTS';
   const ready = !blocked && (gaps === 0 || reason.trim().length >= 3);
   const first = !snapshot.published;
@@ -38,11 +88,12 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
   const submit = async () => {
     const result = await onPublish(reason.trim() || null);
     if (result && result.ok === false) setServerResult(result);
+    else if (result?.ok) setPublished(result);
   };
 
   return (
     <AdminDrawer open={open} onOpenChange={onOpenChange} title={`Publish ${monthLabel(month)}`}
-      description={first ? 'Coaches will see their classes and get a notice in their coach inbox.' : 'Replaces the roster coaches can see now. Only coaches whose classes change get a notice.'}
+      description={!screensOn ? 'Coach screens are switched off, so coaches won’t see this until you switch them on.' : first ? 'Coaches will see their classes and get a notice in their coach inbox.' : 'Replaces the roster coaches can see now. Only coaches whose classes change get a notice.'}
       closeLabel="Close publish"
       footer={<>
         <AdminButton disabled={busy || !ready} onClick={submit}>{gaps ? `Publish with ${gaps} empty ${gaps === 1 ? 'spot' : 'spots'}` : 'Publish roster'}</AdminButton>
@@ -92,16 +143,22 @@ export default function PublishDialog({ open, onOpenChange, month, snapshot, ctx
             <ul className="staff-roster-list mt-2">
               {preview.impact.map(row => (
                 <li key={row.staffId} className="staff-roster-row">
-                  <div className="min-w-0">
-                    <p className="font-body text-sm font-semibold text-xert-offwhite">{staffName(ctx, row.staffId)}</p>
-                    {row.added.map(item => <p key={`a-${item.id}`} className="font-body text-xs staff-roster-diff-added">+ {describe(item)}</p>)}
-                    {row.removed.map(item => <p key={`r-${item.id}`} className="font-body text-xs staff-roster-diff-removed">{describe(item)}</p>)}
-                  </div>
+                  {/* One line per coach; the class list folds away so a whole month stays short. */}
+                  <details className="min-w-0 w-full">
+                    <summary className="cursor-pointer font-body text-sm text-xert-offwhite">
+                      <span className="font-semibold">{staffName(ctx, row.staffId)}</span>
+                      <span className="text-xert-pale/65"> · {changeSummary(row)}</span>
+                    </summary>
+                    <div className="mt-1">
+                      {row.added.map(item => <p key={`a-${item.id}`} className="font-body text-xs staff-roster-diff-added">+ {describe(item)}</p>)}
+                      {row.removed.map(item => <p key={`r-${item.id}`} className="font-body text-xs staff-roster-diff-removed">− {describe(item)}</p>)}
+                    </div>
+                  </details>
                 </li>
               ))}
             </ul>
           )}
-          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the website (and phone, if they allowed notifications). Email copies go only if switched on in Settings.</p>
+          <p className="font-body text-xs text-xert-pale/50 mt-2">Notices go to each coach’s inbox on the coach screens. Email copies go only if switched on in Settings.{snapshot.settings?.sms_enabled && snapshot.settings?.enabled ? ' They also get a text listing their classes (each coach can turn texts off).' : ''}</p>
         </section>
       </div>
     </AdminDrawer>

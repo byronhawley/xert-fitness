@@ -48,6 +48,11 @@
 
 .coaching-photo { width: 72px; height: 88px; flex-shrink: 0; overflow: hidden; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); display: flex; align-items: center; justify-content: center; font-size: 0.65rem; color: var(--text-secondary); background: var(--surface-sunken); }
 .coaching-photo img { width: 100%; height: 100%; object-fit: cover; }
+.coaching-cropper { position: relative; width: min(100%, 300px, calc((100dvh - 340px) * 0.8)); margin: 0 auto; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface-sunken); touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+.coaching-cropper:active { cursor: grabbing; }
+.coaching-cropper:focus-visible { outline: 2px solid var(--accent-default); outline-offset: 2px; }
+.coaching-cropper img { position: absolute; max-width: none; height: auto; pointer-events: none; -webkit-user-drag: none; }
+.coaching-cropper-loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; color: var(--text-secondary); }
 .coaching-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 
 /* Availability: the ask header, the tap grid and the away calendar. Phone first, 44px+ targets. */
@@ -64,27 +69,50 @@
 .coaching-brush button[aria-checked="true"] { color: var(--text-inverse); }
 .coaching-brush button[aria-checked="true"][data-status="AVAILABLE"], .coaching-brush button[aria-checked="true"][data-status="PREFERRED"] { background: var(--state-success); border-color: var(--state-success); }
 .coaching-brush button[aria-checked="true"][data-status="UNAVAILABLE"] { background: var(--state-danger-text); border-color: var(--state-danger-text); }
-.coaching-brush button:focus-visible, .coaching-cell:focus-visible, .coaching-day:focus-visible { outline: var(--focus-width, 2px) solid var(--focus-ring, var(--accent-default)); outline-offset: 2px; }
-.coaching-legend { display: grid; gap: 2px; font-size: 0.75rem; color: var(--text-secondary); }
-.coaching-legend strong { color: var(--text-primary); font-weight: 600; }
+.coaching-brush button:focus-visible, .coaching-day:focus-visible { outline: var(--focus-width, 2px) solid var(--focus-ring, var(--accent-default)); outline-offset: 2px; }
 
-.coaching-cells { display: grid; grid-template-columns: repeat(auto-fill, minmax(5.25rem, 1fr)); gap: 6px; }
-.coaching-cell { display: grid; gap: 2px; justify-items: start; min-height: 56px; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-primary); text-align: start; }
-.coaching-cell-time { font-size: 0.9rem; font-weight: 700; }
-.coaching-cell-state { font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); }
-.coaching-cell[data-status="AVAILABLE"], .coaching-cell[data-status="PREFERRED"] { border-color: var(--state-success); background: var(--state-success-10); }
-.coaching-cell[data-status="AVAILABLE"] .coaching-cell-state, .coaching-cell[data-status="PREFERRED"] .coaching-cell-state { color: var(--state-success); }
-.coaching-cell[data-status="PREFERRED"] { border-width: 2px; }
-.coaching-cell[data-status="UNAVAILABLE"] { border-color: var(--state-danger-text); border-style: dashed; }
-.coaching-cell[data-status="UNAVAILABLE"] .coaching-cell-state { color: var(--state-danger-text); }
-.coaching-cell[data-status="IF_NEEDED"] { border-color: var(--state-warning); }
-.coaching-cell[data-status="IF_NEEDED"] .coaching-cell-state { color: var(--state-warning); }
 
-.coaching-calendar-card { padding-inline: 8px; }
+.coaching-calendar-card { padding-inline: 6px; }
+.coaching-calendar-title { font-size: 1rem; font-weight: 700; color: var(--text-primary); text-align: center; }
 .coaching-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
 .coaching-calendar-head { text-align: center; font-size: 0.7rem; color: var(--text-secondary); }
-.coaching-day { display: grid; align-content: center; justify-items: center; min-height: 44px; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-primary); font-size: 0.85rem; font-weight: 600; line-height: 1.1; }
-.coaching-day[aria-pressed="true"] { background: var(--state-danger-text); border-color: var(--state-danger-text); color: var(--text-inverse); }
-.coaching-day-away { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; }
+.coaching-day { position: relative; display: grid; align-content: center; justify-items: center; min-height: 52px; min-width: 0; border: 1px solid var(--border-hairline); border-radius: var(--radius-control); background: var(--surface-overlay); color: var(--text-primary); font-size: 0.9rem; font-weight: 600; line-height: 1.1; }
+.coaching-day:disabled { opacity: 0.6; }
+.coaching-day[data-state="outside"] { opacity: 0.35; background: transparent; border-style: dashed; cursor: not-allowed; }
+.coaching-day-word { min-height: 0.75rem; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+.coaching-day[data-state="available"] { background: var(--state-success); border-color: var(--state-success); color: var(--text-inverse); }
+.coaching-day[data-state="away"] { background: var(--state-danger-text); border-color: var(--state-danger-text); color: var(--text-inverse); }
+.coaching-day[aria-pressed="true"] { outline: 3px solid var(--text-primary); outline-offset: 1px; z-index: 1; }
+.coaching-day-dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 999px; background: var(--accent-default); }
+.coaching-day[data-state="available"] .coaching-day-dot, .coaching-day[data-state="away"] .coaching-day-dot { background: var(--text-inverse); }
+.coaching-day-dot--inline { position: static; display: inline-block; vertical-align: middle; }
+.coaching-legend-line { font-size: 0.72rem; color: var(--text-secondary); }
+
+.coaching-every-day { display: grid; align-content: center; justify-items: center; min-height: 44px; min-width: 0; padding: 2px 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-control); font-size: 0.75rem; font-weight: 700; color: var(--text-primary); background: transparent; line-height: 1.05; }
+.coaching-every-word { font-size: 0.55rem; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); }
+.coaching-every-day[aria-pressed="true"] { border-style: solid; border-color: var(--accent-default); background: var(--surface-overlay); }
+.coaching-every-day:focus-visible, .coaching-day-states button:focus-visible, .coaching-class-choices button:focus-visible, .coaching-presets button:focus-visible { outline: var(--focus-width, 2px) solid var(--focus-ring, var(--accent-default)); outline-offset: 2px; }
+
+.coaching-mode { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+.coaching-day-panel { border-color: var(--border-strong); }
+.coaching-day-states { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.coaching-day-states button { min-height: 44px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 0.8rem; font-weight: 700; color: var(--text-primary); background: var(--surface-overlay); }
+.coaching-day-states button[aria-pressed="true"][data-state="available"] { background: var(--state-success); border-color: var(--state-success); color: var(--text-inverse); }
+.coaching-day-states button[aria-pressed="true"][data-state="away"] { background: var(--state-danger-text); border-color: var(--state-danger-text); color: var(--text-inverse); }
+.coaching-day-states button[aria-pressed="true"][data-state="none"] { border-width: 2px; border-color: var(--text-primary); }
+
+.coaching-class { display: grid; gap: 6px; padding: 10px 0; border-top: 1px solid var(--border-hairline); }
+.coaching-class:first-child { border-top: 0; padding-top: 0; }
+.coaching-class-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.coaching-class-choices button { min-height: 44px; padding: 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 0.85rem; font-weight: 700; color: var(--text-primary); background: var(--surface-overlay); }
+.coaching-class-choices button[aria-pressed="true"][data-status="AVAILABLE"], .coaching-class-choices button[aria-pressed="true"][data-status="PREFERRED"] { background: var(--state-success); border-color: var(--state-success); color: var(--text-inverse); }
+.coaching-class-choices button[aria-pressed="true"][data-status="UNAVAILABLE"] { background: var(--state-danger-text); border-color: var(--state-danger-text); color: var(--text-inverse); }
+
+.coaching-presets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.coaching-presets button { display: grid; gap: 2px; justify-items: start; min-height: 52px; padding: 6px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-control); font-size: 0.9rem; font-weight: 700; color: var(--text-primary); background: var(--surface-overlay); text-align: start; }
+.coaching-presets button[aria-pressed="true"] { background: var(--state-success); border-color: var(--state-success); color: var(--text-inverse); }
+.coaching-preset-time { font-size: 0.72rem; font-weight: 600; opacity: 0.8; }
+.coaching-ask-span { white-space: nowrap; font-size: 0.75em; color: var(--text-secondary); }
 
 .coaching-submit-bar { position: sticky; bottom: 0; z-index: 5; display: grid; gap: 6px; padding: 10px 0 max(10px, env(safe-area-inset-bottom)); background: var(--surface-base); border-top: 1px solid var(--border-hairline); }

@@ -9,6 +9,8 @@
  */
 
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
+/** A picked photo is cropped and shrunk on the device before upload, so big phone photos are fine. */
+export const PHOTO_PICK_MAX_BYTES = 30 * 1024 * 1024;
 export const CERTIFICATE_MAX_BYTES = 10 * 1024 * 1024;
 export const CERTIFICATE_TYPES = Object.freeze(['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/webp']);
 
@@ -28,9 +30,10 @@ export function certificateFilePath(uid, fileName, now = Date.now()) {
 /** Plain-words check before uploading; null when the file is fine. */
 export function fileProblem(file, kind) {
   if (!file) return 'Choose a file.';
-  if (kind === 'photo') {
+  if (kind === 'photo' || kind === 'photo-pick') {
     if (!String(file.type).startsWith('image/')) return 'Choose an image file.';
-    if (file.size > PHOTO_MAX_BYTES) return 'Photos must be under 5 MB.';
+    if (kind === 'photo-pick' && file.size > PHOTO_PICK_MAX_BYTES) return 'That photo is too big. Choose one under 30 MB.';
+    if (kind === 'photo' && file.size > PHOTO_MAX_BYTES) return 'Photos must be under 5 MB.';
   } else {
     if (!CERTIFICATE_TYPES.includes(file.type)) return 'Upload a PDF or a photo (JPG, PNG, HEIC).';
     if (file.size > CERTIFICATE_MAX_BYTES) return 'Files must be under 10 MB.';
@@ -40,11 +43,12 @@ export function fileProblem(file, kind) {
 
 export function createStaffFiles(storage) {
   return {
+    /** `file` may be a picked File or the cropper's JPEG Blob (no name, so it is stored as .jpg). */
     async uploadProfilePhoto(uid, file) {
       const problem = fileProblem(file, 'photo');
       if (problem) throw new Error(problem);
       const path = profilePhotoPath(uid, file.name);
-      const { error } = await storage.from('site-images').upload(path, file, { cacheControl: '31536000', upsert: false });
+      const { error } = await storage.from('site-images').upload(path, file, { cacheControl: '31536000', upsert: false, contentType: file.type });
       if (error) throw new Error(error.message || 'Upload failed.');
       return storage.from('site-images').getPublicUrl(path).data.publicUrl;
     },

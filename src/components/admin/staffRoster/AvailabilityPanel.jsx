@@ -1,8 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { AdminButton, AdminFormField, AdminStatCard, ADMIN_TEXT } from '@/components/admin/ui';
-import { defaultPeriodDates, planPeriodOpening } from '@/lib/staffRoster/cycle';
+import { defaultPeriodDates, partMonthStartRange, planPartMonthOpening, planPeriodOpening } from '@/lib/staffRoster/cycle';
 import { suggestedOpening } from '@/lib/staffRoster/monthSteps';
-import { gymDateOf } from '@/lib/staffRoster/time';
+import { addDays, compareDateKeys, dateInMonth, daysInMonth as daysInMonthOf, gymDateOf } from '@/lib/staffRoster/time';
 import { submissionProgress } from '@/lib/staffRoster/snapshot';
 import { LIVE_SESSION_STATUSES } from '@/lib/staffRoster/validate';
 import { dayLabel, monthLabel, SUBMISSION_LABELS, SUBMISSION_TONE, timeLabel } from './rosterFormat';
@@ -63,6 +63,72 @@ function OpenPeriod({ month, today, cycle, busy, onOpen }) {
   );
 }
 
+/**
+ * A month that has started: ask coaches about the classes from a later day
+ * only. Earlier classes keep whoever coaches them now.
+ */
+function OpenPartMonth({ month, today, busy, onOpen }) {
+  const range = partMonthStartRange(month, today);
+  const [startsOn, setStartsOn] = useState(range?.suggested || '');
+  // Empty means "use the usual date" (worked out from the start day).
+  const [dueOn, setDueOn] = useState('');
+  const [publishTargetOn, setPublishTargetOn] = useState('');
+  const [editing, setEditing] = useState(false);
+  if (!range) {
+    const over = today > dateInMonth(month, daysInMonthOf(month));
+    return <Notice tone="warning" title={`It’s too late to ask for ${monthLabel(month)} availability`}>{over ? `${monthLabel(month)} has finished, so there are no classes left to ask about.` : 'Today is the last day of the month, so there are no classes left to ask about.'} You can still choose coaches for each class on the Roster tab.</Notice>;
+  }
+  let chosen = null;
+  let dateProblem = null;
+  if (startsOn) {
+    try { chosen = planPartMonthOpening(month, { today, startsOn, dueOn: dueOn || null, publishTargetOn: publishTargetOn || null }); } catch (error) { dateProblem = error.message; }
+  }
+  const changeStart = value => {
+    setStartsOn(value);
+    setDueOn('');
+    setPublishTargetOn('');
+  };
+  const name = monthLabel(month).split(' ')[0];
+  return (
+    <section className="staff-roster-row" aria-labelledby="roster-open-part-month">
+      <div className="min-w-0 w-full space-y-3">
+        <h3 id="roster-open-part-month" className={ADMIN_TEXT.sectionHeading}>Ask coaches for the rest of {name}</h3>
+        <p className="font-body text-sm text-xert-pale/75">
+          {name} has already started. You can still roster coaches for the classes from a day you choose. Every coach who can sign in gets a notice today
+          and taps the class times they can do. Classes before that day keep the coach they have now.
+        </p>
+        <AdminFormField label="Roster coaches from" helper="The first day of classes this roster covers." required>
+          <input type="date" value={startsOn} min={range.min} max={range.max} onChange={event => changeStart(event.target.value)} />
+        </AdminFormField>
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <div><dt className="font-body text-xs uppercase tracking-wider text-xert-pale/60">Due by</dt><dd className="font-body text-lg font-semibold text-xert-offwhite">{chosen ? dayLabel(chosen.dueOn) : '—'}</dd>
+            <dd className="font-body text-xs text-xert-pale/60">The last day coaches can answer without asking you.</dd></div>
+          <div><dt className="font-body text-xs uppercase tracking-wider text-xert-pale/60">Aim to publish by</dt><dd className="font-body text-lg font-semibold text-xert-offwhite">{chosen ? dayLabel(chosen.publishTargetOn) : '—'}</dd>
+            <dd className="font-body text-xs text-xert-pale/60">Your own reminder, so coaches know their classes before they start. Nothing happens automatically.</dd></div>
+        </dl>
+        <p className="font-body text-xs text-status-warning-200">Coaches get less notice than usual, so check the due date suits them.</p>
+        {editing && startsOn && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <AdminFormField label="Due by" required>
+              <input type="date" value={dueOn || chosen?.dueOn || ''} min={today} max={addDays(startsOn, -1)} onChange={event => setDueOn(event.target.value)} />
+            </AdminFormField>
+            <AdminFormField label="Aim to publish by">
+              <input type="date" value={publishTargetOn || chosen?.publishTargetOn || ''} min={dueOn || chosen?.dueOn || today} max={addDays(startsOn, -1)} onChange={event => setPublishTargetOn(event.target.value)} />
+            </AdminFormField>
+          </div>
+        )}
+        {dateProblem && <Notice tone="warning" title="Check the dates">{dateProblem}</Notice>}
+        <div className="flex flex-wrap gap-2">
+          <AdminButton disabled={busy || !chosen} onClick={() => onOpen({ startsOn: chosen.startsOn, dueOn: chosen.dueOn, publishTargetOn: chosen.publishTargetOn })}>
+            {chosen ? `Ask coaches about classes from ${dayLabel(chosen.startsOn)}` : 'Ask coaches now'}
+          </AdminButton>
+          {!editing && chosen && <AdminButton variant="ghost" onClick={() => setEditing(true)}>Change dates</AdminButton>}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /** Availability progress for the month, and the coach-by-class answer grid. */
 export default function AvailabilityPanel({ month, today, data, settings, focusStaffId, onMutate, onAddCoach = null }) {
   const { snapshot, draftCtx: ctx, busy } = data;
@@ -86,14 +152,23 @@ export default function AvailabilityPanel({ month, today, data, settings, focusS
     return result;
   }, [ctx, sessions]);
   const changeRequests = snapshot.change_requests || [];
+  const started = compareDateKeys(today, dateInMonth(month, 1)) >= 0;
 
   return (
     <div className="space-y-6">
-      {!period ? (
+      {!period && started ? (
+        <OpenPartMonth month={month} today={today} busy={busy}
+          onOpen={values => onMutate(client => client.openPartMonth(month, values), `Coaches asked about classes from ${dayLabel(values.startsOn)}. They get a notice and can answer on the website.`)} />
+      ) : !period ? (
         <OpenPeriod month={month} today={today} cycle={settings?.cycle} busy={busy}
           onOpen={values => onMutate(client => client.openPeriod(month, values), 'Coaches asked. They get a notice and can answer on the website.')} />
       ) : (
         <section className="grid gap-3 sm:grid-cols-4" aria-label="Availability progress">
+          {period.starts_on && (
+            <p className="font-body text-sm text-xert-pale/75 sm:col-span-4">
+              <strong className="text-xert-offwhite">Classes from {dayLabel(period.starts_on)}.</strong> Earlier classes this month keep the coach they have now.
+            </p>
+          )}
           <AdminStatCard label="Answered" value={`${progress.submitted} of ${progress.total}`} detail="Coaches who can sign in" />
           <AdminStatCard label="Still to answer" value={progress.missing} detail={progress.overdue ? `${progress.overdue} overdue` : 'None overdue'} />
           <AdminStatCard label="Due by" value={dayLabel(period.due_on)} detail={`Asked ${dayLabel(period.opens_on)}${period.shortened ? ' (less notice than usual)' : ''}`} />
@@ -105,7 +180,7 @@ export default function AvailabilityPanel({ month, today, data, settings, focusS
         <details className="staff-roster-row">
           <summary className="font-body text-sm text-xert-pale cursor-pointer min-h-11 flex items-center">Change the due date or send reminders</summary>
           <div className="flex flex-wrap items-end gap-3 mt-3 w-full">
-            <AdminFormField label="New due-by date"><input type="date" value={dueOn} min={today} onChange={event => setDueOn(event.target.value)} /></AdminFormField>
+            <AdminFormField label="New due-by date"><input type="date" value={dueOn} min={today} max={addDays(period.starts_on || period.month, -1)} onChange={event => setDueOn(event.target.value)} /></AdminFormField>
             <AdminButton variant="ghost" disabled={busy || !dueOn || dueOn === period.due_on}
               onClick={() => onMutate(client => client.updatePeriod(month, { dueOn, publishTargetOn: period.publish_target_on < dueOn ? dueOn : period.publish_target_on }, period.version), 'Due date changed')}>Save due date</AdminButton>
           </div>

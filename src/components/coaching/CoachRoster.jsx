@@ -38,7 +38,7 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
       {data.pending_acknowledgements.map(ack => (
         <Banner key={ack.revision_id} tone="warning" title={`Your ${monthName(ack.month)} roster changed`}
           action={<button type="button" className={BUTTON} disabled={busy} onClick={() => act(() => client.acknowledge(ack.revision_id), 'Thanks — marked as seen.')}>I’ve seen it</button>}>
-          Version {ack.number} is published. Check your classes below.
+          The manager published changes. Check your classes below, then tap I’ve seen it.
         </Banner>
       ))}
       {data.assignments.length === 0 && <div className="coaching-card"><p className="font-body text-sm text-xert-pale/70">No published classes for you in the next two months. Once the manager publishes a roster, your classes show here.</p></div>}
@@ -53,7 +53,7 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
                   <div className="min-w-0">
                     <p className="font-display text-xl text-xert-offwhite">{at(item.start)} <span className="text-xert-pale/50 text-base">– {at(item.end)}</span></p>
                     <p className="font-body text-sm text-xert-offwhite">{item.title}</p>
-                    <p className="font-body text-xs text-xert-pale/60">{ROLE[item.role] || item.role}{item.duty_start && toMs(item.duty_start) < toMs(item.start) ? ` · on duty from ${at(item.duty_start)}` : ''}{item.colleagues.length ? ` · with ${item.colleagues.map(colleague => colleague.display_name).join(', ')}` : ''}</p>
+                    <p className="font-body text-xs text-xert-pale/60">{ROLE[item.role] || item.role}{item.duty_start && toMs(item.duty_start) < toMs(item.start) ? ` · arrive by ${at(item.duty_start)}` : ''}{item.colleagues.length ? ` · with ${item.colleagues.map(colleague => colleague.display_name).join(', ')}` : ''}</p>
                   </div>
                   {cancelled ? <Pill tone="danger">Cancelled</Pill> : item.cover ? <Pill tone="warning">{item.cover.status === 'offered' ? 'Cover offered, awaiting manager' : 'Cover requested'}</Pill> : null}
                 </div>
@@ -62,15 +62,17 @@ export default function CoachRoster({ client, today, onChanged, notify }) {
                     It was {at(item.published_start)}–{at(item.published_end)} on {dateName(gymDateOf(toMs(item.published_start)))}. {item.availability && !['PREFERRED', 'AVAILABLE', 'IF_NEEDED'].includes(item.availability) ? 'Your availability doesn’t cover the new time yet.' : ''}
                   </Banner>
                 )}
-                {!cancelled && <button type="button" className={GHOST} onClick={() => setDetailFor(item)} aria-label={`Who’s booked and session plan: ${item.title}, ${dateName(date)} ${at(item.start)}`}>Who’s booked &amp; plan</button>}
-                {!cancelled && toMs(item.start) > Date.now() && (
+                {!cancelled && (
                   <div className="flex flex-wrap gap-2">
+                    <button type="button" className={GHOST} onClick={() => setDetailFor(item)} aria-label={`Who’s booked and session plan: ${item.title}, ${dateName(date)} ${at(item.start)}`}>Who’s booked &amp; plan</button>
+                    {toMs(item.start) > Date.now() && <>
                     {item.changed_since_publish && <>
                       <button type="button" className={GHOST} disabled={busy} onClick={() => act(() => client.confirmSession(item.session_id, 'AVAILABLE'), 'Thanks — you’re confirmed for the new time.')}>I can do the new time</button>
                       <button type="button" className={GHOST} disabled={busy} onClick={() => act(() => client.confirmSession(item.session_id, 'UNAVAILABLE'), 'Noted. The manager will find cover.')}>I can’t</button>
                     </>}
                     {!item.cover && <button type="button" className={GHOST} disabled={busy} onClick={() => { setCoverFor(item); setReason(''); }}>Ask for cover</button>}
                     {item.cover && <button type="button" className={GHOST} disabled={busy} onClick={() => act(() => client.withdraw('cover', item.cover.id), 'Cover request withdrawn. You’re still on this class.')}>Withdraw cover request</button>}
+                    </>}
                   </div>
                 )}
               </article>

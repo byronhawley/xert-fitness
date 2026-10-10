@@ -150,6 +150,8 @@ export const XERT_CONTRACTOR_FORM_DEFINITION = Object.freeze({
   one_response_per_email: false,
   notify_admin: true,
   email_copy_to_respondent: true,
+  // The whole agreement, not just the answers: it is what they signed.
+  email_pdf_copy: true,
   tags: ['contractor', 'agreement', 'trainers'],
 });
 

@@ -64,3 +64,17 @@ test('the timetable keeps its counts and its context current', async () => {
   // where they can actually sign up.
   assert.doesNotMatch(timetable, /StickyMobileCTA/);
 });
+
+test('the booking page offers the same calendar as the timetable', async () => {
+  const [booking, calendar] = await Promise.all([
+    read('../src/pages/Booking.jsx'),
+    read('../src/components/public/PublicClassCalendar.jsx'),
+  ]);
+  // "Book your first session" lands here; it used to be a list starting at
+  // whichever day was next, with no way to pick another day.
+  assert.match(booking, /<PublicClassCalendar[\s\S]{0,200}renderSession=\{renderSessionRow\}/);
+  assert.match(booking, /useState\('calendar'\)/);
+  // A link to one class opens the calendar on that class's day.
+  assert.match(booking, /initialDayKey=\{targetSession \? gymDateKey\(targetSession\.start_time\) : null\}/);
+  assert.match(calendar, /renderSession \? renderSession\(session\) :/);
+});
