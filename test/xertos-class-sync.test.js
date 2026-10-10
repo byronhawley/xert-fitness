@@ -417,3 +417,29 @@ test('the fingerprint migration closes the action-only bypass and preserves lega
   assert.doesNotMatch(sql, /grant execute on function public\.xertos_sync_apply_edit\(jsonb(, text)?\)\s+to (public|anon|authenticated)/);
   assert.match(sql, /grant execute on function public\.xertos_sync_apply_edit\(jsonb, text\) to service_role/);
 });
+
+test('a booking from XertOS goes to the booking function, and its refusals are worded for staff', async () => {
+  for (const edit of [
+    { action: 'book', externalId: 'a', member: { email: 'jess@example.com', name: 'Jess', personId: 'per_1' }, waitlistIfFull: true, by: 'member', requestId: 'b1' },
+    { action: 'cancelBooking', externalId: 'a', bookingExternalId: 'member:1', reason: null, by: 'staff', requestId: 'b2' },
+  ]) {
+    const body = JSON.stringify(edit);
+    const answer = { class: { externalId: 'a' }, booking: { externalId: 'member:1', status: 'confirmed' } };
+    const admin = fakeAdmin({ xertos_sync_apply_booking: { data: answer, error: null } });
+    const result = await handleXertosEdit(
+      request({ body: JSON.parse(body), headers: { 'x-xertos-site': 'xert_fitness', 'x-webhook-timestamp': String(NOW), 'x-webhook-signature': sign(body) } }),
+      admin, trace(), ENV, NOW,
+    );
+    assert.equal(result.status, 200, edit.action);
+    assert.deepEqual(result.body, answer);
+    assert.equal(admin.calls[0].name, 'xertos_sync_apply_booking');
+    assert.deepEqual(admin.calls[0].args.p_edit, edit);
+  }
+  assert.equal(xertosEditRefusal({ message: 'NO_SITE_ACCOUNT' }).status, 422);
+  assert.match(xertosEditRefusal({ message: 'NO_SITE_ACCOUNT' }).message, /sign up on XERT Fitness/);
+  assert.equal(xertosEditRefusal({ message: 'SITE_ACCOUNT_AMBIGUOUS' }).status, 422);
+  assert.equal(xertosEditRefusal({ message: 'CLASS_FULL' }).status, 409);
+  assert.equal(xertosEditRefusal({ message: 'BOOKINGS_OFF' }).status, 409);
+  assert.equal(xertosEditRefusal({ message: 'SESSION_NOT_BOOKABLE' }).status, 409);
+  assert.equal(xertosEditRefusal({ message: 'BOOKING_NOT_FOUND' }).status, 409);
+});
