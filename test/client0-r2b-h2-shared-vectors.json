@@ -1,0 +1,172 @@
+{
+  "manifestVersion": "client0-r2b-h2-boundary-shared-vectors.v1",
+  "canonicalRules": "PR #386",
+  "schemaVersion": 1,
+  "vectors": [
+    {
+      "id": "base",
+      "requestKeys": [
+        "req_c0_r2b_base_a",
+        "req_c0_r2b_base_b"
+      ],
+      "producerProjection": {
+        "schemaVersion": "client0.roster.projection.v1",
+        "month": "2026-11",
+        "revisionId": "7f0c9f39-62ae-4c05-9df2-46bb77190f32",
+        "revisionNumber": 3,
+        "sourceRevisionVersion": 8,
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "assignments": [
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          },
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "lead",
+            "sourceStaffId": "11111111-1111-4111-8111-111111111111",
+            "publicCoachName": "Ada Coach"
+          },
+          {
+            "sessionId": "44444444-4444-4444-8444-444444444444",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          }
+        ]
+      },
+      "expected": {
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "canonicalSha256": "28ea7986ed62b9ac70b1f8d4b436429b5d7422a527205489e941bf3f00dc8f82",
+        "canonicalByteCount": 650
+      }
+    },
+    {
+      "id": "utc-normalization",
+      "requestKeys": [
+        "req_c0_r2b_utc"
+      ],
+      "producerProjection": {
+        "schemaVersion": "client0.roster.projection.v1",
+        "month": "2026-11",
+        "revisionId": "7f0c9f39-62ae-4c05-9df2-46bb77190f32",
+        "revisionNumber": 3,
+        "sourceRevisionVersion": 8,
+        "sourceUpdatedAt": "2026-10-09T11:23:45.678+10:00",
+        "assignments": [
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          },
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "lead",
+            "sourceStaffId": "11111111-1111-4111-8111-111111111111",
+            "publicCoachName": "Ada Coach"
+          },
+          {
+            "sessionId": "44444444-4444-4444-8444-444444444444",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          }
+        ]
+      },
+      "expected": {
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "canonicalSha256": "28ea7986ed62b9ac70b1f8d4b436429b5d7422a527205489e941bf3f00dc8f82",
+        "canonicalByteCount": 650
+      }
+    },
+    {
+      "id": "assignment-order",
+      "requestKeys": [
+        "req_c0_r2b_order"
+      ],
+      "producerProjection": {
+        "schemaVersion": "client0.roster.projection.v1",
+        "month": "2026-11",
+        "revisionId": "7f0c9f39-62ae-4c05-9df2-46bb77190f32",
+        "revisionNumber": 3,
+        "sourceRevisionVersion": 8,
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "assignments": [
+          {
+            "sessionId": "44444444-4444-4444-8444-444444444444",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          },
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "lead",
+            "sourceStaffId": "11111111-1111-4111-8111-111111111111",
+            "publicCoachName": "Ada Coach"
+          },
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Bo Coach"
+          }
+        ]
+      },
+      "expected": {
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "canonicalSha256": "c1d41b3d5c0aa9397a1ad9eae886d64a357cafafcb653ae3e264e81213beef6b",
+        "canonicalByteCount": 650
+      }
+    },
+    {
+      "id": "unicode-public-name",
+      "requestKeys": [
+        "req_c0_r2b_unicode"
+      ],
+      "producerProjection": {
+        "schemaVersion": "client0.roster.projection.v1",
+        "month": "2026-11",
+        "revisionId": "7f0c9f39-62ae-4c05-9df2-46bb77190f32",
+        "revisionNumber": 3,
+        "sourceRevisionVersion": 8,
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "assignments": [
+          {
+            "sessionId": "33333333-3333-4333-8333-333333333333",
+            "slotKey": "assistant",
+            "sourceStaffId": "22222222-2222-4222-8222-222222222222",
+            "publicCoachName": "Côach B"
+          }
+        ]
+      },
+      "expected": {
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "canonicalSha256": "658ca6e4e563e8111cf486579a7c96ad0c862b97e92b205e3d17a9d4cb55347f",
+        "canonicalByteCount": 336
+      }
+    },
+    {
+      "id": "empty-assignments",
+      "requestKeys": [
+        "req_c0_r2b_empty"
+      ],
+      "producerProjection": {
+        "schemaVersion": "client0.roster.projection.v1",
+        "month": "2026-11",
+        "revisionId": "7f0c9f39-62ae-4c05-9df2-46bb77190f32",
+        "revisionNumber": 3,
+        "sourceRevisionVersion": 8,
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "assignments": []
+      },
+      "expected": {
+        "sourceUpdatedAt": "2026-10-09T01:23:45.678Z",
+        "canonicalSha256": "a1947fb308d8a6ef06e07a286ef05941e5f5919189a9ed368d8facf7c1f59092",
+        "canonicalByteCount": 178
+      }
+    }
+  ]
+}
