@@ -15,10 +15,22 @@ export const DAY_PARTS = Object.freeze([
 export const WEEK_ORDER = Object.freeze([1, 2, 3, 4, 5, 6, 0]);
 const SHORT_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-/** Merge touching or overlapping windows within each day, sorted. */
+const isStart = block => block.kind === 'start';
+
+/** Split saved hours into time windows and exact start times. */
+export function splitHours(hours) {
+  return { windows: (hours || []).filter(block => !isStart(block)), starts: (hours || []).filter(isStart) };
+}
+
+/**
+ * Merge touching or overlapping windows within each day and drop repeated
+ * start times, sorted by day and time with a window before a start time at
+ * the same minute (the order the database returns).
+ */
 export function normalizeHours(hours) {
+  const { windows, starts } = splitHours(hours);
   const byDay = new Map();
-  for (const block of hours || []) {
+  for (const block of windows) {
     if (!byDay.has(block.weekday)) byDay.set(block.weekday, []);
     byDay.get(block.weekday).push({ start: block.start, end: block.end });
   }
@@ -32,18 +44,35 @@ export function normalizeHours(hours) {
     }
     if (current) result.push(current);
   }
-  return result;
+  const seen = new Set();
+  for (const block of starts) {
+    const key = `${block.weekday}:${block.start}`;
+    if (!seen.has(key)) { seen.add(key); result.push({ weekday: block.weekday, start: block.start, kind: 'start' }); }
+  }
+  return result.sort((a, b) => a.weekday - b.weekday || a.start - b.start || (isStart(a) ? 1 : 0) - (isStart(b) ? 1 : 0));
+}
+
+/** Exact start times as { [weekday]: [minute, …] }, sorted. */
+export function startsByDay(hours) {
+  const days = Object.fromEntries(WEEK_ORDER.map(day => [day, []]));
+  for (const block of normalizeHours(splitHours(hours).starts)) days[block.weekday].push(block.start);
+  return days;
+}
+
+export function hoursFromStarts(days) {
+  return Object.entries(days).flatMap(([weekday, minutes]) => minutes.map(start => ({ weekday: Number(weekday), start, kind: 'start' })));
 }
 
 /** Hours → { [weekday]: Set(partKey) }, and whether the hours fit the grid exactly. */
 export function gridFromHours(hours) {
   const grid = Object.fromEntries(WEEK_ORDER.map(day => [day, new Set()]));
-  for (const block of normalizeHours(hours)) {
+  const { windows } = splitHours(hours);
+  for (const block of normalizeHours(windows)) {
     for (const part of DAY_PARTS) {
       if (part.start >= block.start && part.end <= block.end) grid[block.weekday].add(part.key);
     }
   }
-  const exact = JSON.stringify(normalizeHours(hoursFromGrid(grid))) === JSON.stringify(normalizeHours(hours));
+  const exact = JSON.stringify(normalizeHours(hoursFromGrid(grid))) === JSON.stringify(normalizeHours(windows));
   return { grid, exact };
 }
 
@@ -81,19 +110,18 @@ function dayList(days) {
   return parts.join(', ');
 }
 
-/** e.g. "Mon–Fri 6 am–12 pm · Sat 8 am–12 pm", or '' when no hours. */
+/** e.g. "Mon–Fri 6 am–12 pm · Sat sessions at 8 am, 9 am", or '' when no hours. */
 export function describeHours(hours) {
   const normalized = normalizeHours(hours);
   const byDay = new Map();
-  for (const block of normalized) {
-    const text = `${clockWords(block.start)}–${clockWords(block.end)}`;
-    byDay.set(block.weekday, [...(byDay.get(block.weekday) || []), text]);
+  for (const day of WEEK_ORDER) {
+    const blocks = normalized.filter(block => block.weekday === day);
+    const windows = blocks.filter(block => !isStart(block)).map(block => `${clockWords(block.start)}–${clockWords(block.end)}`);
+    const starts = blocks.filter(isStart).map(block => clockWords(block.start));
+    const parts = [...windows, ...(starts.length ? [`sessions at ${starts.join(', ')}`] : [])];
+    if (parts.length) byDay.set(day, parts.join(', '));
   }
   const groups = new Map();
-  for (const day of WEEK_ORDER) {
-    if (!byDay.has(day)) continue;
-    const key = byDay.get(day).join(', ');
-    groups.set(key, [...(groups.get(key) || []), day]);
-  }
+  for (const [day, text] of byDay) groups.set(text, [...(groups.get(text) || []), day]);
   return [...groups.entries()].map(([times, days]) => `${dayList(days)} ${times}`).join(' · ');
 }

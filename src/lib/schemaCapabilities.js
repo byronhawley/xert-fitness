@@ -83,6 +83,8 @@ export const REQUIRED_SCHEMA_CAPABILITIES = Object.freeze({
   staff_roster_sms: 'Apply supabase/migrations/20261002050000_staff_roster_sms.sql in Supabase (after 20261002040000_staff_roster_part_month.sql).',
   // Roster editing from the published month, class detail requests, push stops when switched off.
   staff_roster_fixes: 'Apply supabase/migrations/20261002060000_staff_roster_fixes.sql in Supabase (after 20261002050000_staff_roster_sms.sql).',
+  // PT exact start times and members' own PT sessions.
+  pt_start_times: 'Apply supabase/migrations/20261002080000_pt_start_times_and_members.sql in Supabase (after 20261002030000_pt_booking.sql).',
 });
 
 export function summarizeSchemaCapabilities(rows) {

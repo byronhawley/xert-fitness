@@ -4,7 +4,7 @@ import { clockLabel, gymInstantIso, parseClock } from '@/lib/staffRoster/time';
 import {
   BOOKING_STATUS_WORDS, PAYMENT_WORDS, formatDuration, formatPrice, parsePrice, ptClient,
 } from '@/lib/ptBookingData';
-import { DAY_PARTS, WEEK_ORDER as PT_WEEK_ORDER, describeHours, gridFromHours, hoursFromGrid, normalizeHours } from '@/lib/ptHours';
+import { DAY_PARTS, WEEK_ORDER as PT_WEEK_ORDER, clockWords, describeHours, gridFromHours, hoursFromGrid, hoursFromStarts, normalizeHours, splitHours, startsByDay } from '@/lib/ptHours';
 import { Banner, BUTTON, GHOST, INPUT, LABEL, Pill, Sheet, WEEKDAYS, dateName, when, at } from './coachingUi';
 
 const SECTIONS = [
@@ -341,7 +341,7 @@ function ServicesSection({ services, client, notify, reload }) {
 
 export function hoursByDay(hours) {
   const days = Object.fromEntries(WEEK_ORDER.map(day => [day, []]));
-  for (const block of hours || []) days[block.weekday]?.push({ start: clockLabel(block.start), end: clockLabel(block.end) });
+  for (const block of splitHours(hours).windows) days[block.weekday]?.push({ start: clockLabel(block.start), end: clockLabel(block.end) });
   return days;
 }
 
@@ -364,13 +364,23 @@ function HoursSection({ overview, client, today, notify, reload }) {
   const [grid, setGrid] = useState(() => gridFromHours(saved).grid);
   const [exact, setExact] = useState(() => !gridFromHours(saved).exact);
   const [days, setDays] = useState(() => hoursByDay(saved));
+  const [starts, setStarts] = useState(() => startsByDay(saved));
+  const [newStart, setNewStart] = useState({ day: 1, time: '06:00' });
   const [buffer, setBuffer] = useState(overview.hours.buffer_minutes || 0);
   const [away, setAway] = useState({ from: today, until: today, partDay: false, fromTime: '09:00', untilTime: '12:00', note: '' });
   useEffect(() => {
     const next = gridFromHours(overview.hours.hours || []);
-    setGrid(next.grid); setExact(!next.exact); setDays(hoursByDay(overview.hours.hours)); setBuffer(overview.hours.buffer_minutes || 0);
+    setGrid(next.grid); setExact(!next.exact); setDays(hoursByDay(overview.hours.hours)); setStarts(startsByDay(overview.hours.hours || [])); setBuffer(overview.hours.buffer_minutes || 0);
   }, [overview.hours]);
-  const hours = exact ? hoursFromDays(days) : hoursFromGrid(grid);
+  const windows = exact ? hoursFromDays(days) : hoursFromGrid(grid);
+  const hours = windows && [...windows, ...hoursFromStarts(starts)];
+  const startCount = Object.values(starts).reduce((total, list) => total + list.length, 0);
+  const addStart = () => {
+    const minute = parseClock(newStart.time);
+    if (minute === null) return;
+    setStarts(current => ({ ...current, [newStart.day]: [...new Set([...current[newStart.day], minute])].sort((a, b) => a - b) }));
+  };
+  const copyStartsToWeekdays = () => setStarts(current => ({ ...current, ...Object.fromEntries([2, 3, 4, 5].map(day => [day, [...current[1]]])) }));
   const dirty = hours !== null && (JSON.stringify(normalizeHours(hours)) !== JSON.stringify(normalizeHours(saved)) || buffer !== (overview.hours.buffer_minutes || 0));
   const toggle = (day, part) => setGrid(current => {
     const next = new Set(current[day]);
@@ -453,6 +463,34 @@ function HoursSection({ overview, client, today, notify, reload }) {
             {!hours && <p className="font-body text-xs text-status-danger-200">Each time needs a start before its end.</p>}
           </div>
         )}
+
+        <div className="coaching-card space-y-3">
+          <div>
+            <p className="font-body text-sm font-semibold text-xert-offwhite">Set start times (optional)</p>
+            <p className="font-body text-xs text-xert-pale/60">Add the exact times a session can start, like 6 am and 7 am. Use these as well as, or instead of, the times above.</p>
+          </div>
+          {PT_WEEK_ORDER.filter(day => starts[day].length).map(day => (
+            <div key={day} className="flex flex-wrap items-center gap-2">
+              <span className="font-body text-sm font-semibold text-xert-offwhite w-12">{WEEKDAYS[day].slice(0, 3)}</span>
+              {starts[day].map(minute => (
+                <button key={minute} type="button" className="inline-flex items-center gap-1.5 min-h-11 rounded-full border border-xert-steel/40 px-3 font-body text-sm text-xert-offwhite" aria-label={`Remove ${WEEKDAYS[day]} ${clockWords(minute)}`}
+                  onClick={() => setStarts(current => ({ ...current, [day]: current[day].filter(value => value !== minute) }))}>
+                  {clockWords(minute)} <span aria-hidden="true">✕</span>
+                </button>
+              ))}
+            </div>
+          ))}
+          <div className="flex flex-wrap items-end gap-2">
+            <div><label className={LABEL} htmlFor="pt-start-day">Day</label>
+              <select id="pt-start-day" className={`${INPUT} w-auto`} value={newStart.day} onChange={event => setNewStart({ ...newStart, day: Number(event.target.value) })}>
+                {PT_WEEK_ORDER.map(day => <option key={day} value={day}>{WEEKDAYS[day]}</option>)}
+              </select></div>
+            <div><label className={LABEL} htmlFor="pt-start-time">Start time</label>
+              <input id="pt-start-time" type="time" step={300} className={`${INPUT} w-auto`} value={newStart.time} onChange={event => setNewStart({ ...newStart, time: event.target.value })} /></div>
+            <button type="button" className={GHOST} disabled={startCount >= 40 || parseClock(newStart.time) === null || parseClock(newStart.time) % 5 !== 0} onClick={addStart}>Add time</button>
+            {starts[1].length > 0 && <button type="button" className={GHOST} onClick={copyStartsToWeekdays}>Copy Monday’s times to Tue–Fri</button>}
+          </div>
+        </div>
 
         <div className="coaching-card space-y-1" role="status">
           <p className={LABEL}>What people will see</p>

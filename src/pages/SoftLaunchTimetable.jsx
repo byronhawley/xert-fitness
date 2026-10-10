@@ -16,6 +16,7 @@ import { classSignupState, signupOutcomeMessage } from '@/lib/classSignup';
 import VisitorPassChoices from '@/components/public/VisitorPassChoices';
 import { shouldOfferVisitorPasses } from '@/lib/visitorPassChoices';
 import { gymDateKey } from '@/lib/gymTime';
+import { usePtAvailability } from '@/lib/usePtAvailability';
 
 const VIEW_OPTIONS = [
   { key: 'calendar', label: 'Calendar', icon: CalendarDays },
@@ -30,6 +31,7 @@ export default function SoftLaunchTimetable() {
   const [settings, setSettings] = useState(getDefaultSettings());
   const [loading, setLoading] = useState(true);
   const [selectedSession, setSelectedSession] = useState(null);
+  const ptBooking = usePtAvailability();
   const [showPTForm, setShowPTForm] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [availability, setAvailability] = useState({});
@@ -227,9 +229,14 @@ export default function SoftLaunchTimetable() {
           <div className="relative max-w-2xl mx-auto text-center">
             <h2 className="font-display text-3xl text-xert-offwhite uppercase mb-3">Personal Training</h2>
             <p className="font-body text-sm text-xert-pale/65 mb-6 max-w-md mx-auto">
-              Looking for 1-on-1 coaching? Request a PT session and we'll be in touch to confirm availability.
+              {ptBooking.enabled
+                ? 'One-on-one coaching with your coach. Pick a coach, see their prices and book a time online.'
+                : 'Looking for 1-on-1 coaching? Request a PT session and we\'ll be in touch to confirm availability.'}
             </p>
-            {!showPTForm && !ptSuccess && (
+            {ptBooking.enabled && (
+              <Link to="/pt" className={ctaClasses}>Book PT online</Link>
+            )}
+            {!ptBooking.enabled && !showPTForm && !ptSuccess && (
               <button onClick={() => setShowPTForm(true)} className={ctaClasses}>
                 Request PT session
               </button>
