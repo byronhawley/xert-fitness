@@ -6,6 +6,9 @@ export const XERTOS_PROVIDER = 'xert_fitness';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
 
 const CLIENT0_WRITABLE_ACTIONS = new Set(['create', 'update', 'cancel']);
+// Bookings made in XertOS for XERT classes (owner decision 2026-10-10: class
+// bookings are two-way for XERT Fitness). Gated on their own switch.
+const CLIENT0_BOOKING_ACTIONS = new Set(['book', 'cancelBooking']);
 
 function strictPositiveVersion(value) {
   const text = String(value ?? '').trim();
@@ -64,6 +67,12 @@ export function xertosSecretsAreConfigured(environment = process.env) {
 export function client0CalendarWritesEnabled(environment = process.env) {
   return environment.CLIENT0_SYNC_ENABLED === 'true'
     && environment.CLIENT0_CALENDAR_WRITES_ENABLED === 'true';
+}
+
+/** Bookings from XertOS stay inert unless sync and their own gate are both true. */
+export function client0BookingWritesEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true'
+    && environment.CLIENT0_BOOKING_WRITES_ENABLED === 'true';
 }
 
 export function verifyXertosSignature({
@@ -152,8 +161,24 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
 
   if (payload?.action === 'ping') return sendJson(response, { ok: true });
 
-  // Unknown verbs never reach the database. The first write slice is exactly
-  // create/update/cancel through the site's existing booking guards.
+  // Unknown verbs never reach the database. Writes are exactly create/update/
+  // cancel of a class, and book/cancelBooking, through the site's own guards.
+  if (CLIENT0_BOOKING_ACTIONS.has(payload?.action)) {
+    if (!client0BookingWritesEnabled(process.env) || typeof runEdit !== 'function') {
+      return sendJson(response, {
+        error: {
+          code: 'ACTION_NOT_READY',
+          message: 'XERT Fitness is not taking bookings from XertOS yet. Book on XERT Fitness.',
+        },
+      }, 501);
+    }
+    return runEdit({
+      method: request.method,
+      headers: request.headers,
+      target: request.url,
+      text: async () => rawBody,
+    }, response, { now: Math.floor(Date.now() / 1000) });
+  }
   if (!CLIENT0_WRITABLE_ACTIONS.has(payload?.action)) {
     return sendJson(response, {
       error: {
