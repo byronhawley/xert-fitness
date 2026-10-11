@@ -106,6 +106,26 @@ export function xertosEditRefusal(error) {
     return refuse(422, code, 'XERT Fitness could not prove the exact request identity, so nothing changed.');
   }
   if (code === 'SESSION_NOT_FOUND') return refuse(409, code, 'This class no longer exists on XERT Fitness.');
+  if (code === 'BOOKINGS_OFF') {
+    return refuse(409, code, "XERT Fitness isn't taking bookings from XertOS right now. Book on XERT Fitness.");
+  }
+  if (code === 'NO_SITE_ACCOUNT') {
+    return refuse(422, code, 'No XERT Fitness member account uses this email. They need to sign up on XERT Fitness first, with the same email.');
+  }
+  if (code === 'SITE_ACCOUNT_AMBIGUOUS') {
+    return refuse(422, code, 'More than one XERT Fitness account uses this email, so XERT Fitness cannot tell who to book. Book them on XERT Fitness.');
+  }
+  if (code === 'CLASS_FULL') return refuse(409, code, 'This class is full on XERT Fitness.');
+  if (code === 'SESSION_NOT_BOOKABLE') return refuse(409, code, "This class isn't open for bookings on XERT Fitness.");
+  if (code === 'SESSION_FINISHED') return refuse(409, code, 'This class has already finished.');
+  if (code === 'SESSION_INTEREST_ONLY') {
+    return refuse(409, code, 'This class takes expressions of interest only. Members register interest on XERT Fitness.');
+  }
+  if (code === 'CLASS_CAPACITY_INVALID') return refuse(409, code, "This class has no places set on XERT Fitness, so it can't be booked.");
+  if (code === 'MEMBER_NOT_BOOKABLE') return refuse(422, code, "This XERT Fitness account isn't a member account, so it can't be booked into classes.");
+  if (code === 'MEMBER_ALREADY_ON_ROSTER') return refuse(409, code, 'They are already booked into this class on XERT Fitness.');
+  if (code === 'BOOKING_NOT_FOUND') return refuse(409, code, 'This booking no longer exists on XERT Fitness.');
+  if (code === 'NOT_CANCELLABLE') return refuse(409, code, "This booking can't be cancelled any more on XERT Fitness (it may already be marked attended).");
   if (code === 'SESSION_ALREADY_COMPLETED') {
     return refuse(409, code, 'This class has already been completed on XERT Fitness, so it cannot be cancelled.');
   }
@@ -170,7 +190,8 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
     return json({ error: { code: 'INVALID_REQUEST_FINGERPRINT', message: 'XERT Fitness could not prove the exact request identity, so nothing changed.' } }, 422);
   }
 
-  const { data, error } = await admin.rpc('xertos_sync_apply_edit', {
+  const bookingAction = edit.action === 'book' || edit.action === 'cancelBooking';
+  const { data, error } = await admin.rpc(bookingAction ? 'xertos_sync_apply_booking' : 'xertos_sync_apply_edit', {
     p_edit: edit,
     p_request_fingerprint: fingerprint,
   });

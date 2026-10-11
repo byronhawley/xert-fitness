@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import handler, {
+  client0BookingWritesEnabled,
   client0CalendarWritesEnabled,
   verifyXertosSignature,
   xertosWebhookConfigError,
@@ -359,5 +360,53 @@ test('error responses expose neither signing secrets nor signature material', as
   const serialized = JSON.stringify(res.body);
   for (const forbidden of ['current-secret', 'old-secret', headers['x-webhook-signature']]) {
     assert.equal(serialized.includes(forbidden), false);
+  }
+});
+
+test('bookings from XertOS stay fail-closed until sync and the booking gate are both on', async () => {
+  assert.equal(client0BookingWritesEnabled({}), false);
+  assert.equal(client0BookingWritesEnabled({ CLIENT0_SYNC_ENABLED: 'true' }), false);
+  assert.equal(client0BookingWritesEnabled({ CLIENT0_BOOKING_WRITES_ENABLED: 'true' }), false);
+  // The calendar gate alone does not open bookings.
+  assert.equal(client0BookingWritesEnabled({
+    CLIENT0_SYNC_ENABLED: 'true', CLIENT0_CALENDAR_WRITES_ENABLED: 'true',
+  }), false);
+  assert.equal(client0BookingWritesEnabled({
+    CLIENT0_SYNC_ENABLED: 'true', CLIENT0_BOOKING_WRITES_ENABLED: 'true',
+  }), true);
+
+  const original = { ...process.env };
+  const rawBody = JSON.stringify({
+    action: 'book', externalId: 'class-1', member: { email: 'jess@example.com', name: 'Jess' },
+    waitlistIfFull: true, by: 'member', requestId: 'book-1',
+  });
+  const headers = { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' };
+  try {
+    Object.assign(process.env, { CLIENT0_SYNC_ENABLED: 'true', CLIENT0_CALENDAR_WRITES_ENABLED: 'true' });
+    delete process.env.CLIENT0_BOOKING_WRITES_ENABLED;
+    let called = false;
+    let res = mockResponse();
+    await handler(request({ rawBody, headers }), res, { runEdit: () => { called = true; } });
+    assert.equal(res.statusCode, 501);
+    assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+    assert.equal(called, false);
+
+    process.env.CLIENT0_BOOKING_WRITES_ENABLED = 'true';
+    delete process.env.CLIENT0_CALENDAR_WRITES_ENABLED;
+    let received;
+    res = mockResponse();
+    await handler(request({ rawBody, headers }), res, {
+      runEdit: async (replayRequest, response) => {
+        received = await replayRequest.text();
+        return response.status(200).json({ booking: { externalId: 'member:1', status: 'confirmed' } });
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(received, rawBody, 'the exact authenticated bytes reach the booking handler');
+  } finally {
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED', 'CLIENT0_BOOKING_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
   }
 });
