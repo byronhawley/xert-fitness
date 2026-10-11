@@ -45,7 +45,7 @@ const BASE_SCHEMA = `
   );
   create table public.class_bookings (
     id uuid primary key default gen_random_uuid(), class_session_id uuid, full_name text, email text,
-    status text, created_at timestamptz not null default now()
+    phone text, status text, created_at timestamptz not null default now()
   );
   create table public.member_announcements (
     id uuid primary key, title text, body text, tone text, cta_label text, cta_url text, audience text,
@@ -93,6 +93,7 @@ async function database({ capacity = 2 } = {}) {
     '20261004010000_xertos_class_sync.sql',
     '20261009010000_xertos_receipt_fingerprint.sql',
     '20261010010000_xertos_two_way_bookings.sql',
+    '20261011010000_xertos_guest_signups.sql',
   ]) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8'));
   }
@@ -173,13 +174,52 @@ test('a booking from XertOS goes through the front desk rules, once', async () =
   assert.equal(queued.booking.status, 'waitlisted');
 });
 
-test('a person XERT cannot find, or cannot tell apart, is refused', async () => {
+test('someone two XERT accounts share is refused', async () => {
   const db = await database();
-  await assert.rejects(() => apply(db, book('nobody@example.com', 'req-a')), /NO_SITE_ACCOUNT/);
   await assert.rejects(() => apply(db, book('twins@example.com', 'req-b')), /SITE_ACCOUNT_AMBIGUOUS/);
-  await assert.rejects(() => apply(db, book('coach@example.com', 'req-c')), /NO_SITE_ACCOUNT/);
-  const count = await db.query('select count(*)::int as n from public.session_bookings');
-  assert.equal(count.rows[0].n, 0);
+  const count = await db.query('select (select count(*) from public.session_bookings) + (select count(*) from public.class_bookings) as n');
+  assert.equal(Number(count.rows[0].n), 0);
+});
+
+test('someone with no XERT member account is booked as a sign-up', async () => {
+  const db = await database({ capacity: 2 });
+  const guest = (email, requestId, extra = {}) => JSON.stringify({
+    action: 'book', externalId: SESSION, member: { email, name: 'Casual Visitor', phone: '+61 400 000 000' },
+    waitlistIfFull: true, by: 'member', requestId, ...extra,
+  });
+
+  // Nobody here, and a staff (admin) account: both become sign-ups.
+  const first = await apply(db, guest(' Visitor@Example.com', 'req-g1'));
+  assert.equal(first.booking.status, 'confirmed');
+  assert.match(first.booking.externalId, /^signup:/);
+  const row = await db.query('select full_name, email, phone, status from public.class_bookings');
+  assert.deepEqual(row.rows, [{ full_name: 'Casual Visitor', email: 'visitor@example.com', phone: '+61 400 000 000', status: 'confirmed' }]);
+  assert.equal(first.class.bookings.find((b) => b.externalId === first.booking.externalId)?.email, 'visitor@example.com');
+  const coach = await apply(db, guest('coach@example.com', 'req-g2'));
+  assert.match(coach.booking.externalId, /^signup:/);
+  assert.equal(coach.booking.status, 'confirmed');
+  const members = await db.query('select count(*)::int as n from public.session_bookings');
+  assert.equal(members.rows[0].n, 0, 'no member booking is made for them');
+
+  // Asking again answers with the same sign-up.
+  assert.equal((await apply(db, guest('visitor@example.com', 'req-g3'))).booking.externalId, first.booking.externalId);
+
+  // Full: waitlisted, or refused when XertOS asked not to queue them.
+  await assert.rejects(() => apply(db, guest('late@example.com', 'req-g4', { waitlistIfFull: false })), /CLASS_FULL/);
+  assert.equal((await apply(db, guest('late@example.com', 'req-g5'))).booking.status, 'waitlisted');
+
+  // A phone that isn't one is dropped, not stored; a name is required.
+  await apply(db, JSON.stringify({ action: 'book', externalId: SESSION, member: { email: 'odd@example.com', name: 'Odd Phone', phone: 'call me' }, waitlistIfFull: true, by: 'member', requestId: 'req-g6' }));
+  assert.equal((await db.query(`select phone from public.class_bookings where email = 'odd@example.com'`)).rows[0].phone, null);
+  await assert.rejects(() => apply(db, JSON.stringify({ action: 'book', externalId: SESSION, member: { email: 'anon@example.com', name: ' ' }, waitlistIfFull: true, by: 'member', requestId: 'req-g7' })), /INVALID_EDIT/);
+
+  // XertOS cancels it like any other sign-up.
+  const cancelled = await apply(db, cancel(first.booking.externalId, 'req-g8'));
+  assert.equal(cancelled.booking.status, 'cancelled');
+
+  // A class that has finished takes nobody.
+  await db.query(`update public.class_sessions set start_time = now() - interval '2 hours', end_time = now() - interval '1 hour'`);
+  await assert.rejects(() => apply(db, guest('after@example.com', 'req-g9')), /SESSION_FINISHED/);
 });
 
 test('a cancellation from XertOS frees the place on XERT', async () => {
