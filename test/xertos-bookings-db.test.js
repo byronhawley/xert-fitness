@@ -94,6 +94,7 @@ async function database({ capacity = 2 } = {}) {
     '20261009010000_xertos_receipt_fingerprint.sql',
     '20261010010000_xertos_two_way_bookings.sql',
     '20261011010000_xertos_guest_signups.sql',
+    '20261012010000_xertos_signup_waitlist.sql',
   ]) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8'));
   }
@@ -220,6 +221,35 @@ test('someone with no XERT member account is booked as a sign-up', async () => {
   // A class that has finished takes nobody.
   await db.query(`update public.class_sessions set start_time = now() - interval '2 hours', end_time = now() - interval '1 hour'`);
   await assert.rejects(() => apply(db, guest('after@example.com', 'req-g9')), /SESSION_FINISHED/);
+});
+
+test('a sign-up waiting for a place stays visible to XertOS and can be taken off the list', async () => {
+  const db = await database({ capacity: 1 });
+  const guest = (email, requestId) => JSON.stringify({
+    action: 'book', externalId: SESSION, member: { email, name: 'Casual Visitor' },
+    waitlistIfFull: true, by: 'member', requestId,
+  });
+  await apply(db, guest('first@example.com', 'req-w1'));
+  const waiting = await apply(db, guest('second@example.com', 'req-w2'));
+  assert.equal(waiting.booking.status, 'waitlisted');
+  // The class XertOS receives lists them as waiting, so its next push keeps them.
+  assert.deepEqual(
+    waiting.class.bookings.map((b) => [b.externalId === waiting.booking.externalId, b.status]),
+    [[false, 'confirmed'], [true, 'waitlisted']],
+  );
+  // A public "tell me if a place frees up" is listed the same way.
+  await db.query(`insert into public.class_bookings (class_session_id, full_name, email, status)
+    values ($1, 'Public Queue', 'queue@in.example', 'waitlisted')`, [SESSION]);
+  const payload = (await db.query('select public.xertos_class_payload($1) as item', [SESSION])).rows[0].item;
+  assert.equal(payload.bookings.filter((b) => b.status === 'waitlisted').length, 2);
+  assert.equal(payload.bookedCount, 1, 'waiting holds no place');
+
+  // Leaving the list from XertOS really takes them off it on XERT.
+  const left = await apply(db, cancel(waiting.booking.externalId, 'req-w3'));
+  assert.equal(left.booking.status, 'cancelled');
+  const row = await db.query('select status from public.class_bookings where id = $1', [waiting.booking.externalId.split(':')[1]]);
+  assert.equal(row.rows[0].status, 'cancelled');
+  assert.equal(left.class.bookings.some((b) => b.externalId === waiting.booking.externalId), false);
 });
 
 test('a cancellation from XertOS frees the place on XERT', async () => {
