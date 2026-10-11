@@ -24,6 +24,9 @@ const VIEW_OPTIONS = [
 ];
 
 const dialogClasses = 'xert-card border-xert-steel/20 text-xert-pale rounded-2xl sm:rounded-2xl w-[calc(100%-2rem)] gap-0';
+// How far back the calendar keeps classes that have already run.
+const PAST_CLASS_DAYS = 120;
+
 const ctaClasses = 'xert-btn-primary inline-flex min-h-[52px] w-full sm:w-auto items-center justify-center px-8 font-display text-base uppercase tracking-wide';
 
 export default function SoftLaunchTimetable() {
@@ -43,7 +46,9 @@ export default function SoftLaunchTimetable() {
 
   useEffect(() => {
     Promise.all([
-      getClassSessions(true).catch(() => []),
+      // Classes stay on their day after they've run; the list view below
+      // still only shows what's coming up.
+      getClassSessions(true, { since: new Date(Date.now() - PAST_CLASS_DAYS * 86400000) }).catch(() => []),
       getSoftLaunchSettings().catch(() => getDefaultSettings()),
       // Live remaining places. Failing here only hides spot counts; the
       // database still refuses a sign-up once a class is full.
@@ -99,6 +104,10 @@ export default function SoftLaunchTimetable() {
     fitbox,
   });
   const successCopy = signupOutcomeMessage(bookingSuccess);
+  const upcomingSessions = useMemo(
+    () => sessions.filter(item => new Date(item.start_time).getTime() > Date.now()),
+    [sessions],
+  );
   // Memberships are not linked to the website, so a booking charges nobody.
   // Somebody who told the form they are not a member is shown the ways to pay
   // here, rather than being left to find a QR code at the front desk they have
@@ -195,7 +204,7 @@ export default function SoftLaunchTimetable() {
               />
             ) : (
               <div className="space-y-3">
-                {sessions.map(s => (
+                {upcomingSessions.map(s => (
                   <ClassSessionCard key={s.id} session={s} bookingsEnabled={settings.bookings_enabled}
                     onBook={setSelectedSession} fitbox={fitbox} availability={availability[s.id]} />
                 ))}

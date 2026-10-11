@@ -309,3 +309,19 @@ export function isPastDayKey(dateKey, now = new Date()) {
   if (!day) return false;
   return day.getTime() + DAY_MS <= now.getTime();
 }
+
+const CLOCK_TIME = String.raw`\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?`;
+
+/**
+ * The calendar chip already leads with the time, and class names often carry
+ * it too ("5:15am training session", "Group class/ open gym 2:30pm"), which
+ * read as "5:15 am 5:15am trai…". Drops a time at either end of the name.
+ */
+export function chipTitle(title) {
+  const trimmed = String(title || '')
+    .replace(new RegExp(`^\\s*${CLOCK_TIME}\\s*[-–—:]?\\s*`, 'i'), '')
+    .replace(new RegExp(`\\s*[-–—]?\\s*${CLOCK_TIME}\\s*$`, 'i'), '')
+    .trim();
+  if (!trimmed) return String(title || '');
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
