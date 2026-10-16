@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
 import React from 'react';
 import { renderToString } from 'react-dom/server';
@@ -495,6 +495,36 @@ test('the owner payments list names an unknown pass instead of breaking, while c
   })), /This visitor pass is not available/);
 
   assert.match(read('../src/components/admin/OrdersManager.jsx'), /\{visitorPassLabel\(visit\.pass_kind\)\}/);
+});
+
+test('the owner payments panel is named for every kind of visitor payment it lists, not some of them', () => {
+  // The panel lists every row of casual_visit_payments, so it holds whatever
+  // kinds the newest pass_kind check allows, and its Today and This month
+  // totals add all of them up. A heading that names some of those kinds reads
+  // as though the rest are somewhere else. It once said "Casual visits & Three
+  // Day Passes" over 10 Session Pack and three month membership rows.
+  const migrations = readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(name => name.endsWith('.sql')).sort();
+  const kindLists = migrations
+    .map(name => read(`../supabase/migrations/${name}`).match(/casual_visit_pass_kind_check\s+check \(pass_kind in \(([^)]*)\)\)/))
+    .filter(Boolean);
+  assert.ok(kindLists.length > 0, 'the pass_kind check is found in the migrations');
+  const kinds = [...kindLists.at(-1)[1].matchAll(/'([a-z_]+)'/g)].map(match => match[1]);
+  assert.ok(kinds.includes('ten_session_pack'));
+  assert.deepEqual([...kinds].sort(), Object.keys(visits.VISITOR_PASSES).sort(),
+    'every kind the table can hold has a name the panel can show');
+
+  const orders = read('../src/components/admin/OrdersManager.jsx');
+  const start = orders.indexOf('casualVisits.installed && casualVisits.rows.length > 0');
+  const end = orders.indexOf('{visitorPassLabel(visit.pass_kind)}', start);
+  assert.ok(start > -1 && end > start, 'the panel that labels each visitor payment is found');
+  const headings = [...orders.slice(start, end).matchAll(/<h3[^>]*>([^<]*)<\/h3>/g)]
+    .map(match => match[1].replace(/&amp;/g, '&').trim());
+  assert.equal(headings.length, 1, 'the panel has one heading');
+  const [heading] = headings;
+  const named = kinds.filter(kind => heading.toLowerCase().includes(visits.visitorPassLabel(kind).toLowerCase()));
+  assert.ok(named.length === 0 || named.length === kinds.length,
+    `"${heading}" names ${named.join(', ')} but the panel also lists ${kinds.filter(kind => !named.includes(kind)).join(', ')}`);
+  assert.equal(heading, 'Visitor payments', 'the same name as the Settings switch that turns these pages on and off');
 });
 
 test('Settings edits the 10 Session Pack price only once its columns exist', () => {

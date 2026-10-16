@@ -263,11 +263,15 @@ export default function OrdersManager() {
         </div>
       )}
 
-      {/* Casual visits paid at the door */}
+      {/* Everything a visitor paid for at the door: casual visits and every
+          pass, each row labelled with what it was. The heading names none of
+          them, because a heading that names some reads as though the totals
+          leave the others out. It matches the Visitor payments switch in
+          Settings, which turns these same pages on and off. */}
       {casualVisits.installed && casualVisits.rows.length > 0 && (
         <div className="mb-8 border border-xert-steel/20 bg-xert-ink">
           <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-xert-steel/15 p-4">
-            <h3 className="font-display text-sm uppercase tracking-wider text-xert-offwhite">Casual visits &amp; Three Day Passes</h3>
+            <h3 className="font-display text-sm uppercase tracking-wider text-xert-offwhite">Visitor payments</h3>
             <p className="font-body text-xs text-xert-concrete/45">
               Paid at the door on the visitor&apos;s own phone. No account, no credits.
             </p>

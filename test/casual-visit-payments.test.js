@@ -117,7 +117,7 @@ test('the owner sees door takings beside orders, counted only when actually paid
     'the screen says so rather than failing before the migration is applied');
 
   const orders = await read('../src/components/admin/OrdersManager.jsx');
-  assert.match(orders, /Casual visits/);
+  assert.match(orders, />Visitor payments<\/h3>/);
   assert.match(orders, /Paid at the door on the visitor&apos;s own phone/);
   assert.match(orders, /summarizeCasualVisits\(casualVisits\.rows\)/);
   assert.match(orders, /casualVisits\.installed && casualVisits\.rows\.length > 0/,
