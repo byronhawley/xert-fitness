@@ -47,8 +47,8 @@ export default function Memberships() {
             Ways to<br /><span className="text-xert-steel">Train Here.</span>
           </h1>
           <p className="mb-12 max-w-xl font-body text-sm leading-relaxed text-xert-pale/65">
-            Join on an ongoing weekly membership, pay for a single visit, try us for three days, or
-            pay three months upfront. Book any class on the{' '}
+            Join on an ongoing weekly membership, pay for a single visit, try us for three days, buy a
+            10 Session Pack, or pay three months upfront. Book any class on the{' '}
             <Link to="/timetable" className="text-xert-steel underline underline-offset-2">timetable</Link>
             {' '}first — you can pay before you come in or when you arrive.
           </p>

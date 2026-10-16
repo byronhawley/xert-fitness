@@ -368,6 +368,7 @@ workflows:
               "staff_roster_sms",
               "staff_roster_fixes",
               "pt_start_times",
+              "ten_session_pack",
             ];
             const missing = required.filter(item => !installed.has(item));
             if (missing.length) {

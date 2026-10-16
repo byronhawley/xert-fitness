@@ -204,7 +204,7 @@ export default function SoftLaunchTimetable() {
           </div>
         </section>
 
-        {/* Not a member? The three ways to pay, in the open. The QR codes at the
+        {/* Not a member? The four ways to pay, in the open. The QR codes at the
             front desk are no use to somebody booking from their kitchen. */}
         {settings.casual_payments_enabled !== false && (
           <section className="px-6 pb-4">

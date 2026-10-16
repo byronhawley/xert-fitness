@@ -80,6 +80,11 @@ export default function OrdersManager() {
       description: 'They sign the questionnaire on their own phone, then pay for three days of training.',
     },
     {
+      slug: 'ten-session-pack', path: '/10pack', title: '10 Session Pack',
+      qrTitle: '10 Session Pack QR',
+      description: 'They sign the questionnaire on their own phone, or say they already have, then pay for ten sessions.',
+    },
+    {
       slug: 'three-month-membership', path: '/3months', title: 'Three month membership',
       qrTitle: 'Three month membership QR',
       description: 'Three months paid up front. They sign the questionnaire and agreement first, or say they already have.',
@@ -250,9 +255,9 @@ export default function OrdersManager() {
               <li>4. First time in? Send them to the casual questionnaire before they train.</li>
             </ol>
             <p className="mt-4 font-body text-xs text-xert-concrete/40">
-              Every price, and the switch that turns all three pages on or off, lives in Business → Settings —
+              Every price, and the switch that turns every visitor page on or off, lives in Business → Settings —
               including a discount you can run on any of them. Nothing here grants a session credit: these are
-              entry paid for, not packs.
+              paid at the door, not member credit packs.
             </p>
           </div>
         </div>

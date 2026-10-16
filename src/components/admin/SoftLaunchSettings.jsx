@@ -3,7 +3,7 @@ import { toast } from '@/components/ui/use-toast';
 import { activateSessionPackPayments, getCommerceConfigurationHealth, getSoftLaunchSettings, updateSoftLaunchSettings, getDefaultSettings } from '@/lib/adminData';
 import AdminLoadError from '@/components/admin/AdminLoadError';
 import AdminConfirmDialog from '@/components/admin/AdminConfirmDialog';
-import { countdownVisibility, launchSettingsChanged, normalizeLaunchSettings, VISITOR_PRICE_FIELDS } from '@/lib/launchSettings';
+import { countdownVisibility, launchSettingsChanged, normalizeLaunchSettings, VISITOR_PRICE_FIELDS, visitorPriceFieldInstalled } from '@/lib/launchSettings';
 import { ADMIN_PAGE } from '@/components/admin/ui';
 
 /** @param {boolean} _dirty */
@@ -229,11 +229,13 @@ export default function SoftLaunchSettings({ onDirtyChange = NOOP }) {
       <div className="bg-xert-ink border border-xert-steel/20 p-6 space-y-5 mb-6">
         <h3 className="font-display text-sm uppercase tracking-wider text-xert-offwhite">Casual visits</h3>
         <p className="font-body text-xs text-xert-concrete/40">
-          A walk-in scans the front-desk code, enters their details and pays for one visit on their own phone.
+          A walk-in scans the front-desk code, enters their details and pays for a visit or pass on their own phone.
           Nothing here grants a session credit.
         </p>
-        <Toggle label="Visitor payments" desc="Controls /casual, /3daypass and /3months. When off, visitors are directed to the XERT team." field="casual_payments_enabled" />
-        {VISITOR_PRICE_FIELDS.map(field => (
+        <Toggle label="Visitor payments" desc="Controls /casual, /3daypass, /10pack and /3months. When off, visitors are directed to the XERT team." field="casual_payments_enabled" />
+        {/* A price whose column the database does not have yet could never be
+            saved, so it stays hidden until its migration has been run. */}
+        {VISITOR_PRICE_FIELDS.map(field => visitorPriceFieldInstalled(field, savedSettings) && (
           <VisitorPriceRow key={field.key} field={field} settings={settings} set={set} />
         ))}
         <p className="font-body text-xs text-xert-concrete/40">

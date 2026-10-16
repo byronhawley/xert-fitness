@@ -1,6 +1,6 @@
 import { normalizeProviderUrl, resolvePlatformProvider } from './platformProvider.js';
 import {
-  CASUAL_VISIT_ACTION, THREE_DAY_PASS_ACTION, THREE_MONTH_MEMBERSHIP_ACTION, visitorPass,
+  CASUAL_VISIT_ACTION, TEN_SESSION_PACK_ACTION, THREE_DAY_PASS_ACTION, THREE_MONTH_MEMBERSHIP_ACTION, visitorPass,
 } from './casualVisit.js';
 
 /**
@@ -88,7 +88,7 @@ export function normalizeLaunchSettings(settings = {}) {
 }
 
 /**
- * The three visitor prices and their discounts. A discount is the price
+ * The four visitor prices and their discounts. A discount is the price
  * actually charged while it runs, so a club types what a visitor pays rather
  * than a percentage — and a discount cannot be switched on unless it is set
  * and genuinely cheaper, which is the same rule the database enforces.
@@ -109,6 +109,17 @@ export const VISITOR_PRICE_FIELDS = Object.freeze([
     enabled: 'three_day_pass_discount_enabled',
     fallback: visitorPass(THREE_DAY_PASS_ACTION).defaultPriceCents,
   }),
+  // The site can go live before the 10 Session Pack migration has been run.
+  // Until its columns exist this row is left out of every save, because one
+  // unknown column makes the database refuse the whole Settings save, visitor
+  // payments switch and all.
+  Object.freeze({
+    key: 'ten-pack', label: '10 Session Pack',
+    price: 'ten_session_pack_price_cents', discount: 'ten_session_pack_discount_cents',
+    enabled: 'ten_session_pack_discount_enabled',
+    fallback: visitorPass(TEN_SESSION_PACK_ACTION).defaultPriceCents,
+    optionalColumn: true,
+  }),
   Object.freeze({
     key: 'three-month', label: 'Three month membership',
     price: 'three_month_price_cents', discount: 'three_month_discount_cents',
@@ -120,6 +131,7 @@ export const VISITOR_PRICE_FIELDS = Object.freeze([
 export function normalizeVisitorPricing(settings = {}) {
   const normalized = {};
   for (const field of VISITOR_PRICE_FIELDS) {
+    if (!visitorPriceFieldInstalled(field, settings)) continue;
     const price = normalizeCasualPrice(settings[field.price], field.fallback);
     const raw = settings[field.discount];
     const discount = raw === '' || raw === null || raw === undefined
@@ -137,6 +149,15 @@ export function normalizeVisitorPricing(settings = {}) {
     normalized[field.enabled] = enabled;
   }
   return normalized;
+}
+
+/**
+ * Whether the settings row has a price's columns yet. The row is read with
+ * select('*'), so a column the database has is always present, if only as
+ * its default.
+ */
+export function visitorPriceFieldInstalled(field, settings = {}) {
+  return !field.optionalColumn || settings?.[field.price] !== undefined;
 }
 
 /**
@@ -173,6 +194,9 @@ export function launchSettingsChanged(current = {}, saved = {}) {
     'three_month_price_cents',
     'three_month_discount_cents',
     'three_month_discount_enabled',
+    'ten_session_pack_price_cents',
+    'ten_session_pack_discount_cents',
+    'ten_session_pack_discount_enabled',
   ];
   return fields.some(field => String(current[field] ?? '') !== String(saved[field] ?? ''));
 }

@@ -5,6 +5,7 @@ export async function checkAdminQR(page, { capture = async () => {} } = {}) {
   const entries = new URL(page.url()).pathname === '/admin/orders' ? [
     { title: 'Casual visit QR', path: '/casual', filename: 'casual-visit' },
     { title: 'Three Day Pass QR', path: '/3daypass', filename: 'three-day-pass' },
+    { title: '10 Session Pack QR', path: '/10pack', filename: 'ten-session-pack' },
     { title: 'Three month membership QR', path: '/3months', filename: 'three-month-membership' },
   ] : [{ title: 'Branded QR code' }];
   for (const entry of entries) {

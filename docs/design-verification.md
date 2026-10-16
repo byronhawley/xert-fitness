@@ -39,7 +39,7 @@ node scripts/verify-design.mjs --tag=owner --routes=/admin --shell --commands --
 node scripts/verify-design.mjs --tag=kit --kit-only
 node scripts/verify-design.mjs --tag=kit-motion --kit-only --motion=default --quick
 node scripts/verify-design.mjs --tag=visitor-settings --routes=/admin/settings --visitor-prices
-node scripts/verify-design.mjs --tag=visitor-payments --routes=/casual,/3daypass,/3months --public-visitor-prices
+node scripts/verify-design.mjs --tag=visitor-payments --routes=/casual,/3daypass,/10pack,/3months --public-visitor-prices
 ```
 
 The full matrix uses 390×844, 768×1024, 1440×900 and 1920×1080. It captures resting,

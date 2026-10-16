@@ -10,6 +10,9 @@ export const THREE_DAY_PASS_ACTION = 'three_day_pass';
 export const THREE_DAY_PASS_PRICE_CENTS = 3900;
 export const THREE_MONTH_MEMBERSHIP_ACTION = 'three_month_membership';
 export const THREE_MONTH_MEMBERSHIP_PRICE_CENTS = 43000;
+// $120 plus Stripe's card fee (1.7% + 30c), so the club keeps the $120.
+export const TEN_SESSION_PACK_ACTION = 'ten_session_pack';
+export const TEN_SESSION_PACK_PRICE_CENTS = 12240;
 
 /**
  * Everything sold on a visitor page. A casual visit is priced by the club in
@@ -39,6 +42,21 @@ export const VISITOR_PASSES = Object.freeze({
     productDescription: 'Three Day Pass — show your receipt to the XERT team.',
     needsSignedQuestionnaire: true,
   }),
+  // Sold and screened exactly like the Three Day Pass: the casual
+  // questionnaire first, then a receipt the team arranges the sessions from.
+  // It is a visitor purchase, not a member session pack, so it never carries
+  // a user or an order and never grants credits.
+  [TEN_SESSION_PACK_ACTION]: Object.freeze({
+    label: '10 Session Pack',
+    priceCents: TEN_SESSION_PACK_PRICE_CENTS,
+    priceField: 'ten_session_pack_price_cents',
+    discountField: 'ten_session_pack_discount_cents',
+    discountEnabledField: 'ten_session_pack_discount_enabled',
+    defaultPriceCents: TEN_SESSION_PACK_PRICE_CENTS,
+    productName: 'XERT Fitness 10 Session Pack',
+    productDescription: '10 Session Pack — show your receipt to the XERT team.',
+    needsSignedQuestionnaire: true,
+  }),
   [THREE_MONTH_MEMBERSHIP_ACTION]: Object.freeze({
     label: 'Three month membership',
     priceCents: THREE_MONTH_MEMBERSHIP_PRICE_CENTS,
@@ -60,8 +78,18 @@ export function visitorPass(kind = 'casual') {
 
 const RESPONSE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * The name the owner's payments list shows for a recorded purchase.
+ *
+ * Unlike visitorPass(), this never throws. One row of a kind this copy of the
+ * site does not know yet — an admin screen still cached from before a new pass
+ * shipped — must not take the whole payments list down with it. Checkout and
+ * the webhook go through visitorPass(), which still refuses an unknown kind.
+ */
 export function visitorPassLabel(kind = 'casual') {
-  return visitorPass(kind).label;
+  if (Object.prototype.hasOwnProperty.call(VISITOR_PASSES, kind)) return VISITOR_PASSES[kind].label;
+  const readable = String(kind ?? '').replace(/[_-]+/g, ' ').trim().slice(0, 60);
+  return readable ? `Visitor pass (${readable})` : 'Visitor pass';
 }
 
 export function validQuestionnaireResponseId(value) {

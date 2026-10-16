@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import {
   CASUAL_VISIT_ACTION, casualVisitValidationError, formatCasualVisitPrice,
   recallCasualVisitor, rememberCasualVisitor,
+  TEN_SESSION_PACK_ACTION, TEN_SESSION_PACK_PRICE_CENTS,
   THREE_DAY_PASS_ACTION, THREE_DAY_PASS_PRICE_CENTS, THREE_MONTH_MEMBERSHIP_ACTION,
   THREE_MONTH_MEMBERSHIP_PRICE_CENTS, validQuestionnaireResponseId, visitorPassPricing,
 } from '@/lib/casualVisit';
@@ -29,16 +30,22 @@ const MEMBERSHIP_COPY = Object.freeze({
 // Pay for a single visit on your own phone. The club never handles anyone's
 // card: the visitor fills this in, and Stripe takes the payment with their
 // name, email and phone already carried across.
-export default function CasualVisit({ threeDayPass = false, threeMonth = false }) {
+//
+// Every choice below falls through to the casual visit, so each pass needs its
+// own branch everywhere: a missing 10 Session Pack branch would quietly sell
+// somebody a single casual visit instead.
+export default function CasualVisit({ threeDayPass = false, tenSessionPack = false, threeMonth = false }) {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [visitor, setVisitor] = useState({ first_name: '', last_name: '', email: '', phone: '' });
   const [questionnaire, setQuestionnaire] = useState('');
-  const passKind = threeMonth ? THREE_MONTH_MEMBERSHIP_ACTION : threeDayPass ? THREE_DAY_PASS_ACTION : CASUAL_VISIT_ACTION;
+  const passKind = threeMonth ? THREE_MONTH_MEMBERSHIP_ACTION : threeDayPass ? THREE_DAY_PASS_ACTION
+    : tenSessionPack ? TEN_SESSION_PACK_ACTION : CASUAL_VISIT_ACTION;
   const [pricing, setPricing] = useState(() => (
     threeMonth ? { full: THREE_MONTH_MEMBERSHIP_PRICE_CENTS, charge: THREE_MONTH_MEMBERSHIP_PRICE_CENTS, discounted: false }
       : threeDayPass ? { full: THREE_DAY_PASS_PRICE_CENTS, charge: THREE_DAY_PASS_PRICE_CENTS, discounted: false }
-        : null
+        : tenSessionPack ? { full: TEN_SESSION_PACK_PRICE_CENTS, charge: TEN_SESSION_PACK_PRICE_CENTS, discounted: false }
+          : null
   ));
   const priceCents = pricing?.charge ?? null;
   // A member who signed when they joined should not sign again to pay. The
@@ -82,7 +89,8 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
   useEffect(() => {
     document.title = threeMonth ? 'Three month membership | XERT Fitness'
       : threeDayPass ? 'Three Day Pass | XERT Fitness'
-        : 'Casual visit | XERT Fitness';
+        : tenSessionPack ? '10 Session Pack | XERT Fitness'
+          : 'Casual visit | XERT Fitness';
     let active = true;
     // PostgREST's builder is a thenable, not a Promise, so it has no .catch.
     // The price shown here is a courtesy — the server reads it again before
@@ -96,7 +104,7 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
       }
     })();
     return () => { active = false; };
-  }, [passKind, threeDayPass, threeMonth]);
+  }, [passKind, threeDayPass, tenSessionPack, threeMonth]);
 
   const update = (field, value) => setVisitor(current => ({ ...current, [field]: value }));
   const validation = casualVisitValidationError(visitor);
@@ -107,6 +115,10 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
   const threeDayAlreadySigned = threeDayPass && questionnaire === 'done'
     && !validQuestionnaireResponseId(questionnaireResponseId);
   const needsThreeDayQuestionnaire = threeDayPass && questionnaire !== 'done';
+  // The 10 Session Pack is screened exactly like the Three Day Pass.
+  const tenPackAlreadySigned = tenSessionPack && questionnaire === 'done'
+    && !validQuestionnaireResponseId(questionnaireResponseId);
+  const needsTenPackQuestionnaire = tenSessionPack && questionnaire !== 'done';
   const membershipPaperwork = membershipPaperworkStatus(
     visitor, membershipQuestionnaire, membershipAgreement,
   );
@@ -134,9 +146,14 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
       navigate(`/forms/${CASUAL_PEQ_SLUG}?return=3daypass`);
       return;
     }
+    if (needsTenPackQuestionnaire) {
+      rememberCasualVisitor(visitor);
+      navigate(`/forms/${CASUAL_PEQ_SLUG}?return=10pack`);
+      return;
+    }
     // Nobody trains without being screened, so the questionnaire comes before
     // the payment rather than being an afterthought on the receipt page.
-    if (!threeMonth && !threeDayPass && questionnaire === 'not-done') {
+    if (!threeMonth && !threeDayPass && !tenSessionPack && questionnaire === 'not-done') {
       rememberCasualVisitor(visitor);
       navigate(`/forms/${CASUAL_PEQ_SLUG}?return=casual`);
       return;
@@ -162,7 +179,14 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
                 ? { already_signed: true }
                 : { questionnaire_response_id: questionnaireResponseId }),
             }
-            : { action: CASUAL_VISIT_ACTION, ...visitor }),
+            : tenSessionPack
+              ? {
+                action: TEN_SESSION_PACK_ACTION, ...visitor,
+                ...(tenPackAlreadySigned
+                  ? { already_signed: true }
+                  : { questionnaire_response_id: questionnaireResponseId }),
+              }
+              : { action: CASUAL_VISIT_ACTION, ...visitor }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || !body.url) {
@@ -188,17 +212,19 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
         <div className="relative mx-auto w-full max-w-lg">
           <div className="flex items-center gap-3 mb-5">
             <div className="h-px w-6 bg-xert-steel" aria-hidden="true" />
-            <span className="font-body text-xs uppercase tracking-[0.2em] text-xert-steel">{threeMonth ? MEMBERSHIP_COPY.eyebrow : threeDayPass ? 'Three Day Pass' : 'Casual visit'}</span>
+            <span className="font-body text-xs uppercase tracking-[0.2em] text-xert-steel">{threeMonth ? MEMBERSHIP_COPY.eyebrow : threeDayPass ? 'Three Day Pass' : tenSessionPack ? '10 Session Pack' : 'Casual visit'}</span>
           </div>
 
           {paid ? (
             <div className="xert-card p-6 sm:p-8">
               <CheckCircle2 className="mb-4 h-9 w-9 text-status-success-300" aria-hidden="true" />
-              <h1 className="font-display text-4xl uppercase leading-tight text-xert-offwhite">{threeMonth ? MEMBERSHIP_COPY.paidTitle : threeDayPass ? 'Check your payment receipt' : 'Payment received'}</h1>
+              <h1 className="font-display text-4xl uppercase leading-tight text-xert-offwhite">{threeMonth ? MEMBERSHIP_COPY.paidTitle : threeDayPass || tenSessionPack ? 'Check your payment receipt' : 'Payment received'}</h1>
               <p className="mt-4 font-body text-sm leading-relaxed text-xert-pale/75">
                 {threeMonth ? MEMBERSHIP_COPY.paidBody : threeDayPass
                   ? 'If your payment completed, Stripe will email your Three Day Pass receipt. Show it to the XERT team before training; the team will arrange your visits.'
-                  : 'Thanks — your receipt is on its way by email, and the team has been told you are here. If you have not filled in the pre-exercise questionnaire yet, do that before you train.'}
+                  : tenSessionPack
+                    ? 'If your payment completed, Stripe will email your 10 Session Pack receipt. Show it to the XERT team before training; the team will arrange your sessions.'
+                    : 'Thanks — your receipt is on its way by email, and the team has been told you are here. If you have not filled in the pre-exercise questionnaire yet, do that before you train.'}
               </p>
               {!threeMonth && <Link to="/forms/peq-casual" className="mt-6 inline-flex min-h-12 items-center justify-center bg-xert-steel px-5 font-display text-sm uppercase tracking-wide text-xert-navy transition-colors hover:bg-xert-pale">
                 Fill in the questionnaire
@@ -207,12 +233,14 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
           ) : (
             <>
               <h1 className="font-display text-[clamp(2.25rem,7vw,3.25rem)] uppercase leading-tight text-xert-offwhite">
-                {threeMonth ? MEMBERSHIP_COPY.title : threeDayPass ? 'Get your Three Day Pass' : <>Pay for today&apos;s visit</>}
+                {threeMonth ? MEMBERSHIP_COPY.title : threeDayPass ? 'Get your Three Day Pass' : tenSessionPack ? 'Get your 10 Session Pack' : <>Pay for today&apos;s visit</>}
               </h1>
               <p className="mt-4 max-w-prose font-body text-sm leading-relaxed text-xert-pale/75">
                 {threeMonth ? MEMBERSHIP_COPY.lede : threeDayPass
                   ? 'Three Day Pass — show your receipt to the XERT team. Enter your details and pay on your own phone, no account needed'
-                  : 'One visit, one class, no membership. Enter your details and pay on your own phone'}
+                  : tenSessionPack
+                    ? '10 Session Pack — show your receipt to the XERT team. Enter your details and pay on your own phone, no account needed'
+                    : 'One visit, one class, no membership. Enter your details and pay on your own phone'}
                 {priceCents ? <> — {pricing?.discounted && (
                   <s className="text-xert-pale/40">{formatCasualVisitPrice(pricing.full)}</s>
                 )} <strong className="text-xert-offwhite">{formatCasualVisitPrice(priceCents)}</strong>
@@ -297,7 +325,7 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
                 ) : (
                 <fieldset className="min-w-0 border border-xert-steel/20 p-4">
                   <legend className="px-2 font-body text-xs uppercase tracking-wider text-xert-pale/60">Pre-exercise questionnaire</legend>
-                  {threeDayPass && <p className="mb-3 font-body text-xs leading-relaxed text-xert-pale/60">
+                  {(threeDayPass || tenSessionPack) && <p className="mb-3 font-body text-xs leading-relaxed text-xert-pale/60">
                     Signed it on an earlier visit? Say so below and pay — we check our records against your email. Otherwise the next button opens it, and your details carry back here afterwards.
                   </p>}
                   <div className="space-y-2" role="radiogroup" aria-label="Pre-exercise questionnaire">
@@ -336,14 +364,14 @@ export default function CasualVisit({ threeDayPass = false, threeMonth = false }
                   {sending ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                   {sending ? 'Opening secure payment…'
                     : needsMembershipPaperwork ? 'Sign the questionnaire and agreement first'
-                    : (!threeMonth && questionnaire === 'not-done') || needsThreeDayQuestionnaire ? 'Fill in the questionnaire first'
+                    : (!threeMonth && questionnaire === 'not-done') || needsThreeDayQuestionnaire || needsTenPackQuestionnaire ? 'Fill in the questionnaire first'
                     : priceCents ? `Pay ${formatCasualVisitPrice(priceCents)}` : 'Continue to payment'}
                 </button>
                 <p className="font-body text-xs leading-relaxed text-xert-pale/45">
                   Payment is taken by Stripe on their secure page. XERT never sees or stores your card details.
                   {threeMonth ? <> Your membership starts once the XERT team sets it up, and they will be in touch.</> : <>
-                  {' '}New here? Please also complete the <Link to={threeDayPass ? '/forms/peq-casual?return=3daypass' : '/forms/peq-casual'}
-                    onClick={threeDayPass ? () => { rememberCasualVisitor(visitor); } : undefined}
+                  {' '}New here? Please also complete the <Link to={threeDayPass ? '/forms/peq-casual?return=3daypass' : tenSessionPack ? '/forms/peq-casual?return=10pack' : '/forms/peq-casual'}
+                    onClick={threeDayPass || tenSessionPack ? () => { rememberCasualVisitor(visitor); } : undefined}
                     className="text-xert-steel underline">pre-exercise questionnaire</Link> before you train.</>}
                 </p>
               </form>

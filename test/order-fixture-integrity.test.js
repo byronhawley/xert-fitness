@@ -32,8 +32,8 @@ test('visitor fixture is a separate bounded ledger and has no mutation handler',
   const visits = fixture.read('casual_visit_payments', query('casual_visit_payments', { limit: 200 }));
   assert.equal(visits.rows.length, 61);
   assert.equal(fixture.read('casual_visit_payments', query('casual_visit_payments', { limit: 50 })).rows.length, 50);
-  assert.deepEqual([...new Set(visits.rows.map(row => row.pass_kind))].sort(), ['casual', 'three_day_pass']);
-  assert.deepEqual([...new Set(visits.rows.map(row => visitorPassLabel(row.pass_kind)))].sort(), ['Casual visit', 'Three Day Pass']);
+  assert.deepEqual([...new Set(visits.rows.map(row => row.pass_kind))].sort(), ['casual', 'ten_session_pack', 'three_day_pass']);
+  assert.deepEqual([...new Set(visits.rows.map(row => visitorPassLabel(row.pass_kind)))].sort(), ['10 Session Pack', 'Casual visit', 'Three Day Pass']);
   assert.ok(visits.rows.some(row => row.status === 'refunded'));
   assert.equal(fixture.read('admin_refund_order', query('rpc/admin_refund_order')), undefined);
   assert.equal(fixture.mutate, undefined);

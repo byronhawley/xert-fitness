@@ -237,7 +237,7 @@ try {
             results.push({ prefix: `${prefix}-calendar-flows`, passed: false, error: error.message, browserErrors: errors });
           }
         }
-        if (['/casual', '/3daypass', '/3months'].includes(path) && process.argv.includes('--public-visitor-prices')) {
+        if (['/casual', '/3daypass', '/10pack', '/3months'].includes(path) && process.argv.includes('--public-visitor-prices')) {
           try {
             await checkPublicVisitorPrices(page, { origin, path, capture: name => page.screenshot({ path: resolve(output, `${prefix}-${name}.png`) }) });
             assert.deepEqual(errors, [], 'No runtime errors during public price display checks');
