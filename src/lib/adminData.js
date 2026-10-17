@@ -420,14 +420,19 @@ export async function updateLegacyBookingNotes(id, adminNotes) {
  * and including the ones the owner has marked full so their card can say so.
  * Without the time bound the List view opened on the oldest class in the
  * database and the month counter included classes that had long since run.
+ *
+ * `since` widens that bound back into the past. The public calendar keeps the
+ * classes that have already run on their days (the owner asked that a class
+ * never vanish once it has happened); it still stops somewhere, so a year of
+ * history can't push next week's classes past the API's row limit.
  */
-export async function getClassSessions(publicOnly = false, { now = new Date() } = {}) {
+export async function getClassSessions(publicOnly = false, { now = new Date(), since = null } = {}) {
   let query = supabase.from('class_sessions').select('*').order('start_time', { ascending: true });
   if (publicOnly) {
     query = query
       .eq('public_visible', true)
       .in('status', ['published', 'full'])
-      .gt('start_time', new Date(now).toISOString());
+      .gt('start_time', new Date(since ?? now).toISOString());
   }
   const { data, error } = await query;
   if (error) throw new Error(error.message);
