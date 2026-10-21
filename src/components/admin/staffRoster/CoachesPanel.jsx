@@ -33,6 +33,7 @@ function capabilityRows(row) {
 function CoachEditor({ row, busy, onClose, onMutate }) {
   const [form, setForm] = useState(() => toForm(row));
   const [capabilities, setCapabilities] = useState(() => capabilityRows(row));
+  const [canBook, setCanBook] = useState(row?.can_book_members === true);
   const [query, setQuery] = useState('');
   const [candidates, setCandidates] = useState([]);
   const [publicCoaches, setPublicCoaches] = useState([]);
@@ -63,6 +64,12 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
       // aren't lost; a new coach now exists, so saving again would add a twin.
       if (!kept && row) return;
     }
+    if (canBook !== (row?.can_book_members === true)) {
+      const allowed = await onMutate(client => client.setCanBookMembers(saved.id, canBook),
+        canBook ? 'Can now add people to classes' : 'Can no longer add people to classes',
+        { failTitle: 'Coach saved, class permission not saved' });
+      if (!allowed && row) return;
+    }
     onClose(undefined, row ? null : saved);
   };
   const setStatus = async status => {
@@ -87,6 +94,11 @@ function CoachEditor({ row, busy, onClose, onMutate }) {
             ))}
           </div>
         </fieldset>
+        {/* Lead coaches can always add people; the tick lets anyone else. */}
+        <label className="flex items-start gap-2 font-body text-sm text-xert-pale min-h-11">
+          <input type="checkbox" className="mt-1" checked={form.roles.includes('lead') || canBook} disabled={form.roles.includes('lead')} onChange={event => setCanBook(event.target.checked)} />
+          <span>Can add people to classes<span className="block text-xs text-xert-pale/60">{form.roles.includes('lead') ? 'Lead coaches always can.' : 'From My Coaching: book a registered member, or add a walk-in by name.'}</span></span>
+        </label>
 
         <section className="space-y-2">
           <h3 className={ADMIN_TEXT.sectionHeading}>Sign-in</h3>

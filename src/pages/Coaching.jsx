@@ -12,6 +12,7 @@ import { answerableMonths } from '@/lib/staffRoster/coachHome';
 import { Banner, GHOST } from '@/components/coaching/coachingUi';
 import CoachHome from '@/components/coaching/CoachHome';
 import CoachRoster from '@/components/coaching/CoachRoster';
+import CoachAddToClass from '@/components/coaching/CoachAddToClass';
 import CoachAvailability from '@/components/coaching/CoachAvailability';
 import CoachRequests from '@/components/coaching/CoachRequests';
 import CoachInbox from '@/components/coaching/CoachInbox';
@@ -25,6 +26,7 @@ import '@/components/coaching/coaching.css';
 const TABS = [
   { key: 'home', label: 'Home' },
   { key: 'roster', label: 'My classes' },
+  { key: 'add', label: 'Add to a class', when: 'booker' },
   { key: 'availability', label: 'Availability' },
   { key: 'requests', label: 'Time off' },
   { key: 'inbox', label: 'Inbox' },
@@ -66,7 +68,9 @@ export default function Coaching({ client: injected = null }) {
   // PT has its own switch; its tab only appears once PT booking is on.
   const [ptOn, setPtOn] = useState(false);
   useEffect(() => { ptClient().then(pt => pt.coaches()).then(result => setPtOn(Boolean(result?.enabled))).catch(() => setPtOn(false)); }, []);
-  const tabs = TABS.filter(item => !item.when || (item.when === 'pt' && ptOn));
+  // The database says who may add people: lead coaches, and staff the manager allows.
+  const canBook = me?.staff?.can_book_members === true;
+  const tabs = TABS.filter(item => !item.when || (item.when === 'pt' && ptOn) || (item.when === 'booker' && canBook));
   const tab = tabs.some(item => item.key === params.get('tab')) ? params.get('tab') : 'home';
 
   useEffect(() => { if (!injected) staffRoster().then(setClient); }, [injected]);
@@ -120,6 +124,7 @@ export default function Coaching({ client: injected = null }) {
       <section id="coach-panel" role="tabpanel" aria-labelledby={`coach-tab-${tab}`}>
         {tab === 'home' && <CoachHome client={client} me={me} today={today} joined={location.state?.joined || null} />}
         {tab === 'roster' && <CoachRoster client={client} today={today} notify={notify} onChanged={loadMe} />}
+        {tab === 'add' && canBook && <CoachAddToClass client={client} notify={notify} />}
         {tab === 'availability' && <CoachAvailability client={client} me={me} monthParam={params.get('month') || ''} setMonthParam={value => setParam('month', value)} notify={notify} onChanged={loadMe} />}
         {tab === 'requests' && <CoachRequests client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'inbox' && <CoachInbox client={client} notify={notify} onChanged={loadMe} />}

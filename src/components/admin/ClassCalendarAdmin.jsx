@@ -7,7 +7,7 @@ import './calendar.css';
 import { kitTokens } from './ui/kitTokens.mjs';
 import { AlertTriangle, BellRing, CheckCheck, ClipboardCheck, Copy, Download, LoaderCircle, Search, Mail, Phone, RotateCcw, UserCheck } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
-import { getClassSessions, createClassSession, cancelClassSession, notifyClassCancellation, duplicateClassSession, getClassBookings, updateBookingStatus, adminSessionRoster, adminClassCapacity, adminWaitlistOverview, adminSetBookingStatus, adminPromoteNextWaitlisted, adminRecordSessionAttendance, adminSearchMembers, staffBookMemberIntoClass, searchClassAttendees, getBlackoutPeriods, getClassTemplates, createClassTemplate, getSoftLaunchSettings } from '@/lib/adminData';
+import { getClassSessions, staffAddWalkIn, createClassSession, cancelClassSession, notifyClassCancellation, duplicateClassSession, getClassBookings, updateBookingStatus, adminSessionRoster, adminClassCapacity, adminWaitlistOverview, adminSetBookingStatus, adminPromoteNextWaitlisted, adminRecordSessionAttendance, adminSearchMembers, staffBookMemberIntoClass, searchClassAttendees, getBlackoutPeriods, getClassTemplates, createClassTemplate, getSoftLaunchSettings } from '@/lib/adminData';
 import { downloadCsv } from '@/lib/csv';
 import { blackoutsOverlappingSession } from '@/lib/scheduling';
 import { classSessionFromTemplate, classSessionSeedForDate, classTemplateFromSession } from '@/lib/classCalendar';
@@ -155,6 +155,8 @@ export default function ClassCalendarAdmin({ initialAction, initialSessionId, on
   const [attendeeSearch, setAttendeeSearch] = useState('');
   const [attendeeResults, setAttendeeResults] = useState([]);
   const [addingAttendeeId, setAddingAttendeeId] = useState('');
+  const [walkIn, setWalkIn] = useState(null);
+  const [walkInBusy, setWalkInBusy] = useState(false);
   const [boardRosterSessionId, setBoardRosterSessionId] = useState(null);
   const [boardRosterLoading, setBoardRosterLoading] = useState(false);
   const [allSignups, setAllSignups] = useState([]);
@@ -409,6 +411,27 @@ export default function ClassCalendarAdmin({ initialAction, initialSessionId, on
     }, 250);
     return () => { active = false; clearTimeout(timer); };
   }, [attendeeSearch]);
+
+  // Somebody with no account, added by name as a sign-up on the class.
+  const addWalkIn = async (event, session) => {
+    event.preventDefault();
+    setWalkInBusy(true);
+    try {
+      const result = await staffAddWalkIn(session.id, walkIn);
+      toast({
+        title: result?.status === 'waitlisted' ? 'Added to the waitlist' : 'Added to the class',
+        description: `${result?.full_name || walkIn.fullName} is ${result?.status || 'added'} for ${session.title || 'this class'}.`,
+      });
+      setWalkIn(null);
+      setAttendeeSearch('');
+      setAttendeeResults([]);
+      await refreshBookings(session.id);
+    } catch (error) {
+      toast({ title: 'Could not add them', description: error.message, variant: 'destructive' });
+    } finally {
+      setWalkInBusy(false);
+    }
+  };
 
   const addAttendee = async (session, member) => {
     setAddingAttendeeId(member.id);
@@ -1026,13 +1049,39 @@ export default function ClassCalendarAdmin({ initialAction, initialSessionId, on
                       Add an attendee
                     </label>
                     <p className="mt-1 mb-2 font-body text-xs text-xert-concrete/40">
-                      Books a member in from here using one of their credits, the same as if they had booked it themselves.
+                      Books a registered member in, the same as if they had booked it themselves. Not registered? Add them as a walk-in.
                     </p>
                     <input id={`add-attendee-${s.id}`} value={attendeeSearch} onChange={e => setAttendeeSearch(e.target.value)}
                       placeholder="Search a member by name or email"
                       className="w-full bg-xert-charcoal border border-xert-steel/40 px-3 py-2 font-body text-sm text-xert-offwhite focus:outline-none focus:border-xert-steel" />
                     {attendeeSearch.trim().length >= 2 && attendeeResults.length === 0 && (
-                      <p className="mt-2 font-body text-xs text-xert-concrete/40">No member matches that. Members must have an account before they can be booked in.</p>
+                      <p className="mt-2 font-body text-xs text-xert-concrete/40">No registered member matches that.</p>
+                    )}
+                    {!walkIn && (
+                      <button type="button" onClick={() => setWalkIn({ fullName: attendeeSearch.trim().includes('@') ? '' : attendeeSearch.trim(), phone: '', email: '' })}
+                        className="mt-2 min-h-11 font-body text-xs uppercase tracking-wider text-xert-steel hover:text-xert-offwhite">
+                        Not registered? Add a walk-in
+                      </button>
+                    )}
+                    {walkIn && (
+                      <form onSubmit={event => addWalkIn(event, s)} aria-label="Add a walk-in" className="mt-3 space-y-2 border-t border-xert-steel/20 pt-3">
+                        <p className="font-body text-xs text-xert-concrete/40">For someone without an account. With an email they get the usual booking confirmation.</p>
+                        {[['fullName', 'Name', 'text', true], ['phone', 'Phone (optional)', 'tel', false], ['email', 'Email (optional)', 'email', false]].map(([key, label, type, required]) => (
+                          <label key={key} className="block font-body text-xs uppercase tracking-wider text-xert-concrete/50">
+                            {label}
+                            <input type={type} value={walkIn[key]} required={required} minLength={required ? 2 : undefined} autoComplete="off"
+                              onChange={e => setWalkIn({ ...walkIn, [key]: e.target.value })}
+                              className="mt-1 w-full bg-xert-charcoal border border-xert-steel/40 px-3 py-2 font-body text-sm normal-case tracking-normal text-xert-offwhite focus:outline-none focus:border-xert-steel" />
+                          </label>
+                        ))}
+                        <div className="flex gap-2">
+                          <button type="submit" disabled={walkInBusy || walkIn.fullName.trim().length < 2}
+                            className="min-h-11 border border-xert-steel px-4 font-body text-xs uppercase tracking-wider text-xert-offwhite disabled:opacity-50">
+                            {walkInBusy ? 'Adding…' : 'Add to class'}
+                          </button>
+                          <button type="button" onClick={() => setWalkIn(null)} className="min-h-11 px-4 font-body text-xs uppercase tracking-wider text-xert-concrete/60">Cancel</button>
+                        </div>
+                      </form>
                     )}
                     {attendeeResults.length > 0 && (
                       <ul className="mt-2 space-y-1">

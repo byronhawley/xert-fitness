@@ -23,6 +23,7 @@ import { collectAdminBatches, collectAdminPages } from './adminPagination.js';
 import { adminAuditRangeStart } from './adminAudit.js';
 import { apiErrorMessage } from './apiError.js';
 import { providerOperationsHealth } from './platformProvider.js';
+import { rosterError } from './staffRosterData.js';
 
 // ─── Leads ────────────────────────────────────────────────────────────────────
 
@@ -706,6 +707,19 @@ export async function listCasualVisits({ limit = 200 } = {}) {
  */
 function newDecisionRequestID() {
   return globalThis.crypto?.randomUUID?.();
+}
+
+// Adds somebody with no account to a class as a walk-in sign-up. The same
+// database entry point the coach screens use; admins are always allowed.
+export async function staffAddWalkIn(sessionId, { fullName, phone = '', email = '' }) {
+  const { data, error } = await supabase.rpc('staff_roster_add_walk_in', {
+    p_session_id: sessionId,
+    p_full_name: fullName,
+    p_phone: phone?.trim() || null,
+    p_email: email?.trim() || null,
+  });
+  if (error) throw rosterError(error);
+  return data;
 }
 
 export async function staffBookMemberIntoClass(sessionId, memberId, requestId) {

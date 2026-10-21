@@ -10,6 +10,19 @@
 import { PROBLEM_MESSAGES } from './staffRoster/validate.js';
 
 export const ROSTER_ERROR_MESSAGES = Object.freeze({
+  // Adding people to a class.
+  NOT_ALLOWED_TO_BOOK: 'You aren’t set up to add people to classes. Ask the manager to allow it on your coach profile.',
+  SESSION_NOT_BOOKABLE: 'That class isn’t taking bookings — it may be cancelled or still a draft.',
+  SESSION_FINISHED: 'That class has already finished.',
+  SESSION_INTEREST_ONLY: 'That class only takes expressions of interest, not bookings.',
+  MEMBER_NOT_BOOKABLE: 'That account can’t be booked into a class.',
+  MEMBER_ALREADY_ON_ROSTER: 'They’re already booked into this class.',
+  ALREADY_ON_CLASS: 'Someone with that name or email is already on this class.',
+  WALK_IN_NAME_INVALID: 'Enter their name (at least 2 letters).',
+  WALK_IN_EMAIL_INVALID: 'That email doesn’t look right — check it, or leave it blank.',
+  WALK_IN_PHONE_INVALID: 'That phone number is too long.',
+  BOOKING_TIME_CONFLICT: 'They’re already booked into another class at that time.',
+  WAITLIST_PRIORITY: 'Others are already waiting for this class, so they’ll join the end of the waitlist.',
   SIGN_IN_REQUIRED: 'Please sign in again.',
   ROSTER_DISABLED: 'The coach roster is not switched on yet.',
   NOT_STAFF: 'This account is not linked to a coach on the roster. Ask the manager to link it.',
@@ -193,6 +206,7 @@ export function createStaffRosterClient(rpc, { notifyPush = null, sendTexts = nu
     upsertStaff: (staff, version) => call('upsert_staff', { p_staff: staff, p_expected_version: version ?? null, p_request_id: rid() }),
     setStaffStatus: (staffId, status, version, reason) => call('set_staff_status', { p_staff_id: staffId, p_status: status, p_expected_version: version, p_reason: reason || null, p_request_id: rid() }),
     setCapabilities: (staffId, capabilities) => call('set_capabilities', { p_staff_id: staffId, p_capabilities: capabilities, p_request_id: rid() }),
+    setCanBookMembers: (staffId, allowed) => call('set_can_book_members', { p_staff_id: staffId, p_allowed: Boolean(allowed) }),
     linkCandidates: query => call('link_candidates', { p_query: query }),
     openPeriod: (month, { opensOn, dueOn, publishTargetOn, shortened }) => call('open_period', {
       p_month: monthParam(month), p_opens_on: opensOn, p_due_on: dueOn, p_publish_target_on: publishTargetOn, p_shortened: Boolean(shortened), p_request_id: rid(),
@@ -270,6 +284,11 @@ export function createStaffRosterClient(rpc, { notifyPush = null, sendTexts = nu
       ? refuse('CERTIFICATE_NOT_FOUND') : call('save_certificate', { p_certificate: certificate })),
     removeCertificate: certificateId => (!UUID_PATTERN.test(String(certificateId ?? ''))
       ? refuse('CERTIFICATE_NOT_FOUND') : call('remove_certificate', { p_certificate_id: certificateId })),
+    // ── Adding people to a class (lead coaches, and staff an admin allows) ──
+    upcomingClasses: (days = 14) => call('upcoming_classes', { p_days: days }),
+    searchMembers: (search, limit = 12) => (String(search ?? '').trim().length < 2 ? Promise.resolve([]) : call('search_members', { p_search: String(search).trim(), p_limit: limit })),
+    bookMember: (sessionId, memberId, requestId = rid()) => call('book_member', { p_session_id: sessionId, p_member_id: memberId, p_request_id: requestId }).then(rows => (Array.isArray(rows) ? rows[0] : rows)),
+    addWalkIn: (sessionId, { fullName, phone = '', email = '' }) => call('add_walk_in', { p_session_id: sessionId, p_full_name: fullName, p_phone: phone || null, p_email: email || null }),
     classDetail: sessionId => (!UUID_PATTERN.test(String(sessionId ?? '')) ? refuse('SESSION_NOT_FOUND') : call('class_detail', { p_session_id: sessionId })),
     saveSessionNote: (sessionId, body, expectedNoteId) => call('save_session_note', { p_session_id: sessionId, p_body: body, p_expected_note_id: expectedNoteId ?? null }),
     myNoticePreferences: () => call('my_notice_preferences'),
