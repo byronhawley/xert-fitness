@@ -20,7 +20,7 @@ import {
   CASUAL_VISIT_ACTION, casualVisitCheckoutParameters, normalizeCasualVisitor,
   visitorPassPricing,
   THREE_DAY_PASS_ACTION, THREE_DAY_PASS_PRICE_CENTS, THREE_MONTH_MEMBERSHIP_ACTION,
-  THREE_MONTH_MEMBERSHIP_PRICE_CENTS, validQuestionnaireResponseId,
+  THREE_MONTH_MEMBERSHIP_PRICE_CENTS, TEN_SESSION_PACK_ACTION, validQuestionnaireResponseId,
 } from '../src/lib/casualVisit.js';
 
 // Vercel serverless function using the default Node request/response signature.
@@ -559,6 +559,21 @@ export default async function handler(request, response) {
       return json({ error: failure.message }, failure.status);
     }
   }
+  // A visitor purchase despite the name: no account, order or credits, so it
+  // has to be dispatched here, before the member checkout asks for a session.
+  if (payload?.action === TEN_SESSION_PACK_ACTION) {
+    try {
+      const origin = resolveCheckoutOrigin(request.url, process.env.APP_BASE_URL || '', {
+        stripeMode: stripeModeForSecret(process.env.STRIPE_SECRET_KEY), expectedHost: XERT_VERCEL_HOST,
+      });
+      return json(await startTenSessionPackCheckout({
+        payload, admin, origin, stripe: createXertStripeClient(process.env.STRIPE_SECRET_KEY),
+      }));
+    } catch (error) {
+      const failure = publicCheckoutFailure(error);
+      return json({ error: failure.message }, failure.status);
+    }
+  }
   if (payload?.action === THREE_MONTH_MEMBERSHIP_ACTION) {
     try {
       const origin = resolveCheckoutOrigin(request.url, process.env.APP_BASE_URL || '', {
@@ -869,6 +884,83 @@ export async function startThreeDayPassCheckout({ payload, admin, stripe, origin
     fail('Stripe did not return a secure payment page.', 502);
   }
   return { url: url.toString(), amount_cents: visitorPassPricing(THREE_DAY_PASS_ACTION, settings).charge };
+}
+
+/**
+ * The 10 Session Pack, sold the same way as the Three Day Pass: the casual
+ * questionnaire signed first (or declared already signed and looked up by
+ * email), the price read from settings, and a receipt the team arranges the
+ * sessions from. Its own capability gate keeps it closed until its migration
+ * has widened the pass kinds, so a paid pack always has somewhere to be
+ * recorded.
+ */
+export async function startTenSessionPackCheckout({ payload, admin, stripe, origin, now = Date.now() }) {
+  const fail = (message, status) => { throw new VisitorCheckoutError(message, status); };
+  if (payload?.action !== TEN_SESSION_PACK_ACTION) fail('This visitor pass is not available.', 400);
+  let visitor;
+  try { visitor = normalizeCasualVisitor(payload); } catch (error) { fail(error.message, 400); }
+  // As for the Three Day Pass: somebody who signed on an earlier visit says
+  // so, and the server looks the record up by email instead of sending them
+  // back through the form.
+  const declaredSigned = payload.already_signed === true;
+  if (!declaredSigned && !validQuestionnaireResponseId(payload.questionnaire_response_id)) {
+    fail('Complete and sign the pre-exercise questionnaire before buying this pass.', 400);
+  }
+  const [{ data: capability, error: capabilityError }, { data: settings, error: settingsError }] = await Promise.all([
+    admin.from('xert_schema_capabilities').select('capability').eq('capability', 'ten_session_pack').maybeSingle(),
+    admin.from('admin_settings').select('*').limit(1).maybeSingle(),
+  ]);
+  if (capabilityError || !capability || settingsError || !settings) fail('10 Session Pack payments are unavailable right now.', 503);
+  // The visitor switch covers every visitor page. The session pack payments
+  // switch is the member credit checkout and has nothing to do with this.
+  if (settings.casual_payments_enabled === false) fail('Visitor payments are switched off. Please speak to the XERT team.', 503);
+  // A declared "already signed" never blocks the sale: the payment goes
+  // through either way and the owner alert says plainly what was found.
+  let paperworkVerified = null;
+  if (declaredSigned) {
+    const { data: onFile, error: lookupError } = await admin.rpc('xert_visitor_questionnaire_signed', {
+      p_email: visitor.email,
+    });
+    // PGRST202 means the lookup is not deployed. An unproven claim is taken
+    // and flagged, the same as the Three Day Pass; a real failure still stops.
+    if (lookupError && lookupError.code !== 'PGRST202') {
+      fail('Your questionnaire could not be checked. Please try again.', 503);
+    }
+    paperworkVerified = onFile === true;
+  } else {
+    const { data: signed, error: proofError } = await admin.rpc('xert_visitor_questionnaire_completed', {
+      p_response_id: payload.questionnaire_response_id,
+      p_name: visitor.fullName, p_email: visitor.email, p_phone: visitor.phone,
+    });
+    if (proofError) fail('The questionnaire could not be checked. Please try again.', 503);
+    if (signed !== true) fail('Complete and sign the questionnaire using these same contact details, then return to pay.', 400);
+  }
+  // Priced once, so the amount handed back is exactly what Stripe was asked
+  // to charge.
+  const priceCents = visitorPassPricing(TEN_SESSION_PACK_ACTION, settings).charge;
+  // Keep expiry and every other parameter stable for a retry in this minute.
+  // Hash the server-built parameters so changed contact details or return URLs
+  // cannot reuse a Stripe key with a different request body.
+  const checkoutMinute = Math.floor(Number(now) / 60000) * 60000;
+  const parameters = casualVisitCheckoutParameters({
+    visitor, priceCents,
+    passKind: TEN_SESSION_PACK_ACTION,
+    ...(declaredSigned ? { paperworkVerified } : { questionnaireResponseId: payload.questionnaire_response_id }),
+    now: checkoutMinute,
+    returnURLs: {
+      success: new URL('/10pack?paid=1', origin).toString(),
+      cancel: new URL('/10pack?cancelled=1', origin).toString(),
+    },
+  });
+  const fingerprint = createHash('sha256').update(JSON.stringify(parameters)).digest('hex');
+  const session = await stripe.checkout.sessions.create(parameters, {
+    idempotencyKey: `ten-session-pack-${fingerprint}`,
+  });
+  const url = new URL(session?.url || 'https://invalid.invalid');
+  if (url.protocol !== 'https:' || url.hostname !== 'checkout.stripe.com' || url.username || url.password || url.port) {
+    fail('Stripe did not return a secure payment page.', 502);
+  }
+  return { url: url.toString(), amount_cents: priceCents };
 }
 
 /**

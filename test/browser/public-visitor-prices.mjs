@@ -5,6 +5,7 @@ export async function checkPublicVisitorPrices(page, { origin, path, capture = a
   const fields = {
     '/casual': ['casual_visit_price_cents', 'casual_visit_discount_cents', 'casual_visit_discount_enabled'],
     '/3daypass': ['three_day_pass_price_cents', 'three_day_pass_discount_cents', 'three_day_pass_discount_enabled'],
+    '/10pack': ['ten_session_pack_price_cents', 'ten_session_pack_discount_cents', 'ten_session_pack_discount_enabled'],
     '/3months': ['three_month_price_cents', 'three_month_discount_cents', 'three_month_discount_enabled'],
   }[path];
   let settings;

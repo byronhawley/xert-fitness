@@ -91,6 +91,7 @@ const AppRoutes = () => (
       <Route path="/passes" element={<Navigate to="/memberships" replace />} />
       <Route path="/casual" element={<CasualVisit key="casual" />} />
       <Route path="/3daypass" element={<CasualVisit key="three-day-pass" threeDayPass />} />
+      <Route path="/10pack" element={<CasualVisit key="ten-session-pack" tenSessionPack />} />
       <Route path="/3months" element={<CasualVisit key="three-month-membership" threeMonth />} />
       <Route path="/forms/:slug" element={<PublicForm />} />
       <Route path="/contact" element={<Contact />} />

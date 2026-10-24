@@ -9,15 +9,16 @@ import { metadataForPath } from '../src/lib/pageMetadata.js';
 
 const read = p => readFileSync(new URL(p, import.meta.url), 'utf8');
 
-test('all three ways to pay are offered, priced from the club\'s own settings', () => {
+test('all four ways to pay are offered, priced from the club\'s own settings', () => {
   const choices = visitorPassChoices({
     casual_visit_price_cents: 2000,
     three_day_pass_price_cents: 3500,
+    ten_session_pack_price_cents: 13000,
     three_month_price_cents: 43000,
   });
-  assert.deepEqual(choices.map(choice => choice.path), ['/casual', '/3daypass', '/3months']);
-  assert.deepEqual(choices.map(choice => choice.charge), [2000, 3500, 43000]);
-  // Each one has to say what it is, or the list is three prices and no choice.
+  assert.deepEqual(choices.map(choice => choice.path), ['/casual', '/3daypass', '/10pack', '/3months']);
+  assert.deepEqual(choices.map(choice => choice.charge), [2000, 3500, 13000, 43000]);
+  // Each one has to say what it is, or the list is four prices and no choice.
   for (const choice of choices) assert.ok(choice.label && choice.blurb);
 });
 

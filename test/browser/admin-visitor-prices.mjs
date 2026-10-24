@@ -5,8 +5,8 @@ export async function checkVisitorPrices(page, { origin, requests, capture = asy
   await page.goto(origin + '/admin/settings', { waitUntil: 'networkidle' });
   const prices = page.getByRole('textbox', { name: /full price in dollars$/ });
   await prices.first().waitFor();
-  assert.equal(await prices.count(), 3, 'All three visitor products have independent price controls');
-  for (let index = 0; index < 3; index++) {
+  assert.equal(await prices.count(), 4, 'All four visitor products have independent price controls');
+  for (let index = 0; index < 4; index++) {
     const price = prices.nth(index);
     const name = await price.getAttribute('aria-label');
     const row = price.locator('xpath=../../../..');

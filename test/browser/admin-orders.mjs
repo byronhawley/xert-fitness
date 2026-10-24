@@ -17,7 +17,9 @@ export async function checkAdminOrders(page, { origin, failures, capture = async
   await page.getByText('1-50 of 503 matching orders', { exact: true }).waitFor();
   assert.ok(await page.getByText('Mixed currencies', { exact: true }).count() >= 1);
   assert.equal(await page.getByRole('img', { name: 'Daily paid revenue for the last 30 days', exact: true }).count(), 0, 'Mixed currency revenue is never combined into a chart');
-  await page.getByRole('heading', { name: 'Casual visits & Three Day Passes', exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'Visitor payments', exact: true }).waitFor();
+  assert.ok((await page.getByRole('listitem').filter({ hasText: 'Fictional Visitor 003' }).textContent()).includes('10 Session Pack'),
+    'A 10 Session Pack sits in the visitor payments list under its own name');
   await page.getByText('Fictional Visitor 050', { exact: true }).waitFor();
   assert.equal(await page.getByText('Fictional Visitor 051', { exact: true }).count(), 0, 'Recent visit display remains bounded to50');
   await page.getByRole('button', { name: 'Next order page', exact: true }).click();

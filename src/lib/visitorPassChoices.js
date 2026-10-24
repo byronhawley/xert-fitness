@@ -6,16 +6,16 @@
 // up booked in and unable to pay.
 //
 // So the sign-up asks whether they are already a member, and anyone who is not
-// is offered the three ways to pay, priced from the club's own settings.
+// is offered the four ways to pay, priced from the club's own settings.
 //
-// A weekly membership is the fourth way, and the odd one out: it is not a
+// A weekly membership is the fifth way, and the odd one out: it is not a
 // payment this site can take. Memberships live in FitBox, so joining means
 // installing FitBox and opening the club's invite there. It is listed beside
-// the passes anyway — somebody deciding how to pay wants to see all four, not
-// three here and one nobody mentioned.
+// the passes anyway — somebody deciding how to pay wants to see all five, not
+// four here and one nobody mentioned.
 
 import {
-  CASUAL_VISIT_ACTION, THREE_DAY_PASS_ACTION, THREE_MONTH_MEMBERSHIP_ACTION,
+  CASUAL_VISIT_ACTION, TEN_SESSION_PACK_ACTION, THREE_DAY_PASS_ACTION, THREE_MONTH_MEMBERSHIP_ACTION,
   visitorPassPricing,
 } from './casualVisit.js';
 
@@ -31,6 +31,12 @@ export const VISITOR_PASS_CHOICES = Object.freeze([
     path: '/3daypass',
     label: 'Three Day Pass',
     blurb: 'Three days of training to try us properly.',
+  }),
+  Object.freeze({
+    kind: TEN_SESSION_PACK_ACTION,
+    path: '/10pack',
+    label: '10 Session Pack',
+    blurb: 'Ten sessions, paid upfront.',
   }),
   Object.freeze({
     kind: THREE_MONTH_MEMBERSHIP_ACTION,
@@ -75,7 +81,7 @@ export const WEEKLY_MEMBERSHIP = Object.freeze({
 });
 
 /**
- * The three ways to pay, with today's prices. A pass whose discount is running
+ * The four ways to pay, with today's prices. A pass whose discount is running
  * carries the full price too, so the page can show what was struck out.
  */
 export function visitorPassChoices(settings = {}) {

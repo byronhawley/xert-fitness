@@ -5,8 +5,8 @@ import { formatCasualVisitPrice, rememberCasualVisitor } from '@/lib/casualVisit
 import { visitorDetailsFromSignup, visitorPassChoices, WEEKLY_MEMBERSHIP } from '@/lib/visitorPassChoices';
 
 /**
- * The four ways a non-member can pay for, or join for, the class they have
- * just booked: three passes sold here, and a weekly membership set up in
+ * The five ways a non-member can pay for, or join for, the class they have
+ * just booked: four passes sold here, and a weekly membership set up in
  * FitBox because that is where memberships live.
  *
  * Their details carry across to the passes, so nobody retypes a name and

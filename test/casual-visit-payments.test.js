@@ -117,7 +117,7 @@ test('the owner sees door takings beside orders, counted only when actually paid
     'the screen says so rather than failing before the migration is applied');
 
   const orders = await read('../src/components/admin/OrdersManager.jsx');
-  assert.match(orders, /Casual visits/);
+  assert.match(orders, />Visitor payments<\/h3>/);
   assert.match(orders, /Paid at the door on the visitor&apos;s own phone/);
   assert.match(orders, /summarizeCasualVisits\(casualVisits\.rows\)/);
   assert.match(orders, /casualVisits\.installed && casualVisits\.rows\.length > 0/,
@@ -126,7 +126,8 @@ test('the owner sees door takings beside orders, counted only when actually paid
   // The front desk needs a code to print, whether or not anyone has paid yet.
   // A code for each thing somebody can buy at the door, named for what it is.
   for (const [slug, path] of [
-    ['casual-visit', '/casual'], ['three-day-pass', '/3daypass'], ['three-month-membership', '/3months'],
+    ['casual-visit', '/casual'], ['three-day-pass', '/3daypass'], ['ten-session-pack', '/10pack'],
+    ['three-month-membership', '/3months'],
   ]) {
     assert.match(orders, new RegExp(`slug: '${slug}', path: '${path}'`));
   }

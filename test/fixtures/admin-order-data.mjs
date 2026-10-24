@@ -26,8 +26,8 @@ export function installOrderData() {
     id: `a0000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
     full_name: `Fictional Visitor ${String(index + 1).padStart(3, '0')}`,
     email: `visitor.${String(index + 1).padStart(3, '0')}@example.invalid`, phone: '',
-    amount_cents: index % 2 ? 3590 : 2000, currency: 'aud', status: index % 6 === 5 ? 'refunded' : 'paid',
-    pass_kind: index % 2 ? 'three_day_pass' : 'casual', created_at: new Date(now - (index + 1) * 3600000).toISOString(),
+    amount_cents: index % 3 === 2 ? 12240 : index % 2 ? 3590 : 2000, currency: 'aud', status: index % 6 === 5 ? 'refunded' : 'paid',
+    pass_kind: index % 3 === 2 ? 'ten_session_pack' : index % 2 ? 'three_day_pass' : 'casual', created_at: new Date(now - (index + 1) * 3600000).toISOString(),
     stripe_payment_intent_id: `pi_local_visitor_fixture_${index + 1}`,
   }));
   return {

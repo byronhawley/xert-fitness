@@ -165,7 +165,7 @@ export function nextFormSlug(search) {
 
 // A form can also hand back to a page rather than another form. Only these
 // are ever accepted, so a crafted link can never bounce someone off the site.
-const RETURN_PATHS = Object.freeze({ casual: '/casual', '3daypass': '/3daypass', '3months': '/3months' });
+const RETURN_PATHS = Object.freeze({ casual: '/casual', '3daypass': '/3daypass', '10pack': '/10pack', '3months': '/3months' });
 
 /** Where a finished form should return to, taken from ?return= */
 export function returnPathAfterForm(search) {

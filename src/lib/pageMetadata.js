@@ -30,7 +30,7 @@ export const PUBLIC_METADATA = Object.freeze({
   '/booking': { title: 'Book Classes | XERT Fitness', description: 'Request a class or a personal training session with XERT Fitness in Kingaroy.' },
   '/contact': { title: 'Contact XERT Fitness | Kingaroy', description: 'Contact XERT Fitness about classes, coaching, allied health partnerships or your first session.' },
   '/training-guide': { title: 'Functional Training Guide | XERT Fitness', description: 'Learn how XERT approaches functional fitness, movement quality, conditioning and event preparation.' },
-  '/memberships': { title: 'Memberships and Passes | XERT Fitness', description: 'Casual visits, the Three Day Pass, three months upfront or an ongoing weekly membership at XERT Fitness in Kingaroy — prices, QR codes and how to join.' },
+  '/memberships': { title: 'Memberships and Passes | XERT Fitness', description: 'Casual visits, the Three Day Pass, the 10 Session Pack, three months upfront or an ongoing weekly membership at XERT Fitness in Kingaroy — prices, QR codes and how to join.' },
   '/timetable': { title: 'Class Timetable | XERT Fitness', description: 'View the XERT Fitness soft-launch timetable and planned class schedule in Kingaroy.' },
   '/app': { title: 'XERT Fitness iPhone App', description: 'Manage XERT bookings, your membership, training goals and events from the XERT Fitness iPhone app.' },
   '/trainer-interest': { title: 'Coach Opportunities | XERT Fitness', description: 'Register your interest in coaching or personal training opportunities with XERT Fitness.' },
@@ -46,6 +46,7 @@ const NOINDEX_TITLES = Object.freeze({
   // Reached from a QR code at the front desk, not from a search result.
   '/casual': 'Casual visit | XERT Fitness',
   '/3daypass': 'Three Day Pass | XERT Fitness',
+  '/10pack': '10 Session Pack | XERT Fitness',
   '/3months': 'Three month membership | XERT Fitness',
   // Kept out of search until PT booking is switched on and settled.
   '/pt': 'Personal Training | XERT Fitness',
