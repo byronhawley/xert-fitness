@@ -73,16 +73,15 @@ export default function ClassSessionCard({ session, bookingsEnabled, onBook, fit
         </div>
         <div className="rounded-xl bg-white/[0.03] px-3 py-2">
           {/* A live "spots left" counter under copy saying no spot is held read
-              as a bookable class, so people concluded their registration had
-              secured one of the eight. Only a class that actually hands out
-              places counts them down. */}
+              as a bookable class. Only a class that actually hands out places
+              counts them down; other modes show the session's configured size. */}
           <p className="font-body text-[10px] text-xert-pale/45 uppercase tracking-wider">
-            {signup.takesSpot ? 'Spots left' : 'Capacity'}
+            {signup.takesSpot ? 'Spots left' : 'Class size'}
           </p>
           <p className="font-display text-base text-xert-offwhite tabular-nums">
             {signup.takesSpot && signup.spotsLeft !== null
               ? `${signup.spotsLeft}${session.capacity ? ` / ${session.capacity}` : ''}`
-              : (session.capacity || '—')}
+              : (session.capacity ? `${session.capacity} places` : 'Set per session')}
           </p>
         </div>
         {session.intensity_level && (

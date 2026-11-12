@@ -17,6 +17,7 @@ import VisitorPassChoices from '@/components/public/VisitorPassChoices';
 import { shouldOfferVisitorPasses } from '@/lib/visitorPassChoices';
 import { gymDateKey } from '@/lib/gymTime';
 import { usePtAvailability } from '@/lib/usePtAvailability';
+import { filterPublicClasses, publicTimetableFilterOptions } from '@/lib/publicTimetableFilters';
 
 const VIEW_OPTIONS = [
   { key: 'calendar', label: 'Calendar', icon: CalendarDays },
@@ -35,8 +36,10 @@ export default function SoftLaunchTimetable() {
   const [showPTForm, setShowPTForm] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(null);
   const [availability, setAvailability] = useState({});
+  const [availabilityError, setAvailabilityError] = useState(false);
   const [ptSuccess, setPTSuccess] = useState(false);
   const [view, setView] = useState('calendar');
+  const [filters, setFilters] = useState({ query: '', coach: '', classType: '', timeOfDay: 'any', availableOnly: false });
   const [searchParams, setSearchParams] = useSearchParams();
   const fitbox = fitboxHandoff(settings);
   const deepLinkedId = searchParams.get('session') || '';
@@ -47,11 +50,12 @@ export default function SoftLaunchTimetable() {
       getSoftLaunchSettings().catch(() => getDefaultSettings()),
       // Live remaining places. Failing here only hides spot counts; the
       // database still refuses a sign-up once a class is full.
-      getPublicClassAvailability().catch(() => ({})),
-    ]).then(([s, cfg, places]) => {
+      getPublicClassAvailability().then(places => ({ places, error: false })).catch(() => ({ places: {}, error: true })),
+    ]).then(([s, cfg, availabilityResult]) => {
       setSessions(s);
       setSettings(cfg);
-      setAvailability(places);
+      setAvailability(availabilityResult.places);
+      setAvailabilityError(availabilityResult.error);
       setLoading(false);
     });
   }, []);
@@ -59,7 +63,9 @@ export default function SoftLaunchTimetable() {
   // Re-read remaining places after a sign-up so other visitors on this page
   // see the spot disappear without a reload.
   const refreshAvailability = useCallback(() => {
-    getPublicClassAvailability().then(setAvailability).catch(() => {});
+    getPublicClassAvailability()
+      .then(places => { setAvailability(places); setAvailabilityError(false); })
+      .catch(() => { setAvailability({}); setAvailabilityError(true); });
   }, []);
 
   // Counts stop being true the moment the page is left open, and a visitor who
@@ -104,6 +110,13 @@ export default function SoftLaunchTimetable() {
   // here, rather than being left to find a QR code at the front desk they have
   // not walked into yet.
   const offerPasses = shouldOfferVisitorPasses(bookingSuccess, settings);
+  const filteredSessions = useMemo(
+    () => filterPublicClasses(sessions, filters, availability),
+    [sessions, filters, availability],
+  );
+  const filterOptions = useMemo(() => publicTimetableFilterOptions(sessions), [sessions]);
+  const hasActiveFilters = Boolean(filters.query || filters.coach || filters.classType || filters.timeOfDay !== 'any' || filters.availableOnly);
+  const clearFilters = () => setFilters({ query: '', coach: '', classType: '', timeOfDay: 'any', availableOnly: false });
 
   return (
     <div className="bg-xert-navy min-h-screen flex flex-col">
@@ -123,7 +136,7 @@ export default function SoftLaunchTimetable() {
               <span className="text-xert-steel">Launch Plan.</span>
             </h1>
             <p className="font-body text-base text-xert-pale/75 leading-relaxed max-w-xl xert-enter xert-enter-up" style={{ animationDelay: '120ms' }}>
-              XERT will open in stages. During the first phase, class capacity may be limited while the full facility continues to take shape. Register interest early to secure your spot.
+              XERT will open in stages. Class sizes are set for each published session, and the timetable shows the available places before you enquire or book. Your place is only confirmed when the sign-up succeeds.
             </p>
             {settings.show_limited_capacity_badge && (
               <div className="xert-chip mt-5">
@@ -170,6 +183,56 @@ export default function SoftLaunchTimetable() {
               </div>
             </div>
 
+            {sessions.length > 0 && (
+              <div role="group" aria-label="Filter classes" className="xert-card mb-6 grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="min-w-0 font-body text-[11px] uppercase tracking-wider text-xert-pale/55">
+                  Search classes
+                  <input value={filters.query} onChange={event => setFilters(current => ({ ...current, query: event.target.value }))}
+                    placeholder="Class, coach or area" className="mt-1.5 min-h-11 w-full rounded-xl border border-xert-steel/20 bg-white/[0.04] px-3 text-sm normal-case tracking-normal text-xert-offwhite placeholder:text-xert-pale/35 focus:border-xert-steel focus:outline-none" />
+                </label>
+                <label className="min-w-0 font-body text-[11px] uppercase tracking-wider text-xert-pale/55">
+                  Coach
+                  <select value={filters.coach} onChange={event => setFilters(current => ({ ...current, coach: event.target.value }))}
+                    className="mt-1.5 min-h-11 w-full rounded-xl border border-xert-steel/20 bg-xert-navy px-3 text-sm normal-case tracking-normal text-xert-offwhite focus:border-xert-steel focus:outline-none">
+                    <option value="">Any coach</option>
+                    {filterOptions.coaches.map(coach => <option key={coach} value={coach}>{coach}</option>)}
+                  </select>
+                </label>
+                <label className="min-w-0 font-body text-[11px] uppercase tracking-wider text-xert-pale/55">
+                  Class
+                  <select value={filters.classType} onChange={event => setFilters(current => ({ ...current, classType: event.target.value }))}
+                    className="mt-1.5 min-h-11 w-full rounded-xl border border-xert-steel/20 bg-xert-navy px-3 text-sm normal-case tracking-normal text-xert-offwhite focus:border-xert-steel focus:outline-none">
+                    <option value="">All class types</option>
+                    {filterOptions.classTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                  </select>
+                </label>
+                <label className="min-w-0 font-body text-[11px] uppercase tracking-wider text-xert-pale/55">
+                  Time of day
+                  <select value={filters.timeOfDay} onChange={event => setFilters(current => ({ ...current, timeOfDay: event.target.value }))}
+                    className="mt-1.5 min-h-11 w-full rounded-xl border border-xert-steel/20 bg-xert-navy px-3 text-sm normal-case tracking-normal text-xert-offwhite focus:border-xert-steel focus:outline-none">
+                    <option value="any">Any time</option>
+                    <option value="morning">Morning · before 12pm</option>
+                    <option value="afternoon">Afternoon · 12–5pm</option>
+                    <option value="evening">Evening · 5pm onwards</option>
+                  </select>
+                </label>
+                <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2 lg:col-span-4">
+                  <label className="inline-flex min-h-11 items-center gap-2 font-body text-sm text-xert-pale/75">
+                    <input type="checkbox" checked={filters.availableOnly}
+                      onChange={event => setFilters(current => ({ ...current, availableOnly: event.target.checked }))}
+                      className="h-4 w-4 accent-[var(--accent-default)]" />
+                    Show sessions with confirmed places available
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <span className="font-body text-xs text-xert-pale/50" role="status" aria-live="polite">
+                      {filteredSessions.length} of {sessions.length} classes
+                    </span>
+                    {hasActiveFilters && <button type="button" onClick={clearFilters} className="min-h-11 px-2 font-body text-xs uppercase tracking-wider text-xert-steel underline underline-offset-4">Clear filters</button>}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {loading ? (
               <div className="py-20 text-center">
                 <div className="w-6 h-6 border-2 border-xert-steel/30 border-t-xert-steel rounded-full animate-spin mx-auto" />
@@ -184,9 +247,23 @@ export default function SoftLaunchTimetable() {
                   Register interest
                 </a>
               </div>
+            ) : filteredSessions.length === 0 ? (
+              <div className="xert-card px-6 py-12 text-center">
+                <p className="font-display text-2xl text-xert-offwhite uppercase mb-2">
+                  {filters.availableOnly && availabilityError ? 'Live availability unavailable' : 'No matching classes'}
+                </p>
+                <p className="font-body text-sm text-xert-pale/60 mb-5">
+                  {filters.availableOnly && availabilityError
+                    ? 'We could not confirm current places. Try again, or clear the availability filter to browse the timetable.'
+                    : 'Try another coach, time or search term. The full timetable is still available.'}
+                </p>
+                <button type="button" onClick={filters.availableOnly && availabilityError ? refreshAvailability : clearFilters} className={ctaClasses}>
+                  {filters.availableOnly && availabilityError ? 'Retry availability' : 'Show all classes'}
+                </button>
+              </div>
             ) : view === 'calendar' ? (
               <PublicClassCalendar
-                sessions={sessions}
+                sessions={filteredSessions}
                 bookingsEnabled={settings.bookings_enabled}
                 onBook={setSelectedSession}
                 fitbox={fitbox}
@@ -195,7 +272,7 @@ export default function SoftLaunchTimetable() {
               />
             ) : (
               <div className="space-y-3">
-                {sessions.map(s => (
+                {filteredSessions.map(s => (
                   <ClassSessionCard key={s.id} session={s} bookingsEnabled={settings.bookings_enabled}
                     onBook={setSelectedSession} fitbox={fitbox} availability={availability[s.id]} />
                 ))}
