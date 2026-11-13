@@ -18,6 +18,7 @@ const environment = {
   XERTOS_WRITE_SECRET_VERSION: '7',
   XERTOS_PREVIOUS_WRITE_SECRET: 'old-secret',
   XERTOS_PREVIOUS_WRITE_SECRET_VERSION: '6',
+  XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT: '2099-01-01T00:00:00Z',
 };
 
 Object.assign(process.env, environment);
@@ -451,8 +452,9 @@ test('post-match refresh needs the global connection gate but not permission for
     let called = false;
     let res = mockResponse();
     await handler(request({ rawBody, headers }), res, { runEdit: () => { called = true; } });
-    assert.equal(res.statusCode, 501);
-    assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+    // A deliberate off switch is a definite 409, which XertOS treats as terminal.
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.body.error.code, 'SYNC_OFF');
     assert.equal(called, false);
 
     process.env.CLIENT0_SYNC_ENABLED = 'true';
@@ -542,6 +544,7 @@ test('the real webhook-to-RPC refresh path accepts a rotated versioned key witho
     process.env.XERTOS_WRITE_SECRET_VERSION = '7';
     process.env.XERTOS_PREVIOUS_WRITE_SECRET = 'old-secret';
     process.env.XERTOS_PREVIOUS_WRITE_SECRET_VERSION = '6';
+    process.env.XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT = '2099-01-01T00:00:00Z';
     delete process.env.XERTOS_SITE_SECRET;
 
     const response = mockResponse();
