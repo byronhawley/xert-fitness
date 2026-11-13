@@ -125,5 +125,7 @@ test('admins tick the permission on the coach profile, and can add walk-ins too'
   const calendar = await read('../src/components/admin/ClassCalendarAdmin.jsx');
   assert.match(calendar, /Not registered\? Add a walk-in/);
   assert.match(calendar, /await staffAddWalkIn\(session\.id, walkIn\)/);
+  assert.match(calendar, /const WALK_IN_FIELDS = \[/);
+  assert.match(calendar, /WALK_IN_FIELDS\.map\(\(\{ key, label, type, required \}\) =>/);
   assert.doesNotMatch(calendar, /Members must have an account before they can be booked in/);
 });

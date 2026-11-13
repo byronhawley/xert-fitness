@@ -22,6 +22,12 @@ import { ADMIN_BUTTON, ADMIN_INPUT, ADMIN_PANEL, ADMIN_TEXT, AdminPageHeader, Ad
 
 const CLASS_TYPES = ['XERT Foundation', 'XERT Strength', 'XERT Engine', 'XERT Hybrid', 'XERT Event Prep', 'XERT Team'];
 const BOOKING_STATUSES = ['requested', 'confirmed', 'waitlisted', 'cancelled', 'declined', 'attended', 'no_show'];
+/** @type {ReadonlyArray<{ key: 'fullName' | 'phone' | 'email', label: string, type: 'text' | 'tel' | 'email', required: boolean }>} */
+const WALK_IN_FIELDS = [
+  { key: 'fullName', label: 'Name', type: 'text', required: true },
+  { key: 'phone', label: 'Phone (optional)', type: 'tel', required: false },
+  { key: 'email', label: 'Email (optional)', type: 'email', required: false },
+];
 
 function rosterStatusOptions(status, sessionStatus, hasWaitlist = false) {
   // A class marked full is still a live class: its roster is exactly the one
@@ -1066,7 +1072,7 @@ export default function ClassCalendarAdmin({ initialAction, initialSessionId, on
                     {walkIn && (
                       <form onSubmit={event => addWalkIn(event, s)} aria-label="Add a walk-in" className="mt-3 space-y-2 border-t border-xert-steel/20 pt-3">
                         <p className="font-body text-xs text-xert-concrete/40">For someone without an account. With an email they get the usual booking confirmation.</p>
-                        {[['fullName', 'Name', 'text', true], ['phone', 'Phone (optional)', 'tel', false], ['email', 'Email (optional)', 'email', false]].map(([key, label, type, required]) => (
+                        {WALK_IN_FIELDS.map(({ key, label, type, required }) => (
                           <label key={key} className="block font-body text-xs uppercase tracking-wider text-xert-concrete/50">
                             {label}
                             <input type={type} value={walkIn[key]} required={required} minLength={required ? 2 : undefined} autoComplete="off"

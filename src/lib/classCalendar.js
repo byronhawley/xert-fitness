@@ -293,6 +293,12 @@ export function upcomingDayKeys(byDay, { now = new Date(), limit = 3 } = {}) {
     .slice(0, limit);
 }
 
+/** Keep a filtered calendar focused on a day that still contains a class. */
+export function reconcileSelectedDayKey(selectedKey, byDay, upcomingKeys = []) {
+  if (byDay?.[selectedKey]?.length) return selectedKey;
+  return upcomingKeys[0] || selectedKey;
+}
+
 /**
  * Moves a day key by whole days, staying on civil dates. Used by the calendar
  * grid's arrow-key navigation, so the whole month is one tab stop rather than

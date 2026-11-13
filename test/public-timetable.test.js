@@ -33,7 +33,48 @@ test('a full class offers the waitlist rather than a dead disabled button', asyn
   assert.match(card, /signup\.kind === 'request' \|\| signup\.kind === 'interest' \|\| signup\.kind === 'waitlist'/);
   assert.doesNotMatch(card, /signup\.kind === 'full'/);
   // "Spots left 8 / 8" above "no spot is held yet" read as a bookable class.
-  assert.match(card, /\{signup\.takesSpot \? 'Spots left' : 'Capacity'\}/);
+  assert.match(card, /\{signup\.takesSpot \? 'Spots left' : 'Class size'\}/);
+  assert.match(card, /\$\{session\.capacity\} places/);
+});
+
+test('public capacity messaging follows per-session capacity instead of promising a fixed cap', async () => {
+  const [hero, timetable, card] = await Promise.all([
+    read('../src/components/public/Hero.jsx'),
+    read('../src/pages/SoftLaunchTimetable.jsx'),
+    read('../src/components/public/ClassSessionCard.jsx'),
+  ]);
+  assert.match(hero, /Class sizes shown for each session/);
+  assert.doesNotMatch(hero, /Initial classes capped at 8/);
+  assert.match(timetable, /Class sizes are set for each published session/);
+  assert.match(timetable, /Your place is only confirmed when the sign-up succeeds/);
+  assert.match(card, /signup\.takesSpot && signup\.spotsLeft !== null/);
+  assert.match(card, /session\.capacity \? `\$\{session\.capacity\} places` : 'Set per session'/);
+});
+
+test('public timetable exposes composable, Brisbane-local discovery filters and a real no-match recovery', async () => {
+  const [timetable, filters] = await Promise.all([
+    read('../src/pages/SoftLaunchTimetable.jsx'),
+    read('../src/lib/publicTimetableFilters.js'),
+  ]);
+  assert.match(timetable, /Search classes/);
+  assert.match(timetable, /Any coach/);
+  assert.match(timetable, /All class types/);
+  assert.match(timetable, /Morning · before 12pm/);
+  assert.match(timetable, /Show sessions with confirmed places available/);
+  assert.match(timetable, /No matching classes/);
+  assert.match(timetable, /Live availability unavailable/);
+  assert.match(timetable, /Retry availability/);
+  assert.match(timetable, /setAvailability\(\{\}\); setAvailabilityError\(true\)/);
+  assert.match(timetable, /Show all classes/);
+  assert.match(timetable, /sessions=\{filteredSessions\}/);
+  assert.match(filters, /timeZone: GYM_TIME_ZONE/);
+  assert.match(filters, /availability\?\.\[session\.id\]\?\.spots_left/);
+});
+
+test('filtered calendar moves from an empty selected day to the next matching date', async () => {
+  const calendar = await read('../src/components/public/PublicClassCalendar.jsx');
+  assert.match(calendar, /reconcileSelectedDayKey\(currentKey, byDay, upcomingDayKeys\(byDay, \{ limit: 1 \}\)\)/);
+  assert.match(calendar, /\[byDay\]/);
 });
 
 test('a spot taken through the timetable can be handed back', async () => {

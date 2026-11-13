@@ -158,7 +158,7 @@ export default function Hero() {
                   <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-xert-steel animate-pulse" />
                   <span className="min-w-0 leading-snug">Booking-based semi-private classes</span>
                 </span>
-                <span className="font-body text-xs text-xert-pale/50">Initial classes capped at 8</span>
+                <span className="font-body text-xs text-xert-pale/50">Class sizes shown for each session</span>
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
