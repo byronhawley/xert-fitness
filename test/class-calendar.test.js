@@ -20,6 +20,7 @@ import {
   shiftMonth,
   timeInputFromMinutes,
   upcomingDayKeys,
+  reconcileSelectedDayKey,
 } from '../src/lib/classCalendar.js';
 
 const validTemplate = {
@@ -210,4 +211,14 @@ test('upcoming day keys and past-day checks respect the local day boundary', () 
   assert.equal(isPastDayKey('2026-09-09', now), true);
   assert.equal(isPastDayKey('2026-09-10', now), false);
   assert.equal(isPastDayKey('2026-09-11', now), false);
+});
+
+test('filtered calendar selection moves off an empty day without overriding a matching day', () => {
+  const byDay = {
+    '2026-11-17': [{ id: 'one' }],
+    '2026-11-18': [{ id: 'two' }],
+  };
+  assert.equal(reconcileSelectedDayKey('2026-11-17', byDay, ['2026-11-17', '2026-11-18']), '2026-11-17');
+  assert.equal(reconcileSelectedDayKey('2026-11-13', byDay, ['2026-11-17', '2026-11-18']), '2026-11-17');
+  assert.equal(reconcileSelectedDayKey('2026-11-13', {}, []), '2026-11-13');
 });

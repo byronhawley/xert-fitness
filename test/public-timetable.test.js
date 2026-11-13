@@ -71,6 +71,12 @@ test('public timetable exposes composable, Brisbane-local discovery filters and 
   assert.match(filters, /availability\?\.\[session\.id\]\?\.spots_left/);
 });
 
+test('filtered calendar moves from an empty selected day to the next matching date', async () => {
+  const calendar = await read('../src/components/public/PublicClassCalendar.jsx');
+  assert.match(calendar, /reconcileSelectedDayKey\(currentKey, byDay, upcomingDayKeys\(byDay, \{ limit: 1 \}\)\)/);
+  assert.match(calendar, /\[byDay\]/);
+});
+
 test('a spot taken through the timetable can be handed back', async () => {
   const [forms, page, app, timetable] = await Promise.all([
     read('../src/lib/submitForms.js'),

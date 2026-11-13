@@ -8,6 +8,7 @@ import {
   localDateKey,
   monthGrid,
   monthOf,
+  reconcileSelectedDayKey,
   shiftDayKey,
   shiftMonth,
   upcomingDayKeys,
@@ -36,6 +37,8 @@ export default function PublicClassCalendar({ sessions, bookingsEnabled = false,
   // so the page can scroll straight to that class without waiting a render.
   const [month, setMonth] = useState(() => monthOf(dateFromKey(initialDayKey) || new Date()));
   const [selectedDayKey, setSelectedDayKey] = useState(() => (dateFromKey(initialDayKey) ? initialDayKey : null) || gymDateKey(new Date()) || localDateKey(new Date()));
+  const selectedDayKeyRef = useRef(selectedDayKey);
+  selectedDayKeyRef.current = selectedDayKey;
   const detailRef = useRef(null);
   const gridRef = useRef(null);
   const hasAutoFocused = useRef(Boolean(dateFromKey(initialDayKey)));
@@ -61,6 +64,18 @@ export default function PublicClassCalendar({ sessions, bookingsEnabled = false,
     setSelectedDayKey(firstKey);
     setMonth(monthOf(firstDay));
   }, [initialDayKey, nextDays]);
+
+  // Filters can remove every class from the currently selected date. When the
+  // session set changes, move to the next date that still has a result; this
+  // effect does not run for ordinary manual day selection.
+  useEffect(() => {
+    const currentKey = selectedDayKeyRef.current;
+    const nextKey = reconcileSelectedDayKey(currentKey, byDay, upcomingDayKeys(byDay, { limit: 1 }));
+    if (nextKey === currentKey) return;
+    setSelectedDayKey(nextKey);
+    const nextDate = dateFromKey(nextKey);
+    if (nextDate) setMonth(monthOf(nextDate));
+  }, [byDay]);
 
   // Move real focus after an arrow key so the browser follows the roving stop.
   useEffect(() => {
