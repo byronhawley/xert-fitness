@@ -46,3 +46,9 @@ saying "book on XERT Fitness" for these classes.
   booking writes to be enabled. Send the signed request to
   `/api/xertos-webhook`; Vercel rewrites it to the existing webhook function,
   whose canonical fingerprint target is `/api/stripe-webhook?provider=xertos`.
+  The endpoint validates the versioned `XERTOS_WRITE_SECRET` (including an
+  explicitly configured previous version during key rotation), an exact-byte
+  HMAC, a five-minute timestamp window and the `xert_fitness` site identity
+  before its internal refresh callback can queue anything. The refresh does
+  **not** depend on the older unversioned `XERTOS_SITE_SECRET`; other existing
+  calendar and booking write actions retain their prior checks.

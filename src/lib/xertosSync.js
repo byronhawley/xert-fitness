@@ -147,11 +147,16 @@ export function xertosEditRefusal(error) {
 }
 
 /** XertOS → XERT: one staff edit, signed with the secret XertOS issued. */
-export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000)) {
+export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
   const { json } = trace;
   if (request.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } }, 405);
   const config = xertosSyncEnvironment(env);
-  if (!config.editReady) {
+  // Only the existing /api/xertos-webhook handler may pass verifiedRefresh:
+  // it verifies the exact request bytes, timestamp, site and versioned HMAC
+  // BEFORE invoking this internal callback. This lets rotating site keys work
+  // for refresh without requiring a second, unrelated legacy site secret.
+  // Legacy calendar/booking writes continue requiring their own signature.
+  if (!config.editReady && !options.verifiedRefresh) {
     return json({ error: { code: 'SYNC_OFF', message: "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness." } }, 409);
   }
 
@@ -159,12 +164,11 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   // same object, which serialises back to the identical bytes.
   const body = await requestText(request);
   if (Buffer.byteLength(body) > EDIT_REQUEST_BYTES) return json({ error: { code: 'TOO_LARGE', message: 'Change too large.' } }, 413);
-  if (requestHeader(request, 'x-xertos-site') !== config.provider
+  if (!options.verifiedRefresh && (requestHeader(request, 'x-xertos-site') !== config.provider
     || !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
-      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)) {
+      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds))) {
     return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
   }
-
   let edit;
   try {
     edit = JSON.parse(body);
@@ -173,6 +177,12 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   }
   if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
+  }
+  const trustedRefresh = options.verifiedRefresh === true && edit.action === 'refreshBookings';
+  if (options.verifiedRefresh && (requestHeader(request, 'x-xertos-site') !== config.provider
+    || (!trustedRefresh && !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
+      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)))) {
+    return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
   }
   // XertOS's connection test: the signature checked out, nothing to change.
   if (edit.action === 'ping') return json({ ok: true, provider: config.provider }, 200);

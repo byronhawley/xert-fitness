@@ -39,7 +39,10 @@ async function runXertosCalendarEdit(replayRequest, response, { now }) {
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now);
+  // This callback is invoked only after xertosWebhookHandler has verified the
+  // versioned exact-byte HMAC. The exemption is restricted to refreshBookings;
+  // all other actions retain their existing legacy signature check.
+  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now, { verifiedRefresh: true });
 }
 
 export function validStripeSignatureHeader(value) {

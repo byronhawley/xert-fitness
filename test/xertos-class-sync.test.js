@@ -158,6 +158,48 @@ test('a signed post-match refresh uses the dedicated durable outbox RPC and exac
   }]);
 });
 
+test('a refresh verified by the versioned webhook can rotate its key without requiring the legacy site secret', async () => {
+  const edit = {
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:key-rotation',
+  };
+  const body = JSON.stringify(edit);
+  const headers = {
+    'x-xertos-site': 'xert_fitness',
+    'x-webhook-timestamp': String(NOW),
+    'x-webhook-signature': sign(body, NOW, 'new-rotating-webhook-secret'),
+  };
+  const answer = { ok: true, status: 'queued', externalId: edit.externalId };
+  const untrusted = fakeAdmin({ xertos_sync_refresh_bookings: { data: answer, error: null } });
+  const blocked = await handleXertosEdit(request({ body, headers }), untrusted, trace(), ENV, NOW);
+  assert.equal(blocked.status, 401);
+  assert.equal(untrusted.calls.length, 0);
+
+  // The real entry point verifies these bytes before the internal callback;
+  // there is no second unversioned site-secret check for this action.
+  const trusted = fakeAdmin({ xertos_sync_refresh_bookings: { data: answer, error: null } });
+  const accepted = await handleXertosEdit(
+    request({ body, headers }), trusted, trace(), { ...ENV, XERTOS_SITE_SECRET: '' }, NOW,
+    { verifiedRefresh: true },
+  );
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.body, answer);
+  assert.equal(trusted.calls[0].name, 'xertos_sync_refresh_bookings');
+
+  // A verified-refresh context never bypasses the legacy HMAC for booking
+  // mutations or any action other than refreshBookings.
+  const otherAction = { action: 'book', externalId: edit.externalId, requestId: 'site-booking-match:wrong-action' };
+  const otherBody = JSON.stringify(otherAction);
+  const otherAdmin = fakeAdmin({ xertos_sync_apply_booking: { data: answer, error: null } });
+  const other = await handleXertosEdit(request({ body: otherBody, headers: {
+    ...headers,
+    'x-webhook-signature': sign(otherBody, NOW, 'new-rotating-webhook-secret'),
+  } }), otherAdmin, trace(), ENV, NOW, { verifiedRefresh: true });
+  assert.equal(other.status, 401);
+  assert.equal(otherAdmin.calls.length, 0);
+});
+
 test('a rate-limited post-match refresh is an explicit retryable 429', async () => {
   const body = JSON.stringify({
     action: 'refreshBookings',
