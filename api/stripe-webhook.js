@@ -28,7 +28,7 @@ const FAILURE_EVENT_TYPES = new Set([
 const MAX_WEBHOOK_BODY_BYTES = 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-async function runXertosCalendarEdit(replayRequest, response, { now }) {
+async function runXertosCalendarEdit(replayRequest, response, { now, verifiedRefresh = false }) {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
     return sendJson(response, {
       error: {
@@ -39,10 +39,13 @@ async function runXertosCalendarEdit(replayRequest, response, { now }) {
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-  // This callback is invoked only after xertosWebhookHandler has verified the
-  // versioned exact-byte HMAC. The exemption is restricted to refreshBookings;
-  // all other actions retain their existing legacy signature check.
-  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now, { verifiedRefresh: true });
+  // xertosWebhookHandler verifies the versioned exact-byte HMAC for every
+  // action, but vouches for it (verifiedRefresh) only from its refreshBookings
+  // branch. Every other action keeps handleXertosEdit's editReady gate and its
+  // own legacy signature check.
+  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now, {
+    verifiedRefresh: verifiedRefresh === true,
+  });
 }
 
 export function validStripeSignatureHeader(value) {

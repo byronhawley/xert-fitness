@@ -179,6 +179,12 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
   }
   const trustedRefresh = options.verifiedRefresh === true && edit.action === 'refreshBookings';
+  // The verified-refresh exemption covers refreshBookings only. Any other
+  // action that arrives with it still fails closed on the editReady gate,
+  // exactly as it would have before the body was read.
+  if (!config.editReady && !trustedRefresh) {
+    return json({ error: { code: 'SYNC_OFF', message: "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness." } }, 409);
+  }
   if (options.verifiedRefresh && (requestHeader(request, 'x-xertos-site') !== config.provider
     || (!trustedRefresh && !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
       requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)))) {

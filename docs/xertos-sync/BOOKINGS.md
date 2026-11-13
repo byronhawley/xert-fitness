@@ -56,3 +56,25 @@ saying "book on XERT Fitness" for these classes.
   before its internal refresh callback can queue anything. The refresh does
   **not** depend on the older unversioned `XERTOS_SITE_SECRET`; other existing
   calendar and booking write actions retain their prior checks.
+  With `CLIENT0_SYNC_ENABLED` off, a refresh is refused with **409
+  `SYNC_OFF`**, the same answer as the database switch, so XertOS treats a
+  deliberate off switch as final rather than retrying it as an outage. Switching
+  the gate back on accepts the same signed request; a 501 `ACTION_NOT_READY`
+  now only means the deployment has no write handler wired. Only the refresh
+  branch tells the write handler the versioned HMAC covered the request
+  (`verifiedRefresh`); create, update, cancel, book and cancelBooking still
+  answer 409 `SYNC_OFF` without a legacy `XERTOS_SITE_SECRET`.
+
+### Rotating the XertOS write key
+
+| Variable | Meaning |
+| --- | --- |
+| `XERTOS_WRITE_SECRET` / `XERTOS_WRITE_SECRET_VERSION` | The current key and its positive integer version, matching XertOS's `write_secret_version`. |
+| `XERTOS_PREVIOUS_WRITE_SECRET` / `XERTOS_PREVIOUS_WRITE_SECRET_VERSION` | The key being retired and its version, during the overlap only. |
+| `XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT` | **Required for the previous key to be accepted.** An ISO 8601 instant with an explicit zone, e.g. `2026-12-01T00:00:00Z`. Set it to XertOS's `previous_write_secret_until` for the connection. |
+
+The previous key is accepted only while now is before the expiry. A missing,
+date-only, zone-less or otherwise unreadable expiry means the previous key is
+not accepted at all; the current key is unaffected. After the expiry, remove
+both previous variables. No response ever includes a key value.
+
