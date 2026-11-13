@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import handler, {
   client0BookingWritesEnabled,
   client0CalendarWritesEnabled,
+  client0SyncEnabled,
   verifyXertosSignature,
   xertosWebhookConfigError,
 } from '../src/lib/xertosWebhook.js';
@@ -403,8 +404,106 @@ test('bookings from XertOS stay fail-closed until sync and the booking gate are 
     });
     assert.equal(res.statusCode, 200);
     assert.equal(received, rawBody, 'the exact authenticated bytes reach the booking handler');
+
+    const refreshBody = JSON.stringify({
+      action: 'refreshBookings',
+      externalId: '00000000-0000-4000-8000-00000000b001',
+      requestId: 'site-booking-match:sbk_123',
+    });
+    let refreshReceived;
+    res = mockResponse();
+    await handler(
+      request({ rawBody: refreshBody, headers: { ...signedHeaders(refreshBody), 'x-xertos-site': 'xert_fitness' } }),
+      res,
+      {
+        runEdit: async (replayRequest, response) => {
+          refreshReceived = await replayRequest.text();
+          return response.status(200).json({ ok: true, status: 'queued', externalId: 'class-1' });
+        },
+      },
+    );
+    assert.equal(res.statusCode, 200);
+    assert.equal(refreshReceived, refreshBody, 'the post-match refresh uses the same exact-byte booking gate');
   } finally {
     for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_CALENDAR_WRITES_ENABLED', 'CLIENT0_BOOKING_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
+  }
+});
+
+test('post-match refresh needs the global connection gate but not permission for XertOS-originated bookings', async () => {
+  assert.equal(client0SyncEnabled({}), false);
+  assert.equal(client0SyncEnabled({ CLIENT0_SYNC_ENABLED: 'TRUE' }), false);
+  assert.equal(client0SyncEnabled({ CLIENT0_SYNC_ENABLED: 'true' }), true);
+
+  const original = { ...process.env };
+  const rawBody = JSON.stringify({
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:sbk_123',
+  });
+  const headers = { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' };
+  try {
+    process.env.CLIENT0_SYNC_ENABLED = 'false';
+    process.env.CLIENT0_BOOKING_WRITES_ENABLED = 'true';
+    let called = false;
+    let res = mockResponse();
+    await handler(request({ rawBody, headers }), res, { runEdit: () => { called = true; } });
+    assert.equal(res.statusCode, 501);
+    assert.equal(res.body.error.code, 'ACTION_NOT_READY');
+    assert.equal(called, false);
+
+    process.env.CLIENT0_SYNC_ENABLED = 'true';
+    delete process.env.CLIENT0_BOOKING_WRITES_ENABLED;
+    let received;
+    res = mockResponse();
+    await handler(request({ rawBody, headers }), res, {
+      runEdit: async (replayRequest, response) => {
+        received = await replayRequest.text();
+        return response.status(200).json({ externalId: 'class-1', queued: true, reason: 'queued' });
+      },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.equal(received, rawBody, 'the authenticated request bytes are forwarded unchanged');
+  } finally {
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_BOOKING_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
+  }
+});
+
+test('the rewritten XertOS webhook forwards the canonical signed target for booking refresh', async () => {
+  const original = { ...process.env };
+  const rawBody = JSON.stringify({
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:sbk_route',
+  });
+  const target = 'https://xert.test/api/stripe-webhook?provider=xertos';
+  try {
+    process.env.CLIENT0_SYNC_ENABLED = 'true';
+    delete process.env.CLIENT0_BOOKING_WRITES_ENABLED;
+    let received;
+    const res = mockResponse();
+    await handler(
+      request({ rawBody, url: target, headers: { ...signedHeaders(rawBody), 'x-xertos-site': 'xert_fitness' } }),
+      res,
+      {
+        runEdit: async (replayRequest, response) => {
+          received = {
+            target: replayRequest.target,
+            body: await replayRequest.text(),
+          };
+          return response.status(200).json({ ok: true, status: 'queued', externalId: 'class-1' });
+        },
+      },
+    );
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(received, { target, body: rawBody });
+  } finally {
+    for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_BOOKING_WRITES_ENABLED']) {
       if (Object.hasOwn(original, key)) process.env[key] = original[key];
       else delete process.env[key];
     }

@@ -109,6 +109,9 @@ export function xertosEditRefusal(error) {
   if (code === 'BOOKINGS_OFF') {
     return refuse(409, code, "XERT Fitness isn't taking bookings from XertOS right now. Book on XERT Fitness.");
   }
+  if (code === 'REFRESH_RATE_LIMITED') {
+    return { ...refuse(429, code, 'This class was refreshed very recently. XertOS can safely retry shortly.'), retryAfterSeconds: 30 };
+  }
   if (code === 'NO_SITE_ACCOUNT') {
     return refuse(422, code, 'No XERT Fitness member account uses this email. They need to sign up on XERT Fitness first, with the same email.');
   }
@@ -191,12 +194,26 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   }
 
   const bookingAction = edit.action === 'book' || edit.action === 'cancelBooking';
-  const { data, error } = await admin.rpc(bookingAction ? 'xertos_sync_apply_booking' : 'xertos_sync_apply_edit', {
+  const refreshAction = edit.action === 'refreshBookings';
+  const rpcName = refreshAction
+    ? 'xertos_sync_refresh_bookings'
+    : bookingAction
+      ? 'xertos_sync_apply_booking'
+      : 'xertos_sync_apply_edit';
+  const { data, error } = await admin.rpc(rpcName, {
     p_edit: edit,
     p_request_fingerprint: fingerprint,
   });
   if (error) {
     const refusal = xertosEditRefusal(error);
+    if (refusal?.status === 429 && refusal.retryAfterSeconds) {
+      return json({
+        ok: false,
+        status: 'rate_limited',
+        retryAfterSeconds: refusal.retryAfterSeconds,
+        error: { code: refusal.code, message: refusal.message },
+      }, 429);
+    }
     if (refusal) return json({ error: { code: refusal.code, message: refusal.message } }, refusal.status);
     console.error('XertOS edit failed.', {
       requestId: trace.requestId,

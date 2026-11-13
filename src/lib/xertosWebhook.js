@@ -9,6 +9,10 @@ const CLIENT0_WRITABLE_ACTIONS = new Set(['create', 'update', 'cancel']);
 // Bookings made in XertOS for XERT classes (owner decision 2026-10-10: class
 // bookings are two-way for XERT Fitness). Gated on their own switch.
 const CLIENT0_BOOKING_ACTIONS = new Set(['book', 'cancelBooking']);
+// A refresh only queues the site's current snapshot; it never writes a booking.
+// It needs the global connection gate, while the database independently checks
+// that booking sharing is enabled. Do not couple it to inbound booking writes.
+const CLIENT0_REFRESH_ACTIONS = new Set(['refreshBookings']);
 
 function strictPositiveVersion(value) {
   const text = String(value ?? '').trim();
@@ -67,6 +71,10 @@ export function xertosSecretsAreConfigured(environment = process.env) {
 export function client0CalendarWritesEnabled(environment = process.env) {
   return environment.CLIENT0_SYNC_ENABLED === 'true'
     && environment.CLIENT0_CALENDAR_WRITES_ENABLED === 'true';
+}
+
+export function client0SyncEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true';
 }
 
 /** Bookings from XertOS stay inert unless sync and their own gate are both true. */
@@ -160,6 +168,23 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
   }
 
   if (payload?.action === 'ping') return sendJson(response, { ok: true });
+
+  if (CLIENT0_REFRESH_ACTIONS.has(payload?.action)) {
+    if (!client0SyncEnabled(process.env) || typeof runEdit !== 'function') {
+      return sendJson(response, {
+        error: {
+          code: 'ACTION_NOT_READY',
+          message: 'XERT Fitness booking sharing is not enabled yet. Refresh the class on XERT Fitness.',
+        },
+      }, 501);
+    }
+    return runEdit({
+      method: request.method,
+      headers: request.headers,
+      target: request.url,
+      text: async () => rawBody,
+    }, response, { now: Math.floor(Date.now() / 1000) });
+  }
 
   // Unknown verbs never reach the database. Writes are exactly create/update/
   // cancel of a class, and book/cancelBooking, through the site's own guards.

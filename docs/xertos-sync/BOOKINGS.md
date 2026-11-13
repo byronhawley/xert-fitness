@@ -35,3 +35,14 @@ saying "book on XERT Fitness" for these classes.
   on its waitlist. Refused when no XERT member account has the email, or when
   more than one does.
 - `cancelBooking`: cancels a member booking or a public sign-up on the class.
+- `refreshBookings`: after staff match a website booking to an existing XertOS
+  person, asks XERT to send the current class-and-bookings snapshot through the
+  existing class outbox. It does not create a booking or change class,
+  capacity, attendance or the site's booking authority. An already-pending
+  snapshot is reused; a refresh racing an in-flight send schedules a follow-up
+  snapshot. A class sent within the last 30 seconds returns a retryable 429.
+  This action needs the global `CLIENT0_SYNC_ENABLED` connection gate and the
+  database `share_bookings` switch; it does not require XertOS-originated
+  booking writes to be enabled. Send the signed request to
+  `/api/xertos-webhook`; Vercel rewrites it to the existing webhook function,
+  whose canonical fingerprint target is `/api/stripe-webhook?provider=xertos`.
