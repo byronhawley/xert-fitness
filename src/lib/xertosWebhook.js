@@ -9,6 +9,10 @@ const CLIENT0_WRITABLE_ACTIONS = new Set(['create', 'update', 'cancel']);
 // Bookings made in XertOS for XERT classes (owner decision 2026-10-10: class
 // bookings are two-way for XERT Fitness). Gated on their own switch.
 const CLIENT0_BOOKING_ACTIONS = new Set(['book', 'cancelBooking']);
+// A refresh only queues the site's current snapshot; it never writes a booking.
+// It needs the global connection gate, while the database independently checks
+// that booking sharing is enabled. Do not couple it to inbound booking writes.
+const CLIENT0_REFRESH_ACTIONS = new Set(['refreshBookings']);
 
 function strictPositiveVersion(value) {
   const text = String(value ?? '').trim();
@@ -17,7 +21,24 @@ function strictPositiveVersion(value) {
   return Number.isSafeInteger(version) && version > 0 ? version : null;
 }
 
-function configuredSecrets(environment) {
+/**
+ * When the previous key stops being accepted: XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT,
+ * an ISO 8601 instant with an explicit zone (for example 2026-12-01T00:00:00Z).
+ * XertOS stops signing with its previous key at previous_write_secret_until; set
+ * this to that instant so the receiver closes the same overlap. Missing or
+ * unreadable, the previous key is not accepted at all (fail closed); the current
+ * key is unaffected.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+
+export function previousSecretExpiresAt(environment = process.env) {
+  const text = String(environment.XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT ?? '').trim();
+  if (!ISO_INSTANT.test(text)) return null;
+  const ms = Date.parse(text);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+function configuredSecrets(environment, now = Math.floor(Date.now() / 1000)) {
   const secrets = [];
   const current = String(environment.XERTOS_WRITE_SECRET || '').trim();
   const currentVersion = strictPositiveVersion(environment.XERTOS_WRITE_SECRET_VERSION);
@@ -25,7 +46,8 @@ function configuredSecrets(environment) {
 
   const previous = String(environment.XERTOS_PREVIOUS_WRITE_SECRET || '').trim();
   const previousVersion = strictPositiveVersion(environment.XERTOS_PREVIOUS_WRITE_SECRET_VERSION);
-  if (previous && previousVersion !== null) {
+  const previousUntil = previousSecretExpiresAt(environment);
+  if (previous && previousVersion !== null && previousUntil !== null && now < previousUntil) {
     secrets.push({ version: previousVersion, secret: previous });
   }
   const seen = new Set();
@@ -69,6 +91,10 @@ export function client0CalendarWritesEnabled(environment = process.env) {
     && environment.CLIENT0_CALENDAR_WRITES_ENABLED === 'true';
 }
 
+export function client0SyncEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true';
+}
+
 /** Bookings from XertOS stay inert unless sync and their own gate are both true. */
 export function client0BookingWritesEnabled(environment = process.env) {
   return environment.CLIENT0_SYNC_ENABLED === 'true'
@@ -94,7 +120,7 @@ export function verifyXertosSignature({
     .some(part => {
       const match = /^v1,k(\d+)=([0-9a-f]{64})$/.exec(part);
       if (!match) return false;
-      const secret = configuredSecrets(environment).find(candidate => candidate.version === Number(match[1]));
+      const secret = configuredSecrets(environment, now).find(candidate => candidate.version === Number(match[1]));
       if (!secret) return false;
       return equalHex(match[2], signaturePayload(secret.secret, timestamp, rawBody));
     });
@@ -116,8 +142,6 @@ export function xertosWebhookConfigError(environment = process.env) {
   if (previous && currentVersion === previousVersion) {
     return 'XERTOS_WRITE_SECRET_VERSION and XERTOS_PREVIOUS_WRITE_SECRET_VERSION must not match';
   }
-
-  const secrets = configuredSecrets(environment);
   return null;
 }
 
@@ -160,6 +184,35 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
   }
 
   if (payload?.action === 'ping') return sendJson(response, { ok: true });
+
+  if (CLIENT0_REFRESH_ACTIONS.has(payload?.action)) {
+    // A deliberate off switch is a definite refusal (409, as the RPC's own
+    // SYNC_OFF), never a 5xx that XertOS would keep retrying as an outage.
+    if (!client0SyncEnabled(process.env)) {
+      return sendJson(response, {
+        error: {
+          code: 'SYNC_OFF',
+          message: "XERT Fitness isn't sharing bookings with XertOS right now. Refresh the class on XERT Fitness.",
+        },
+      }, 409);
+    }
+    if (typeof runEdit !== 'function') {
+      return sendJson(response, {
+        error: {
+          code: 'ACTION_NOT_READY',
+          message: 'XERT Fitness booking sharing is not enabled yet. Refresh the class on XERT Fitness.',
+        },
+      }, 501);
+    }
+    // Only this branch, for this action, vouches that the versioned HMAC above
+    // covered the request; every other action keeps its own legacy checks.
+    return runEdit({
+      method: request.method,
+      headers: request.headers,
+      target: request.url,
+      text: async () => rawBody,
+    }, response, { now: Math.floor(Date.now() / 1000), verifiedRefresh: true });
+  }
 
   // Unknown verbs never reach the database. Writes are exactly create/update/
   // cancel of a class, and book/cancelBooking, through the site's own guards.

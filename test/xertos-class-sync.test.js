@@ -35,11 +35,11 @@ function trace() {
   return { sent, requestId: 'req-1', json(body, status = 200) { sent.push({ body, status }); return { body, status }; } };
 }
 
-function request({ method = 'POST', body, headers = {} }) {
+function request({ method = 'POST', body, headers = {}, target = '/api/xertos-edit?provider=xert_fitness' }) {
   return {
     method,
     body,
-    target: '/api/xertos-edit?provider=xert_fitness',
+    target,
     headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v])),
   };
 }
@@ -91,6 +91,12 @@ test('refusals are worded for staff and keep XERT rules', () => {
   });
   assert.equal(xertosEditRefusal({ message: 'IDEMPOTENCY_RECEIPT_UNVERIFIABLE' }).status, 409);
   assert.equal(xertosEditRefusal({ message: 'INVALID_REQUEST_FINGERPRINT' }).status, 422);
+  assert.deepEqual(xertosEditRefusal({ message: 'REFRESH_RATE_LIMITED' }), {
+    status: 429,
+    code: 'REFRESH_RATE_LIMITED',
+    message: 'This class was refreshed very recently. XertOS can safely retry shortly.',
+    retryAfterSeconds: 30,
+  });
   assert.equal(xertosEditRefusal({ message: 'new row violates check constraint', code: '23514' }).status, 422);
   assert.equal(xertosEditRefusal({ message: 'INVALID_EDIT' }).status, 422);
   assert.equal(xertosEditRefusal({ message: 'something unexpected', code: 'XX000' }), null);
@@ -118,6 +124,109 @@ test('a signed edit is applied and answered with the class as it now stands', as
     name: 'xertos_sync_apply_edit',
     args: { p_edit: edit, p_request_fingerprint: expectedFingerprint },
   }]);
+});
+
+test('a signed post-match refresh uses the dedicated durable outbox RPC and exact request fingerprint', async () => {
+  const edit = {
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:sbk_123',
+  };
+  const body = JSON.stringify(edit);
+  const answer = { ok: true, status: 'queued', externalId: edit.externalId };
+  const admin = fakeAdmin({ xertos_sync_refresh_bookings: { data: answer, error: null } });
+  const result = await handleXertosEdit(
+    request({ body: JSON.parse(body), headers: {
+      'x-xertos-site': 'xert_fitness',
+      'x-webhook-timestamp': String(NOW),
+      'x-webhook-signature': sign(body),
+    }, target: '/api/stripe-webhook?provider=xertos' }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, answer);
+  assert.deepEqual(admin.calls, [{
+    name: 'xertos_sync_refresh_bookings',
+    args: {
+      p_edit: edit,
+      p_request_fingerprint: xertosRequestFingerprint({
+        method: 'POST',
+        target: '/api/stripe-webhook?provider=xertos',
+        rawBody: body,
+      }),
+    },
+  }]);
+});
+
+test('a refresh verified by the versioned webhook can rotate its key without requiring the legacy site secret', async () => {
+  const edit = {
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:key-rotation',
+  };
+  const body = JSON.stringify(edit);
+  const headers = {
+    'x-xertos-site': 'xert_fitness',
+    'x-webhook-timestamp': String(NOW),
+    'x-webhook-signature': sign(body, NOW, 'new-rotating-webhook-secret'),
+  };
+  const answer = { ok: true, status: 'queued', externalId: edit.externalId };
+  const untrusted = fakeAdmin({ xertos_sync_refresh_bookings: { data: answer, error: null } });
+  const blocked = await handleXertosEdit(request({ body, headers }), untrusted, trace(), ENV, NOW);
+  assert.equal(blocked.status, 401);
+  assert.equal(untrusted.calls.length, 0);
+
+  // The real entry point verifies these bytes before the internal callback;
+  // there is no second unversioned site-secret check for this action.
+  const trusted = fakeAdmin({ xertos_sync_refresh_bookings: { data: answer, error: null } });
+  const accepted = await handleXertosEdit(
+    request({ body, headers }), trusted, trace(), { ...ENV, XERTOS_SITE_SECRET: '' }, NOW,
+    { verifiedRefresh: true },
+  );
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.body, answer);
+  assert.equal(trusted.calls[0].name, 'xertos_sync_refresh_bookings');
+
+  // A verified-refresh context never bypasses the legacy HMAC for booking
+  // mutations or any action other than refreshBookings.
+  const otherAction = { action: 'book', externalId: edit.externalId, requestId: 'site-booking-match:wrong-action' };
+  const otherBody = JSON.stringify(otherAction);
+  const otherAdmin = fakeAdmin({ xertos_sync_apply_booking: { data: answer, error: null } });
+  const other = await handleXertosEdit(request({ body: otherBody, headers: {
+    ...headers,
+    'x-webhook-signature': sign(otherBody, NOW, 'new-rotating-webhook-secret'),
+  } }), otherAdmin, trace(), ENV, NOW, { verifiedRefresh: true });
+  assert.equal(other.status, 401);
+  assert.equal(otherAdmin.calls.length, 0);
+});
+
+test('a rate-limited post-match refresh is an explicit retryable 429', async () => {
+  const body = JSON.stringify({
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:sbk_124',
+  });
+  const admin = fakeAdmin({
+    xertos_sync_refresh_bookings: { data: null, error: { message: 'REFRESH_RATE_LIMITED', code: 'P0001' } },
+  });
+  const result = await handleXertosEdit(
+    request({ body, headers: {
+      'x-xertos-site': 'xert_fitness',
+      'x-webhook-timestamp': String(NOW),
+      'x-webhook-signature': sign(body),
+    } }),
+    admin, trace(), ENV, NOW,
+  );
+  assert.equal(result.status, 429);
+  assert.deepEqual(result.body, {
+    ok: false,
+    status: 'rate_limited',
+    retryAfterSeconds: 30,
+    error: {
+      code: 'REFRESH_RATE_LIMITED',
+      message: 'This class was refreshed very recently. XertOS can safely retry shortly.',
+    },
+  });
 });
 
 test('write request ids must come from the signed body, not an unsigned header', async () => {

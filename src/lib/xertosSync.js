@@ -109,6 +109,9 @@ export function xertosEditRefusal(error) {
   if (code === 'BOOKINGS_OFF') {
     return refuse(409, code, "XERT Fitness isn't taking bookings from XertOS right now. Book on XERT Fitness.");
   }
+  if (code === 'REFRESH_RATE_LIMITED') {
+    return { ...refuse(429, code, 'This class was refreshed very recently. XertOS can safely retry shortly.'), retryAfterSeconds: 30 };
+  }
   if (code === 'NO_SITE_ACCOUNT') {
     return refuse(422, code, 'No XERT Fitness member account uses this email. They need to sign up on XERT Fitness first, with the same email.');
   }
@@ -144,11 +147,16 @@ export function xertosEditRefusal(error) {
 }
 
 /** XertOS → XERT: one staff edit, signed with the secret XertOS issued. */
-export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000)) {
+export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
   const { json } = trace;
   if (request.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } }, 405);
   const config = xertosSyncEnvironment(env);
-  if (!config.editReady) {
+  // Only the existing /api/xertos-webhook handler may pass verifiedRefresh:
+  // it verifies the exact request bytes, timestamp, site and versioned HMAC
+  // BEFORE invoking this internal callback. This lets rotating site keys work
+  // for refresh without requiring a second, unrelated legacy site secret.
+  // Legacy calendar/booking writes continue requiring their own signature.
+  if (!config.editReady && !options.verifiedRefresh) {
     return json({ error: { code: 'SYNC_OFF', message: "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness." } }, 409);
   }
 
@@ -156,12 +164,11 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   // same object, which serialises back to the identical bytes.
   const body = await requestText(request);
   if (Buffer.byteLength(body) > EDIT_REQUEST_BYTES) return json({ error: { code: 'TOO_LARGE', message: 'Change too large.' } }, 413);
-  if (requestHeader(request, 'x-xertos-site') !== config.provider
+  if (!options.verifiedRefresh && (requestHeader(request, 'x-xertos-site') !== config.provider
     || !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
-      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)) {
+      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds))) {
     return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
   }
-
   let edit;
   try {
     edit = JSON.parse(body);
@@ -170,6 +177,18 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   }
   if (!edit || typeof edit !== 'object' || Array.isArray(edit)) {
     return json({ error: { code: 'INVALID_EDIT', message: 'XERT Fitness could not read this change, so nothing changed.' } }, 422);
+  }
+  const trustedRefresh = options.verifiedRefresh === true && edit.action === 'refreshBookings';
+  // The verified-refresh exemption covers refreshBookings only. Any other
+  // action that arrives with it still fails closed on the editReady gate,
+  // exactly as it would have before the body was read.
+  if (!config.editReady && !trustedRefresh) {
+    return json({ error: { code: 'SYNC_OFF', message: "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness." } }, 409);
+  }
+  if (options.verifiedRefresh && (requestHeader(request, 'x-xertos-site') !== config.provider
+    || (!trustedRefresh && !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
+      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)))) {
+    return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
   }
   // XertOS's connection test: the signature checked out, nothing to change.
   if (edit.action === 'ping') return json({ ok: true, provider: config.provider }, 200);
@@ -191,12 +210,26 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   }
 
   const bookingAction = edit.action === 'book' || edit.action === 'cancelBooking';
-  const { data, error } = await admin.rpc(bookingAction ? 'xertos_sync_apply_booking' : 'xertos_sync_apply_edit', {
+  const refreshAction = edit.action === 'refreshBookings';
+  const rpcName = refreshAction
+    ? 'xertos_sync_refresh_bookings'
+    : bookingAction
+      ? 'xertos_sync_apply_booking'
+      : 'xertos_sync_apply_edit';
+  const { data, error } = await admin.rpc(rpcName, {
     p_edit: edit,
     p_request_fingerprint: fingerprint,
   });
   if (error) {
     const refusal = xertosEditRefusal(error);
+    if (refusal?.status === 429 && refusal.retryAfterSeconds) {
+      return json({
+        ok: false,
+        status: 'rate_limited',
+        retryAfterSeconds: refusal.retryAfterSeconds,
+        error: { code: refusal.code, message: refusal.message },
+      }, 429);
+    }
     if (refusal) return json({ error: { code: refusal.code, message: refusal.message } }, refusal.status);
     console.error('XertOS edit failed.', {
       requestId: trace.requestId,

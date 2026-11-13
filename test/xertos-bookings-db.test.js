@@ -77,6 +77,7 @@ const SESSION = '00000000-0000-4000-8000-00000000b001';
 const JESS = '00000000-0000-4000-8000-0000000000a1';
 const SAM = '00000000-0000-4000-8000-0000000000a2';
 const target = '/api/admin-fitbox-integration?service=xertos_edit';
+const refreshTarget = '/api/stripe-webhook?provider=xertos';
 
 // The front desk's function body before this change, to prove the split keeps it.
 async function frontDeskFunction() {
@@ -95,6 +96,7 @@ async function database({ capacity = 2 } = {}) {
     '20261010010000_xertos_two_way_bookings.sql',
     '20261011010000_xertos_guest_signups.sql',
     '20261012010000_xertos_signup_waitlist.sql',
+    '20261113010000_xertos_site_booking_refresh.sql',
   ]) {
     await db.exec(await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url), 'utf8'));
   }
@@ -124,6 +126,19 @@ const cancel = (bookingExternalId, requestId, by = 'member') => JSON.stringify({
 async function apply(db, body) {
   const fingerprint = xertosRequestFingerprint({ method: 'POST', target, rawBody: body });
   const result = await db.query('select public.xertos_sync_apply_booking($1::jsonb, $2::text) as answer', [body, fingerprint]);
+  return result.rows[0].answer;
+}
+
+const refreshBookings = (requestId, externalId = SESSION) => JSON.stringify({
+  action: 'refreshBookings', externalId, requestId,
+});
+
+async function refresh(db, body) {
+  const fingerprint = xertosRequestFingerprint({ method: 'POST', target: refreshTarget, rawBody: body });
+  const result = await db.query(
+    'select public.xertos_sync_refresh_bookings($1::jsonb, $2::text) as answer',
+    [body, fingerprint],
+  );
   return result.rows[0].answer;
 }
 
@@ -283,4 +298,129 @@ test('the front desk still books exactly as before, and only for admins', async 
   assert.equal(row.booking_status, 'confirmed');
   const receipt = await db.query('select created_by from public.admin_staff_booking_receipts');
   assert.equal(receipt.rows[0].created_by, JESS);
+});
+
+test('a post-match refresh queues the current class snapshot without changing booking or capacity authority', async () => {
+  const db = await database({ capacity: 3 });
+  await db.query(`insert into public.session_bookings (user_id, class_session_id, status)
+    values ($1, $2, 'confirmed')`, [JESS, SESSION]);
+  await db.query(`insert into public.class_bookings (class_session_id, full_name, email, status)
+    values ($1, 'Public Guest', 'guest@example.com', 'confirmed')`, [SESSION]);
+  const before = (await db.query(`
+    select s.capacity,
+      (select count(*)::int from public.session_bookings where class_session_id = s.id) as member_rows,
+      (select count(*)::int from public.class_bookings where class_session_id = s.id) as public_rows,
+      places.held, places.waiting
+    from public.class_sessions s
+    cross join lateral public.class_places_held(s.id) as places
+    where s.id = $1
+  `, [SESSION])).rows[0];
+
+  // The initial site booking has already been mirrored to XertOS. Move the
+  // synthetic outbox receipt past the cooldown so this request represents a
+  // later staff match, not a duplicate of the original booking push.
+  const initialClaim = (await db.query('select public.xertos_sync_claim(1) as claim')).rows[0].claim;
+  assert.ok(initialClaim.lease);
+  await db.query('select public.xertos_sync_settle($1, true, null, null, null)', [initialClaim.lease]);
+  await db.query(`update public.xertos_class_outbox
+    set sent_at = clock_timestamp() - interval '31 seconds'
+    where session_id = $1`, [SESSION]);
+
+  const body = refreshBookings('site-booking-match:sbk_123');
+  const answer = await refresh(db, body);
+  assert.deepEqual(answer, { ok: true, status: 'queued', externalId: SESSION });
+  const queued = (await db.query(`select changed_at, sent_changed_at, attempts, lease_id
+    from public.xertos_class_outbox where session_id = $1`, [SESSION])).rows[0];
+  assert.ok(queued.changed_at);
+  assert.notEqual(queued.sent_changed_at.toISOString(), queued.changed_at.toISOString(),
+    'the refreshed snapshot is due after the earlier booking snapshot was sent');
+  assert.equal(queued.attempts, 0);
+  assert.equal(queued.lease_id, null);
+
+  const after = (await db.query(`
+    select s.capacity,
+      (select count(*)::int from public.session_bookings where class_session_id = s.id) as member_rows,
+      (select count(*)::int from public.class_bookings where class_session_id = s.id) as public_rows,
+      places.held, places.waiting
+    from public.class_sessions s
+    cross join lateral public.class_places_held(s.id) as places
+    where s.id = $1
+  `, [SESSION])).rows[0];
+  assert.deepEqual(after, before, 'refresh only queues the snapshot; it does not book, cancel, attend or change capacity');
+
+  const replay = await refresh(db, body);
+  assert.deepEqual(replay, answer, 'the same request ID replays the durable receipt');
+  const replayedOutbox = (await db.query('select changed_at from public.xertos_class_outbox where session_id = $1', [SESSION])).rows[0];
+  assert.equal(replayedOutbox.changed_at.toISOString(), queued.changed_at.toISOString());
+  await assert.rejects(
+    () => refresh(db, refreshBookings('site-booking-match:sbk_123', '00000000-0000-4000-8000-00000000b002')),
+    /IDEMPOTENCY_KEY_REUSED/,
+  );
+});
+
+test('an active class-push lease is followed by a second snapshot after the current send settles', async () => {
+  const db = await database();
+  await db.query('select public.xertos_queue_class($1)', [SESSION]);
+  const claimed = (await db.query('select public.xertos_sync_claim(1) as claim')).rows[0].claim;
+  assert.ok(claimed.lease);
+  const before = (await db.query('select changed_at, claimed_changed_at, lease_id from public.xertos_class_outbox where session_id = $1', [SESSION])).rows[0];
+
+  const answer = await refresh(db, refreshBookings('site-booking-match:sbk_lease'));
+  assert.deepEqual(answer, { ok: true, status: 'queued', externalId: SESSION });
+  const during = (await db.query('select changed_at, claimed_changed_at, lease_id from public.xertos_class_outbox where session_id = $1', [SESSION])).rows[0];
+  assert.notEqual(during.changed_at.toISOString(), before.claimed_changed_at.toISOString());
+  assert.equal(during.lease_id, claimed.lease, 'the current lease is not stolen or cleared');
+
+  await db.query('select public.xertos_sync_settle($1, true, null, null, null)', [claimed.lease]);
+  assert.equal((await db.query('select public.xertos_sync_due() as due')).rows[0].due, true,
+    'settling the older payload leaves the newer booking snapshot due');
+});
+
+test('an already-pending class refresh reuses its retry schedule instead of resetting backoff', async () => {
+  const db = await database();
+  await db.query('select public.xertos_queue_class($1)', [SESSION]);
+  await db.query(`update public.xertos_class_outbox
+    set attempts = 4, next_attempt_at = now() + interval '5 minutes', last_error = 'transient'
+    where session_id = $1`, [SESSION]);
+  const before = (await db.query('select changed_at, attempts, next_attempt_at, last_error from public.xertos_class_outbox where session_id = $1', [SESSION])).rows[0];
+  const answer = await refresh(db, refreshBookings('site-booking-match:sbk_pending'));
+  assert.deepEqual(answer, { ok: true, status: 'already_pending', externalId: SESSION });
+  const after = (await db.query('select changed_at, attempts, next_attempt_at, last_error from public.xertos_class_outbox where session_id = $1', [SESSION])).rows[0];
+  assert.deepEqual(after, before);
+});
+
+test('recently sent classes are rate-limited, then become refreshable after the cooldown', async () => {
+  const db = await database();
+  await db.query('select public.xertos_queue_class($1)', [SESSION]);
+  const claimed = (await db.query('select public.xertos_sync_claim(1) as claim')).rows[0].claim;
+  await db.query('select public.xertos_sync_settle($1, true, null, null, null)', [claimed.lease]);
+  await assert.rejects(() => refresh(db, refreshBookings('site-booking-match:sbk_rate_1')), /REFRESH_RATE_LIMITED/);
+  assert.equal((await db.query("select count(*)::int as n from public.xertos_edit_receipts where request_id = 'site-booking-match:sbk_rate_1'")).rows[0].n, 0,
+    'a rate-limited attempt does not consume its request ID');
+
+  await db.query(`update public.xertos_class_outbox set sent_at = clock_timestamp() - interval '31 seconds' where session_id = $1`, [SESSION]);
+  const allowed = await refresh(db, refreshBookings('site-booking-match:sbk_rate_1'));
+  assert.deepEqual(allowed, { ok: true, status: 'queued', externalId: SESSION });
+});
+
+test('post-match refresh fails closed when sync or booking sharing is disabled or the class is missing', async () => {
+  const db = await database();
+  await db.query('update public.xertos_sync_settings set share_bookings = false');
+  await assert.rejects(() => refresh(db, refreshBookings('site-booking-match:sbk_off')), /BOOKINGS_OFF/);
+  await db.query('update public.xertos_sync_settings set share_bookings = true, enabled = false');
+  await assert.rejects(() => refresh(db, refreshBookings('site-booking-match:sbk_sync_off')), /SYNC_OFF/);
+  await db.query('update public.xertos_sync_settings set enabled = true');
+  await assert.rejects(() => refresh(db, refreshBookings('site-booking-match:sbk_missing', '00000000-0000-4000-8000-00000000b099')), /SESSION_NOT_FOUND/);
+  assert.equal((await db.query('select count(*)::int as n from public.xertos_class_outbox')).rows[0].n, 0);
+});
+
+test('post-match refresh is callable only by the service role, never anonymous or authenticated browsers', async () => {
+  const db = await database();
+  const grants = (await db.query(`
+    select
+      has_function_privilege('anon', 'public.xertos_sync_refresh_bookings(jsonb,text)', 'EXECUTE') as anon,
+      has_function_privilege('authenticated', 'public.xertos_sync_refresh_bookings(jsonb,text)', 'EXECUTE') as member,
+      has_function_privilege('service_role', 'public.xertos_sync_refresh_bookings(jsonb,text)', 'EXECUTE') as service
+  `)).rows[0];
+  assert.deepEqual(grants, { anon: false, member: false, service: true });
 });
