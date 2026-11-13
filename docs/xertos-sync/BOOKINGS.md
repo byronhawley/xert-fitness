@@ -46,6 +46,10 @@ saying "book on XERT Fitness" for these classes.
   booking writes to be enabled. Send the signed request to
   `/api/xertos-webhook`; Vercel rewrites it to the existing webhook function,
   whose canonical fingerprint target is `/api/stripe-webhook?provider=xertos`.
+  On 429, no receipt is consumed: wait for `retryAfterSeconds` and retry the
+  exact same signed body with the same `requestId`. A 200 `already_pending`
+  means the existing outbox already owns the next current snapshot; it is not
+  a second booking and must not be converted into another booking request.
   The endpoint validates the versioned `XERTOS_WRITE_SECRET` (including an
   explicitly configured previous version during key rotation), an exact-byte
   HMAC, a five-minute timestamp window and the `xert_fitness` site identity
