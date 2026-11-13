@@ -11,6 +11,7 @@ import handler, {
   xertosWebhookConfigError,
 } from '../src/lib/xertosWebhook.js';
 import stripeWebhookHandler from '../api/stripe-webhook.js';
+import { handleXertosEdit, xertosRequestFingerprint } from '../src/lib/xertosSync.js';
 
 const environment = {
   XERTOS_WRITE_SECRET: 'current-secret',
@@ -504,6 +505,83 @@ test('the rewritten XertOS webhook forwards the canonical signed target for book
     assert.deepEqual(received, { target, body: rawBody });
   } finally {
     for (const key of ['CLIENT0_SYNC_ENABLED', 'CLIENT0_BOOKING_WRITES_ENABLED']) {
+      if (Object.hasOwn(original, key)) process.env[key] = original[key];
+      else delete process.env[key];
+    }
+  }
+});
+
+test('the real webhook-to-RPC refresh path accepts a rotated versioned key without a legacy site secret', async () => {
+  const original = { ...process.env };
+  const edit = {
+    action: 'refreshBookings',
+    externalId: '00000000-0000-4000-8000-00000000b001',
+    requestId: 'site-booking-match:rotated-route',
+  };
+  const rawBody = JSON.stringify(edit);
+  const target = 'https://xert.test/api/stripe-webhook?provider=xertos';
+  const now = Math.floor(Date.now() / 1000);
+  const headers = {
+    ...signedHeaders(rawBody, 'old-secret', 6, now),
+    'x-xertos-site': 'xert_fitness',
+  };
+  const calls = [];
+  const admin = {
+    rpc(name, args) {
+      calls.push({ name, args });
+      return Promise.resolve({
+        data: { ok: true, status: 'queued', externalId: edit.externalId },
+        error: null,
+      });
+    },
+  };
+
+  try {
+    process.env.CLIENT0_SYNC_ENABLED = 'true';
+    process.env.XERTOS_WRITE_SECRET = 'current-secret';
+    process.env.XERTOS_WRITE_SECRET_VERSION = '7';
+    process.env.XERTOS_PREVIOUS_WRITE_SECRET = 'old-secret';
+    process.env.XERTOS_PREVIOUS_WRITE_SECRET_VERSION = '6';
+    delete process.env.XERTOS_SITE_SECRET;
+
+    const response = mockResponse();
+    await handler(request({ rawBody, url: target, headers }), response, {
+      runEdit: (replayRequest, res, context) => handleXertosEdit(
+        replayRequest,
+        admin,
+        { json: (body, status = 200) => res.status(status).json(body) },
+        process.env,
+        context.now,
+        { verifiedRefresh: true },
+      ),
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.body, {
+      ok: true,
+      status: 'queued',
+      externalId: edit.externalId,
+    });
+    assert.deepEqual(calls, [{
+      name: 'xertos_sync_refresh_bookings',
+      args: {
+        p_edit: edit,
+        p_request_fingerprint: xertosRequestFingerprint({
+          method: 'POST',
+          target,
+          rawBody,
+        }),
+      },
+    }]);
+  } finally {
+    for (const key of [
+      'CLIENT0_SYNC_ENABLED',
+      'XERTOS_WRITE_SECRET',
+      'XERTOS_WRITE_SECRET_VERSION',
+      'XERTOS_PREVIOUS_WRITE_SECRET',
+      'XERTOS_PREVIOUS_WRITE_SECRET_VERSION',
+      'XERTOS_SITE_SECRET',
+    ]) {
       if (Object.hasOwn(original, key)) process.env[key] = original[key];
       else delete process.env[key];
     }
