@@ -39,7 +39,9 @@ async function runXertosCalendarEdit(replayRequest, response, { now }) {
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now);
+  // xertosWebhookHandler checked the signature over these exact bytes with the
+  // versioned write secrets before handing the request on.
+  return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now, { signatureVerified: true });
 }
 
 export function validStripeSignatureHeader(value) {

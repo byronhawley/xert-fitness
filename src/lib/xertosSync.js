@@ -143,12 +143,21 @@ export function xertosEditRefusal(error) {
   return null;
 }
 
-/** XertOS → XERT: one staff edit, signed with the secret XertOS issued. */
-export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000)) {
+/**
+ * XertOS → XERT: one staff edit, signed with the secret XertOS issued.
+ *
+ * `signatureVerified` is set by /api/xertos-webhook, which has already checked
+ * the exact bytes against the versioned write secrets (XERTOS_WRITE_SECRET and,
+ * during a rotation, XERTOS_PREVIOUS_WRITE_SECRET). Checking again here with
+ * XERTOS_SITE_SECRET made every rotation need two Vercel values changed in
+ * step; one missed and every XertOS edit answered 401 although the outer check
+ * passed. Called without it, the old single-secret check still applies.
+ */
+export async function handleXertosEdit(request, admin, trace, env = process.env, nowSeconds = Math.floor(Date.now() / 1000), { signatureVerified = false } = {}) {
   const { json } = trace;
   if (request.method !== 'POST') return json({ error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed' } }, 405);
   const config = xertosSyncEnvironment(env);
-  if (!config.editReady) {
+  if (!signatureVerified && !config.editReady) {
     return json({ error: { code: 'SYNC_OFF', message: "XERT Fitness isn't taking changes from XertOS right now. Make this change on XERT Fitness." } }, 409);
   }
 
@@ -156,9 +165,12 @@ export async function handleXertosEdit(request, admin, trace, env = process.env,
   // same object, which serialises back to the identical bytes.
   const body = await requestText(request);
   if (Buffer.byteLength(body) > EDIT_REQUEST_BYTES) return json({ error: { code: 'TOO_LARGE', message: 'Change too large.' } }, 413);
-  if (requestHeader(request, 'x-xertos-site') !== config.provider
-    || !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
-      requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)) {
+  const siteHeader = requestHeader(request, 'x-xertos-site');
+  if ((siteHeader || !signatureVerified) && siteHeader !== config.provider) {
+    return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
+  }
+  if (!signatureVerified && !verifyXertosSignature(requestHeader(request, 'x-webhook-signature'), config.siteSecret,
+    requestHeader(request, 'x-webhook-timestamp'), body, nowSeconds)) {
     return json({ error: { code: 'UNSIGNED', message: 'Change was not accepted.' } }, 401);
   }
 
@@ -375,4 +387,108 @@ export async function handleXertosDispatch(request, admin, trace, env = process.
     totals.window = sent.ok ? sent.body.outcomes || {} : { failed: true };
   }
   return json(totals, totals.failed ? 502 : 200);
+}
+
+// ---------------------------------------------------------------------------
+// How the link is doing, for the owner's operations health page
+// ---------------------------------------------------------------------------
+
+/** XertOS's own view of this connection (GET /v1/connected-sites/{provider}/status). */
+export async function xertosConnectionStatus(config, fetchImpl = fetch) {
+  let token;
+  try {
+    token = await xertosAccessToken(config, fetchImpl);
+  } catch (error) {
+    return { reachable: false, problem: String(error?.message || error).replace(/^XERTOS_TOKEN /, '').slice(0, 300) };
+  }
+  const result = await xertosFetch(fetchImpl, `${config.apiUrl}/v1/connected-sites/${encodeURIComponent(config.provider)}/status`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(error => ({ ok: false, status: 0, body: { error: { code: 'UNREACHABLE', message: error.message } } }));
+  if (!result.ok) return { reachable: true, problem: xertosProblem(result) };
+  const site = result.body || {};
+  return {
+    reachable: true,
+    status: site.status ?? null,
+    health: site.health ?? null,
+    lastReceivedAt: site.lastReceivedAt ?? null,
+    lastWindowAt: site.lastWindowAt ?? null,
+    lastWriteAt: site.lastWriteAt ?? null,
+    lastError: site.lastError ?? null,
+    writeSecretVersion: site.writeSecretVersion ?? null,
+    previousSecretUntil: site.previousSecretUntil ?? null,
+  };
+}
+
+const QUEUE_STUCK_MS = 15 * 60 * 1000;
+
+/** This side of the link: the switch, the daily window, and what is waiting to go. */
+export async function xertosLocalSyncState(admin, now = Date.now()) {
+  const [settings, outbox] = await Promise.all([
+    admin.from('xertos_sync_settings').select('enabled, window_sent_at, window_tried_at').maybeSingle(),
+    admin.from('xertos_class_outbox').select('changed_at, sent_changed_at, last_error').order('changed_at', { ascending: true }).limit(1000),
+  ]);
+  if (settings.error) throw settings.error;
+  if (outbox.error) throw outbox.error;
+  const waiting = (outbox.data || []).filter(row => !row.sent_changed_at
+    || new Date(row.sent_changed_at).getTime() !== new Date(row.changed_at).getTime());
+  const oldest = waiting[0]?.changed_at || null;
+  return {
+    enabled: settings.data?.enabled === true,
+    windowSentAt: settings.data?.window_sent_at || null,
+    windowTriedAt: settings.data?.window_tried_at || null,
+    waiting: waiting.length,
+    stuck: oldest ? now - new Date(oldest).getTime() > QUEUE_STUCK_MS : false,
+    oldestWaitingAt: oldest,
+    lastError: waiting.find(row => row.last_error)?.last_error?.slice(0, 300) || null,
+  };
+}
+
+/**
+ * One verdict for the owner: both sides of the link, the problem in words and
+ * what to do about it. `ok` only when XertOS says it is in step and nothing
+ * has waited here longer than a quarter of an hour.
+ */
+export async function xertosSyncHealth(admin, env = process.env, fetchImpl = fetch, now = Date.now()) {
+  const config = xertosSyncEnvironment(env);
+  const local = await xertosLocalSyncState(admin, now);
+  if (!local.enabled) {
+    return { status: 'ok', local, remote: null, detail: 'XertOS class sync is switched off here, so nothing is sent.', action: null };
+  }
+  if (!config.sendReady) {
+    return {
+      status: 'attention', local, remote: null,
+      detail: 'XertOS class sync is on but its Vercel settings are incomplete (XERTOS_API_URL, XERTOS_CLIENT_ID, XERTOS_CLIENT_SECRET, XERTOS_SYNC_DISPATCH_SECRET).',
+      action: 'Add the missing values in Vercel and redeploy.',
+    };
+  }
+  const remote = await xertosConnectionStatus(config, fetchImpl);
+  const queue = local.waiting
+    ? `${local.waiting} class change${local.waiting === 1 ? '' : 's'} waiting to send${local.lastError ? ` (last error: ${local.lastError})` : ''}`
+    : 'nothing waiting to send';
+  if (!remote.reachable || remote.problem) {
+    return {
+      status: 'attention', local, remote,
+      detail: `XERT can't check in with XertOS: ${remote.problem || 'no answer'}. Here: ${queue}.`,
+      action: /INVALID_CLIENT|CREDENTIAL_|CLIENT_SUSPENDED|401|403/.test(remote.problem || '')
+        ? 'The XertOS credential in Vercel (XERTOS_CLIENT_ID / XERTOS_CLIENT_SECRET) was refused. Issue a new one in XertOS (Developer → Credentials, Connected site preset), update Vercel and redeploy.'
+        : 'Try again in a few minutes. If it keeps failing, check XERTOS_API_URL in Vercel.',
+    };
+  }
+  const state = remote.health?.state || 'unknown';
+  const note = remote.health?.note || '';
+  if (state !== 'ok' || local.stuck) {
+    return {
+      status: 'attention', local, remote,
+      detail: `XertOS says: ${note || state}. Here: ${queue}.`,
+      action: local.stuck
+        ? 'Class changes have waited over 15 minutes. Check the xertos-class-sync cron job and that the vault secret xertos_sync_dispatch_secret matches XERTOS_SYNC_DISPATCH_SECRET in Vercel.'
+        : state === 'failing'
+          ? 'XertOS could not reach this site with an edit. Check XERTOS_WRITE_SECRET matches the secret XertOS issued, then run the connection test in XertOS.'
+          : state === 'behind'
+            ? 'The daily timetable window has not reached XertOS. Check the xertos-class-sync-window cron job.'
+            : 'Open Connected sites in XertOS to see why.',
+    };
+  }
+  return { status: 'ok', local, remote, detail: `In step with XertOS: ${note} Here: ${queue}.`, action: null };
 }

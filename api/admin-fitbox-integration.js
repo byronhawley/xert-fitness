@@ -37,7 +37,7 @@ import {
   summarizeFitboxMirror,
   toolResultRows,
 } from '../src/lib/fitboxMcp.js';
-import { handleXertosDispatch } from '../src/lib/xertosSync.js';
+import { handleXertosDispatch, xertosSyncHealth } from '../src/lib/xertosSync.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1052,6 +1052,15 @@ export default async function handler(request, response) {
     const wantsHealth = requestQuery(request, 'health') === '1';
     const wantsEvents = requestQuery(request, 'events') === '1';
     const wantsOverview = requestQuery(request, 'overview') === '1';
+    if (requestQuery(request, 'xertos') === '1') {
+      try {
+        return json(await xertosSyncHealth(admin));
+      } catch (error) {
+        console.error('XertOS sync health failed.', { requestId: trace.requestId, errorCode: typeof error?.code === 'string' ? error.code.slice(0, 64) : 'UNKNOWN' });
+        if (['42P01', 'PGRST205'].includes(error?.code)) return json({ status: 'ok', detail: 'XertOS class sync is not installed here.' });
+        return json({ error: 'XertOS sync status could not be loaded.' }, 500);
+      }
+    }
     try {
       if (wantsOverview) return json(await fitboxOverview(admin));
       if (wantsHealth) return json(await integrationHealth(admin));
