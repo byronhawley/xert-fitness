@@ -2116,6 +2116,17 @@ export async function sendOwnerPushSmokeTest() {
   return body;
 }
 
+async function getXertosSyncHealth() {
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error || !session?.access_token) throw new Error('Admin session is unavailable.');
+  const response = await fetch('/api/admin-fitbox-integration?xertos=1', {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(apiErrorMessage(body, 'XertOS sync status could not be loaded.'));
+  return body;
+}
+
 export async function getOperationsHealth() {
   const nowIso = new Date().toISOString();
   const platformSettings = getSoftLaunchSettings();
@@ -2268,6 +2279,16 @@ export async function getOperationsHealth() {
         status: reconciliation > 0 ? 'attention' : 'ok',
         detail: `Zapier bridge is ready; ${completed} total job${completed === 1 ? '' : 's'} completed, including ${profileRefreshes} read-only profile refresh${profileRefreshes === 1 ? '' : 'es'}; ${active} in progress, ${events} FitBox event${events === 1 ? '' : 's'} received and ${reconciliation} awaiting review.`,
         action: reconciliation > 0 ? 'Review the FitBox reconciliation queue before treating provider changes as authoritative.' : null,
+      };
+    }),
+
+    healthCheck('xertos-sync', 'XertOS class sync', async () => {
+      const result = await getXertosSyncHealth();
+      return {
+        status: result.status === 'ok' ? 'ok' : 'attention',
+        count: Number(result.local?.waiting || 0),
+        detail: result.detail || 'XertOS class sync status is unknown.',
+        action: result.action || null,
       };
     }),
 

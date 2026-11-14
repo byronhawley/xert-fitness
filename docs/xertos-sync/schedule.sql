@@ -4,19 +4,28 @@
 -- only with the owner's go-ahead, after:
 --   1. 20261004010000_xertos_class_sync.sql is applied;
 --   2. XertOS has XERT Fitness connected (PUT /v1/connected-sites/xert_fitness
---      with timetable "site", writeUrl https://www.xertfitness.com.au/api/xertos/classes,
+--      with timetable "site", writeUrl https://www.xertfitness.com.au/api/xertos-webhook,
 --      status "active"), which shows the write secret once;
 --   3. Vercel has, for Production:
 --        XERTOS_API_URL               the XertOS API, https://…
---        XERTOS_CLIENT_ID             a XertOS service credential with sites.sync
+--        XERTOS_CLIENT_ID             a XertOS service credential from the
+--                                     "Connected site" preset (sites.sync, schedule.read, training.read)
 --        XERTOS_CLIENT_SECRET         and its secret
---        XERTOS_SITE_SECRET           the write secret XertOS showed in step 2
+--        XERTOS_WRITE_SECRET          the write secret XertOS showed in step 2
+--        XERTOS_WRITE_SECRET_VERSION  its version (writeSecretVersion in XertOS)
+--      (XERTOS_SITE_SECRET is no longer needed: /api/xertos-webhook checks the
+--      signature once, with the versioned write secrets, and during a rotation
+--      XERTOS_PREVIOUS_WRITE_SECRET(_VERSION) keep the old one working.)
 --        XERTOS_SYNC_DISPATCH_SECRET  a random value of at least 32 characters
 --                                     (openssl rand -hex 32), the scheduler's only identity
 --      and the release containing src/lib/xertosSync.js is live;
 --   4. pg_cron and pg_net are enabled (they already are for the roster);
 --   5. XertOS's connection test passes: POST /v1/connected-sites/xert_fitness/test
 --      answers ok: true, which proves the write URL and secret match.
+--
+-- Checking on it: Admin → Operations health → "XertOS class sync" shows both
+-- sides at once: XertOS's own view of the link (GET /v1/connected-sites/
+-- xert_fitness/status) and what is waiting to send here, with what to fix.
 --
 -- What it does: every minute, only when xertos_sync_due() says a class has
 -- changed, ONE HTTPS call sends the changes to XertOS. Once a day at 3:10 am
