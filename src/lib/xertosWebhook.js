@@ -29,11 +29,40 @@ function strictPositiveVersion(value) {
  * unreadable, the previous key is not accepted at all (fail closed); the current
  * key is unaffected.
  */
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
 
 export function previousSecretExpiresAt(environment = process.env) {
   const text = String(environment.XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT ?? '').trim();
-  if (!ISO_INSTANT.test(text)) return null;
+  const match = ISO_INSTANT.exec(text);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] ?? 0);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+  // Date.parse normalises impossible dates (for example February 31) into a
+  // later month. Validate the calendar and clock fields before trusting it.
+  if (
+    month < 1 || month > 12 || day < 1 || day > daysInMonth[month - 1]
+    || hour > 23 || minute > 59 || second > 59
+  ) return null;
+
+  if (match[9]) {
+    const offsetHour = Number(match[10]);
+    const offsetMinute = Number(match[11]);
+    // ISO 8601 offsets do not exceed 14:00. -00:00 means an unknown offset,
+    // not a proven instant, so it cannot safely define a key-expiry boundary.
+    if (
+      offsetHour > 14 || offsetMinute > 59 || (offsetHour === 14 && offsetMinute !== 0)
+      || (match[9] === '-' && offsetHour === 0 && offsetMinute === 0)
+    ) return null;
+  }
+
   const ms = Date.parse(text);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 }
