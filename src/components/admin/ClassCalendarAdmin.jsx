@@ -1066,7 +1066,7 @@ export default function ClassCalendarAdmin({ initialAction, initialSessionId, on
                     {walkIn && (
                       <form onSubmit={event => addWalkIn(event, s)} aria-label="Add a walk-in" className="mt-3 space-y-2 border-t border-xert-steel/20 pt-3">
                         <p className="font-body text-xs text-xert-concrete/40">For someone without an account. With an email they get the usual booking confirmation.</p>
-                        {[['fullName', 'Name', 'text', true], ['phone', 'Phone (optional)', 'tel', false], ['email', 'Email (optional)', 'email', false]].map(([key, label, type, required]) => (
+                        {/** @type {Array<[string, string, string, boolean]>} */ ([['fullName', 'Name', 'text', true], ['phone', 'Phone (optional)', 'tel', false], ['email', 'Email (optional)', 'email', false]]).map(([key, label, type, required]) => (
                           <label key={key} className="block font-body text-xs uppercase tracking-wider text-xert-concrete/50">
                             {label}
                             <input type={type} value={walkIn[key]} required={required} minLength={required ? 2 : undefined} autoComplete="off"
