@@ -71,7 +71,7 @@ saying "book on XERT Fitness" for these classes.
 | --- | --- |
 | `XERTOS_WRITE_SECRET` / `XERTOS_WRITE_SECRET_VERSION` | The current key and its positive integer version, matching XertOS's `write_secret_version`. |
 | `XERTOS_PREVIOUS_WRITE_SECRET` / `XERTOS_PREVIOUS_WRITE_SECRET_VERSION` | The key being retired and its version, during the overlap only. |
-| `XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT` | **Required for the previous key to be accepted.** An ISO 8601 instant with an explicit zone, e.g. `2026-12-01T00:00:00Z`. Set it to XertOS's `previous_write_secret_until` for the connection. |
+| `XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT` | **Required for the previous key to be accepted.** A strict ISO 8601 instant with an explicit zone, e.g. `2026-12-01T00:00:00Z`. It must have a real calendar date and valid clock fields; numeric offsets may not exceed `±14:00`, and `-00:00` is rejected because it does not identify a known instant. Set it to XertOS's `previous_write_secret_until` for the connection. |
 
 The previous key is accepted only while now is before the expiry. A missing,
 date-only, zone-less or otherwise unreadable expiry means the previous key is

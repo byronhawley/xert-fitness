@@ -227,7 +227,25 @@ test('the previous key is accepted only before its expiry; the current key throu
 
 test('a missing or unreadable expiry refuses the previous key and leaves the current one working', () => {
   const now = at('2026-11-14T00:00:00Z');
-  const expiries = [undefined, '', 'never', '2026-12-01', '2026-12-01 00:00:00', '2026-12-01T00:00:00', '1793577600', '2026-13-45T00:00:00Z'];
+  const expiries = [
+    undefined,
+    '',
+    'never',
+    '2026-12-01',
+    '2026-12-01 00:00:00',
+    '2026-12-01T00:00:00',
+    '1793577600',
+    '2026-13-45T00:00:00Z',
+    '2026-02-30T00:00:00Z',
+    '2026-04-31T00:00:00Z',
+    '2026-02-29T00:00:00Z',
+    '2026-12-01T24:00:00Z',
+    '2026-12-01T00:60:00Z',
+    '2026-12-01T00:00:60Z',
+    '2026-12-01T00:00:00+14:01',
+    '2026-12-01T00:00:00+15:00',
+    '2026-12-01T00:00:00-00:00',
+  ];
   for (const expiry of expiries) {
     const environment = { ...WRITE };
     if (expiry !== undefined) environment.XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT = expiry;
@@ -235,6 +253,14 @@ test('a missing or unreadable expiry refuses the previous key and leaves the cur
     assert.equal(verify(environment, WRITE.XERTOS_PREVIOUS_WRITE_SECRET, 6, now), false, 'previous refused for ' + expiry);
     assert.equal(verify(environment, WRITE.XERTOS_WRITE_SECRET, 7, now), true, 'current kept for ' + expiry);
   }
+});
+
+test('a real leap-day expiry is accepted without date rollover', () => {
+  const expiry = '2024-02-29T23:59:59.123456789+14:00';
+  assert.equal(
+    previousSecretExpiresAt({ XERTOS_PREVIOUS_WRITE_SECRET_EXPIRES_AT: expiry }),
+    Math.floor(Date.parse(expiry) / 1000),
+  );
 });
 
 test('an expiry with an explicit offset is read as that instant', () => {
