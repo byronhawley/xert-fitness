@@ -32,6 +32,14 @@
 -- Brisbane time it sends the next four weeks as a complete list, so anything
 -- missed heals itself; if that list doesn't reach XertOS, the minute job tries
 -- again hourly until it does. XERT Fitness stays in charge: XertOS only mirrors.
+--
+-- Forms too (20261116010000_xertos_forms_sync.sql): the same minute job fires
+-- when a form response hasn't been confirmed by XertOS, and the dispatcher
+-- sends it (POST /v1/connected-sites/xert_fitness/forms/sync). Anything not
+-- ticked off in xertos_form_sent goes again, so a missed one heals itself.
+-- Check: select count(*) from public.xert_form_responses r where not exists
+--   (select 1 from public.xertos_form_sent s where s.response_id = r.id);
+--   select forms_last_sent_at, forms_next_attempt_at, forms_last_error from public.xertos_sync_settings;
 
 -- ── Activate ────────────────────────────────────────────────────────────────
 
