@@ -609,7 +609,7 @@ test('every Three Day Pass branch on the visitor page has a 10 Session Pack twin
   assert.match(page, /const needsTenPackQuestionnaire = tenSessionPack && questionnaire !== 'done';/);
   // The body the checkout receives: its own action, and either the fresh
   // response id or the "already signed" claim.
-  assert.match(page, /: tenSessionPack\s*\?\s*\{\s*action: TEN_SESSION_PACK_ACTION, \.\.\.visitor,\s*\.\.\.\(tenPackAlreadySigned\s*\? \{ already_signed: true \}\s*: \{ questionnaire_response_id: questionnaireResponseId \}\),\s*\}\s*: \{ action: CASUAL_VISIT_ACTION, \.\.\.visitor \}\)/);
+  assert.match(page, /: tenSessionPack\s*\?\s*\{\s*action: TEN_SESSION_PACK_ACTION, \.\.\.visitor,\s*\.\.\.\(tenPackAlreadySigned\s*\? \{ already_signed: true \}\s*: \{ questionnaire_response_id: questionnaireResponseId \}\),\s*\}\s*: \{\s*action: CASUAL_VISIT_ACTION, \.\.\.visitor,/);
   // Not done yet: off to the casual questionnaire, details remembered, back here after.
   const detour = page.indexOf('if (needsTenPackQuestionnaire) {');
   const remembered = page.indexOf('rememberCasualVisitor(visitor);', detour);
