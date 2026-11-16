@@ -212,8 +212,8 @@ export default function BookingRequestForm({
             </label>
             <p className="mt-2 font-body text-xs leading-relaxed text-xert-pale/65">
               {guestVisit
-                ? 'Nothing to pay — your spot is held and the team will know you are a guest.'
-                : 'No problem — we will show you the ways to pay once your spot is held.'}
+                ? 'Nothing to pay — your spot is held and the team will know you are a guest. Next you sign the pre-exercise questionnaire, which every guest needs before training.'
+                : 'No problem — once your spot is held we will open the pre-exercise questionnaire and show you the ways to pay.'}
             </p>
           </div>
         )}

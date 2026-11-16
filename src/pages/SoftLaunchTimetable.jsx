@@ -14,7 +14,8 @@ import { getClassSessions, getSoftLaunchSettings, getDefaultSettings } from '@/l
 import { getPublicClassAvailability } from '@/lib/submitForms';
 import { classSignupState, signupOutcomeMessage } from '@/lib/classSignup';
 import VisitorPassChoices from '@/components/public/VisitorPassChoices';
-import { shouldOfferVisitorPasses } from '@/lib/visitorPassChoices';
+import { questionnairePromptAfterSignup, shouldOfferVisitorPasses, visitorDetailsFromSignup } from '@/lib/visitorPassChoices';
+import { rememberCasualVisitor } from '@/lib/casualVisit';
 import { gymDateKey } from '@/lib/gymTime';
 import { usePtAvailability } from '@/lib/usePtAvailability';
 
@@ -104,6 +105,9 @@ export default function SoftLaunchTimetable() {
   // here, rather than being left to find a QR code at the front desk they have
   // not walked into yet.
   const offerPasses = shouldOfferVisitorPasses(bookingSuccess, settings);
+  // Nobody without a membership trains unscreened. A bring-a-friend guest
+  // pays nothing, so this is the one thing their confirmation asks of them.
+  const questionnairePrompt = questionnairePromptAfterSignup(bookingSuccess);
 
   return (
     <div className="bg-xert-navy min-h-screen flex flex-col">
@@ -287,7 +291,7 @@ export default function SoftLaunchTimetable() {
 
       {/* Booking success */}
       <Dialog open={Boolean(bookingSuccess)} onOpenChange={(open) => { if (!open) setBookingSuccess(null); }}>
-        <DialogContent className={`${dialogClasses} max-h-[90vh] overflow-y-auto p-8 text-center ${offerPasses ? 'max-w-md' : 'max-w-sm'}`}>
+        <DialogContent className={`${dialogClasses} max-h-[90vh] overflow-y-auto p-8 text-center ${offerPasses || questionnairePrompt ? 'max-w-md' : 'max-w-sm'}`}>
           <div className="w-12 h-12 rounded-full bg-xert-steel text-xert-navy flex items-center justify-center mx-auto mb-4">
             <span className="text-xl" aria-hidden="true">✓</span>
           </div>
@@ -297,6 +301,23 @@ export default function SoftLaunchTimetable() {
           <DialogDescription className="font-body text-sm text-xert-pale/65 mb-6">
             {successCopy.body}
           </DialogDescription>
+          {questionnairePrompt && (
+            <div className="mb-6 border border-xert-steel/40 bg-xert-steel/10 p-4 text-left">
+              <p className="font-display text-sm uppercase tracking-wide text-xert-offwhite">
+                {questionnairePrompt.guest ? 'One more step for guests' : 'Sign the questionnaire before you train'}
+              </p>
+              <p className="mt-1 font-body text-xs leading-relaxed text-xert-pale/70">
+                {questionnairePrompt.guest
+                  ? 'Every bring-a-friend guest signs the pre-exercise questionnaire before their class. It takes a couple of minutes, and the team will see it before you arrive.'
+                  : 'Everyone without a membership signs the pre-exercise questionnaire before training. Signed it on an earlier visit? You do not need to do it again.'}
+              </p>
+              <Link to={questionnairePrompt.path}
+                onClick={() => rememberCasualVisitor(visitorDetailsFromSignup(bookingSuccess))}
+                className="mt-3 inline-flex min-h-11 w-full items-center justify-center bg-xert-steel px-4 font-display text-sm uppercase tracking-wide text-xert-navy transition-colors hover:bg-xert-pale">
+                Fill in the questionnaire
+              </Link>
+            </div>
+          )}
           {offerPasses && (
             <VisitorPassChoices settings={settings} signup={bookingSuccess}
               note="Your spot is already held — pay now or on arrival. Bring your receipt either way." />
@@ -313,7 +334,7 @@ export default function SoftLaunchTimetable() {
           )}
           <button onClick={() => setBookingSuccess(null)}
             className="xert-btn-primary mx-auto inline-flex min-h-[52px] w-full items-center justify-center px-6 font-display text-sm uppercase tracking-wide">
-            {offerPasses ? 'Pay later' : 'Done'}
+            {offerPasses ? 'Pay later' : questionnairePrompt ? 'Later' : 'Done'}
           </button>
         </DialogContent>
       </Dialog>

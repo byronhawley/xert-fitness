@@ -47,8 +47,14 @@ const CHECKOUT_RECORDING_FAILED = 'CHECKOUT_RECORDING_FAILED';
 const CHECKOUT_CONTRACT_VERSION = 'receipt_terms_v1';
 
 class VisitorCheckoutError extends Error {
-  constructor(message, status) { super(message); this.status = status; }
+  constructor(message, status, code = '') { super(message); this.status = status; this.code = code; }
 }
+
+// A visitor who says they already signed the questionnaire, but whose email
+// has no signed one on file. The page reads this code and opens the
+// questionnaire for them, rather than selling a pass to somebody unscreened.
+export const QUESTIONNAIRE_NOT_ON_FILE = 'QUESTIONNAIRE_NOT_ON_FILE';
+const QUESTIONNAIRE_NOT_ON_FILE_MESSAGE = 'We could not find a signed pre-exercise questionnaire under this email. Fill it in now (it takes a couple of minutes) and you come straight back here to pay.';
 
 export { stripeModeForSecret };
 
@@ -234,7 +240,9 @@ export function normalizeCheckoutRequest(input) {
 }
 
 export function publicCheckoutFailure(error) {
-  if (error instanceof VisitorCheckoutError) return { status: error.status, message: error.message };
+  if (error instanceof VisitorCheckoutError) {
+    return { status: error.status, message: error.message, ...(error.code ? { code: error.code } : {}) };
+  }
   if (error?.code === CHECKOUT_RECORDING_FAILED) {
     return {
       status: 503,
@@ -556,7 +564,7 @@ export default async function handler(request, response) {
       }));
     } catch (error) {
       const failure = publicCheckoutFailure(error);
-      return json({ error: failure.message }, failure.status);
+      return json({ error: failure.message, ...(failure.code ? { code: failure.code } : {}) }, failure.status);
     }
   }
   // A visitor purchase despite the name: no account, order or credits, so it
@@ -571,7 +579,7 @@ export default async function handler(request, response) {
       }));
     } catch (error) {
       const failure = publicCheckoutFailure(error);
-      return json({ error: failure.message }, failure.status);
+      return json({ error: failure.message, ...(failure.code ? { code: failure.code } : {}) }, failure.status);
     }
   }
   if (payload?.action === THREE_MONTH_MEMBERSHIP_ACTION) {
@@ -817,7 +825,7 @@ export default async function handler(request, response) {
 
 /** Visitor checkout only: no member account, order or automatic session credits. */
 export async function startThreeDayPassCheckout({ payload, admin, stripe, origin, now = Date.now() }) {
-  const fail = (message, status) => { throw new VisitorCheckoutError(message, status); };
+  const fail = (message, status, code) => { throw new VisitorCheckoutError(message, status, code); };
   if (payload?.action !== THREE_DAY_PASS_ACTION) fail('This visitor pass is not available.', 400);
   let visitor;
   try { visitor = normalizeCasualVisitor(payload); } catch (error) { fail(error.message, 400); }
@@ -835,10 +843,9 @@ export async function startThreeDayPassCheckout({ payload, admin, stripe, origin
   ]);
   if (capabilityError || !capability || settingsError || !settings) fail('Three Day Pass payments are unavailable right now.', 503);
   if (settings.casual_payments_enabled === false) fail('Visitor payments are switched off. Please speak to the XERT team.', 503);
-  // A declared "already signed" never blocks the sale: the payment goes
-  // through either way and the owner alert says plainly what was found, so
-  // staff can ask at the door instead of a visitor being stuck at a payment
-  // screen over a questionnaire filed under a slightly different email.
+  // A declared "already signed" is looked up by email. Found, they pay
+  // straight away. Not found, nobody is sold a pass unscreened: the page gets
+  // QUESTIONNAIRE_NOT_ON_FILE and opens the questionnaire for them instead.
   let paperworkVerified = null;
   if (declaredSigned) {
     const { data: onFile, error: lookupError } = await admin.rpc('xert_visitor_questionnaire_signed', {
@@ -852,6 +859,9 @@ export async function startThreeDayPassCheckout({ payload, admin, stripe, origin
     if (lookupError && lookupError.code !== 'PGRST202') {
       fail('Your questionnaire could not be checked. Please try again.', 503);
     }
+    // Only a lookup that ran and found nothing sends them to the form. A lookup
+    // that is not deployed yet (PGRST202) still flags the sale for staff.
+    if (!lookupError && onFile !== true) fail(QUESTIONNAIRE_NOT_ON_FILE_MESSAGE, 409, QUESTIONNAIRE_NOT_ON_FILE);
     paperworkVerified = onFile === true;
   } else {
     const { data: signed, error: proofError } = await admin.rpc('xert_visitor_questionnaire_completed', {
@@ -895,7 +905,7 @@ export async function startThreeDayPassCheckout({ payload, admin, stripe, origin
  * recorded.
  */
 export async function startTenSessionPackCheckout({ payload, admin, stripe, origin, now = Date.now() }) {
-  const fail = (message, status) => { throw new VisitorCheckoutError(message, status); };
+  const fail = (message, status, code) => { throw new VisitorCheckoutError(message, status, code); };
   if (payload?.action !== TEN_SESSION_PACK_ACTION) fail('This visitor pass is not available.', 400);
   let visitor;
   try { visitor = normalizeCasualVisitor(payload); } catch (error) { fail(error.message, 400); }
@@ -914,18 +924,22 @@ export async function startTenSessionPackCheckout({ payload, admin, stripe, orig
   // The visitor switch covers every visitor page. The session pack payments
   // switch is the member credit checkout and has nothing to do with this.
   if (settings.casual_payments_enabled === false) fail('Visitor payments are switched off. Please speak to the XERT team.', 503);
-  // A declared "already signed" never blocks the sale: the payment goes
-  // through either way and the owner alert says plainly what was found.
+  // A declared "already signed" is looked up by email. Found, they pay
+  // straight away. Not found, nobody is sold a pass unscreened: the page gets
+  // QUESTIONNAIRE_NOT_ON_FILE and opens the questionnaire for them instead.
   let paperworkVerified = null;
   if (declaredSigned) {
     const { data: onFile, error: lookupError } = await admin.rpc('xert_visitor_questionnaire_signed', {
       p_email: visitor.email,
     });
-    // PGRST202 means the lookup is not deployed. An unproven claim is taken
-    // and flagged, the same as the Three Day Pass; a real failure still stops.
+    // PGRST202 means the lookup is not deployed: that sale is taken and
+    // flagged, the same as the Three Day Pass; a real failure still stops.
     if (lookupError && lookupError.code !== 'PGRST202') {
       fail('Your questionnaire could not be checked. Please try again.', 503);
     }
+    // Only a lookup that ran and found nothing sends them to the form. A lookup
+    // that is not deployed yet (PGRST202) still flags the sale for staff.
+    if (!lookupError && onFile !== true) fail(QUESTIONNAIRE_NOT_ON_FILE_MESSAGE, 409, QUESTIONNAIRE_NOT_ON_FILE);
     paperworkVerified = onFile === true;
   } else {
     const { data: signed, error: proofError } = await admin.rpc('xert_visitor_questionnaire_completed', {

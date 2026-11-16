@@ -54,3 +54,19 @@ test('staff can see and export who came in free', () => {
   assert.equal(row.guest_visit, 'Yes');
   assert.equal(bookingCsvRows([{ full_name: 'A Payer' }])[0].guest_visit, 'No');
 });
+
+test('a bring-a-friend guest is sent to the casual pre-exercise questionnaire after booking', async () => {
+  const { questionnairePromptAfterSignup, CASUAL_QUESTIONNAIRE_PATH } = await import('../src/lib/visitorPassChoices.js');
+  assert.equal(CASUAL_QUESTIONNAIRE_PATH, '/forms/peq-casual');
+  assert.deepEqual(questionnairePromptAfterSignup({ has_membership: false, guest_visit: true }),
+    { path: '/forms/peq-casual', guest: true });
+  // Any casual owes the questionnaire; members signed theirs when they joined.
+  assert.deepEqual(questionnairePromptAfterSignup({ has_membership: false, guest_visit: false }),
+    { path: '/forms/peq-casual', guest: false });
+  assert.equal(questionnairePromptAfterSignup({ has_membership: true }), null);
+  assert.equal(questionnairePromptAfterSignup(null), null);
+  const { readFileSync } = await import('node:fs');
+  const page = readFileSync(new URL('../src/pages/SoftLaunchTimetable.jsx', import.meta.url), 'utf8');
+  assert.match(page, /questionnairePromptAfterSignup\(bookingSuccess\)/);
+  assert.match(page, /<Link to=\{questionnairePrompt\.path\}/);
+});
