@@ -157,7 +157,7 @@ test('a claim with nothing signed on file sends them to the questionnaire instea
 test('the three-day page opens the questionnaire when the claim is not on file', () => {
   const page = readFileSync(new URL('../src/pages/CasualVisit.jsx', import.meta.url), 'utf8');
   assert.match(page, /response\.status === 409 && body\.code === QUESTIONNAIRE_NOT_ON_FILE/);
-  assert.match(page, /const passReturnKey = threeDayPass \? '3daypass' : tenSessionPack \? '10pack' : null;/);
+  assert.match(page, /const passReturnKey = threeMonth \? null : threeDayPass \? '3daypass' : tenSessionPack \? '10pack' : 'casual';/);
   assert.match(page, /navigate\(`\/forms\/\$\{CASUAL_PEQ_SLUG\}\?return=\$\{passReturnKey\}`\)/);
 });
 

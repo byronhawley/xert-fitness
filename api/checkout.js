@@ -1049,6 +1049,27 @@ export async function startThreeMonthMembershipCheckout({ payload, admin, stripe
   return { url: url.toString(), amount_cents: visitorPassPricing(THREE_MONTH_MEMBERSHIP_ACTION, settings).charge };
 }
 
+/**
+ * Whether the casual visitor's pre-exercise questionnaire is on file: true,
+ * false, or null when the email lookup is not deployed yet (PGRST202), which
+ * lets the visit through as before. A real database failure throws.
+ */
+export async function casualQuestionnaireOnFile({ admin, payload, visitor }) {
+  if (validQuestionnaireResponseId(payload?.questionnaire_response_id)) {
+    const { data, error } = await admin.rpc('xert_visitor_questionnaire_completed', {
+      p_response_id: payload.questionnaire_response_id,
+      p_name: visitor.fullName, p_email: visitor.email, p_phone: visitor.phone,
+    });
+    if (error) throw new Error('questionnaire proof failed');
+    if (data === true) return true;
+    // A response id for different details still gets the email lookup.
+  }
+  const { data, error } = await admin.rpc('xert_visitor_questionnaire_signed', { p_email: visitor.email });
+  if (error?.code === 'PGRST202') return null;
+  if (error) throw new Error('questionnaire lookup failed');
+  return data === true;
+}
+
 export async function handleCasualVisitCheckout({ payload, request, admin, json, createStripe = createXertStripeClient }) {
   let visitor;
   try {
@@ -1067,6 +1088,18 @@ export async function handleCasualVisitCheckout({ payload, request, admin, json,
   }
   if (settings && settings.casual_payments_enabled === false) {
     return json({ error: 'Casual visit payments are switched off. Please pay at the front desk.' }, 503);
+  }
+
+  // Nobody pays for a casual visit unscreened. A questionnaire signed just
+  // now comes back with its response id; "I have already completed it" is
+  // looked up by email. Neither found sends them to the casual questionnaire.
+  try {
+    const onFile = await casualQuestionnaireOnFile({ admin, payload, visitor });
+    if (onFile === false) {
+      return json({ error: QUESTIONNAIRE_NOT_ON_FILE_MESSAGE, code: QUESTIONNAIRE_NOT_ON_FILE }, 409);
+    }
+  } catch {
+    return json({ error: 'Your questionnaire could not be checked. Please try again.' }, 503);
   }
 
   const stripeMode = stripeModeForSecret(process.env.STRIPE_SECRET_KEY);

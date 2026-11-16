@@ -188,13 +188,18 @@ export default function CasualVisit({ threeDayPass = false, tenSessionPack = fal
                   ? { already_signed: true }
                   : { questionnaire_response_id: questionnaireResponseId }),
               }
-              : { action: CASUAL_VISIT_ACTION, ...visitor }),
+              : {
+                action: CASUAL_VISIT_ACTION, ...visitor,
+                ...(validQuestionnaireResponseId(questionnaireResponseId)
+                  ? { questionnaire_response_id: questionnaireResponseId }
+                  : { already_signed: true }),
+              }),
       });
       const body = await response.json().catch(() => ({}));
       // They said they had signed, but nothing signed is on file under that
       // email. Open the questionnaire now rather than selling an unscreened
       // pass; their details are waiting when it hands back here to pay.
-      const passReturnKey = threeDayPass ? '3daypass' : tenSessionPack ? '10pack' : null;
+      const passReturnKey = threeMonth ? null : threeDayPass ? '3daypass' : tenSessionPack ? '10pack' : 'casual';
       if (response.status === 409 && body.code === QUESTIONNAIRE_NOT_ON_FILE && passReturnKey) {
         rememberCasualVisitor(visitor);
         setQuestionnaire('not-done');

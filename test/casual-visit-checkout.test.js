@@ -4,9 +4,15 @@ import * as checkout from '../api/checkout.js';
 import { CASUAL_VISIT_ACTION } from '../src/lib/casualVisit.js';
 
 const visitor = {action:CASUAL_VISIT_ACTION,first_name:'Casey',last_name:'Example',email:'casey@example.test',phone:'0400111222'};
-function dependencies(settings, error=null) {
+function dependencies(settings, error=null, { onFile=true, lookupError=null, proof=true }={}) {
   const created = [];
-  const admin = {from(table){
+  const rpcCalls = [];
+  const admin = {async rpc(name,args){
+    rpcCalls.push({name,args});
+    if (name==='xert_visitor_questionnaire_signed') return {data:onFile,error:lookupError};
+    assert.equal(name,'xert_visitor_questionnaire_completed');
+    return {data:proof,error:null};
+  },from(table){
     assert.equal(table,'admin_settings');
     let columns;
     const query = {
@@ -20,7 +26,7 @@ function dependencies(settings, error=null) {
     return {url:'https://checkout.stripe.com/c/pay/cs_test_casual'};
   }}}});
   const json = (body,status=200) => ({body,status});
-  return {admin,createStripe,json,created};
+  return {admin,createStripe,json,created,rpcCalls};
 }
 
 test('casual checkout charges the server discount only when enabled and valid, ignoring browser amounts', async () => {
@@ -62,4 +68,39 @@ test('casual checkout keeps the existing default amount when settings are absent
   const result=await checkout.handleCasualVisitCheckout({...deps,payload:visitor,request:{url:'https://xert-fitness.vercel.app/api/checkout'}});
   assert.equal(result.status,200);
   assert.equal(result.body.amount_cents,1560);
+});
+
+const request = {url:'https://xert-fitness.vercel.app/api/checkout'};
+const open = {casual_payments_enabled:true,casual_visit_price_cents:2000};
+
+test('a casual visitor who says they signed is looked up by email before Stripe opens', async () => {
+  const deps=dependencies(open);
+  const result=await checkout.handleCasualVisitCheckout({...deps,payload:{...visitor,already_signed:true},request});
+  assert.equal(result.status,200);
+  assert.deepEqual(deps.rpcCalls,[{name:'xert_visitor_questionnaire_signed',args:{p_email:'casey@example.test'}}]);
+});
+
+test('a casual visitor with no questionnaire on file is sent to sign it, and nothing is charged', async () => {
+  const deps=dependencies(open,null,{onFile:false});
+  const result=await checkout.handleCasualVisitCheckout({...deps,payload:{...visitor,already_signed:true},request});
+  assert.equal(result.status,409);
+  assert.equal(result.body.code,checkout.QUESTIONNAIRE_NOT_ON_FILE);
+  assert.equal(deps.created.length,0);
+});
+
+test('a questionnaire signed just now is proven by its response id', async () => {
+  const id='123e4567-e89b-42d3-a456-426614174000';
+  const deps=dependencies(open,null,{onFile:false});
+  const result=await checkout.handleCasualVisitCheckout({...deps,payload:{...visitor,questionnaire_response_id:id},request});
+  assert.equal(result.status,200);
+  assert.equal(deps.rpcCalls[0].name,'xert_visitor_questionnaire_completed');
+  assert.equal(deps.rpcCalls[0].args.p_response_id,id);
+});
+
+test('a failed lookup stops before Stripe; a lookup not deployed yet lets the visit through', async () => {
+  const failed=dependencies(open,null,{lookupError:{code:'57014',message:'timeout'}});
+  assert.equal((await checkout.handleCasualVisitCheckout({...failed,payload:visitor,request})).status,503);
+  assert.equal(failed.created.length,0);
+  const missing=dependencies(open,null,{lookupError:{code:'PGRST202',message:'not found'}});
+  assert.equal((await checkout.handleCasualVisitCheckout({...missing,payload:visitor,request})).status,200);
 });
