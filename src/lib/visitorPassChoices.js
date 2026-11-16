@@ -142,3 +142,23 @@ export function shouldOfferVisitorPasses(signup, settings = {}) {
   if (signup.bookings_open === false || signup.booking_mode === 'interest_only') return false;
   return true;
 }
+
+/**
+ * Whether the booking confirmation must send them to the pre-exercise
+ * questionnaire. Anyone without a membership is a casual, and every casual,
+ * bring-a-friend guests included, signs the questionnaire before training
+ * (the promotion's own terms say the guest must complete it first). Members
+ * signed theirs when they joined.
+ *
+ * The questionnaire is the club's casual one, the same form the passes use,
+ * so it lands in the same records XertOS imports.
+ */
+export const CASUAL_QUESTIONNAIRE_PATH = '/forms/peq-casual';
+
+export function questionnairePromptAfterSignup(signup) {
+  if (!signup || signup.has_membership !== false) return null;
+  return {
+    path: CASUAL_QUESTIONNAIRE_PATH,
+    guest: Boolean(signup.guest_visit),
+  };
+}

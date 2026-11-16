@@ -14,6 +14,8 @@ import {
 import { formPath, membershipPaperworkStatus, readFormCompletion } from '@/lib/formPrerequisites';
 
 const CASUAL_PEQ_SLUG = 'peq-casual';
+// Matches api/checkout.js: the "already signed" claim was looked up and failed.
+const QUESTIONNAIRE_NOT_ON_FILE = 'QUESTIONNAIRE_NOT_ON_FILE';
 const MEMBER_PEQ_SLUG = 'peq';
 const MEMBERSHIP_TERMS_SLUG = 'terms-and-conditions';
 
@@ -189,6 +191,16 @@ export default function CasualVisit({ threeDayPass = false, tenSessionPack = fal
               : { action: CASUAL_VISIT_ACTION, ...visitor }),
       });
       const body = await response.json().catch(() => ({}));
+      // They said they had signed, but nothing signed is on file under that
+      // email. Open the questionnaire now rather than selling an unscreened
+      // pass; their details are waiting when it hands back here to pay.
+      const passReturnKey = threeDayPass ? '3daypass' : tenSessionPack ? '10pack' : null;
+      if (response.status === 409 && body.code === QUESTIONNAIRE_NOT_ON_FILE && passReturnKey) {
+        rememberCasualVisitor(visitor);
+        setQuestionnaire('not-done');
+        navigate(`/forms/${CASUAL_PEQ_SLUG}?return=${passReturnKey}`);
+        return;
+      }
       if (!response.ok || !body.url) {
         if (threeMonth && !alreadySigned && response.status === 400) {
           setMembershipQuestionnaire(null);
@@ -326,7 +338,7 @@ export default function CasualVisit({ threeDayPass = false, tenSessionPack = fal
                 <fieldset className="min-w-0 border border-xert-steel/20 p-4">
                   <legend className="px-2 font-body text-xs uppercase tracking-wider text-xert-pale/60">Pre-exercise questionnaire</legend>
                   {(threeDayPass || tenSessionPack) && <p className="mb-3 font-body text-xs leading-relaxed text-xert-pale/60">
-                    Signed it on an earlier visit? Say so below and pay — we check our records against your email. Otherwise the next button opens it, and your details carry back here afterwards.
+                    Everyone on a pass signs the pre-exercise questionnaire before they train. Signed it on an earlier visit? Say so and we look it up by your email; if we cannot find it, the questionnaire opens for you to sign. Otherwise the next button opens it, and your details carry back here afterwards.
                   </p>}
                   <div className="space-y-2" role="radiogroup" aria-label="Pre-exercise questionnaire">
                     {[

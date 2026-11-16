@@ -141,13 +141,24 @@ test('a repeat visitor who already signed pays without filling the questionnaire
   assert.equal(parameters.metadata.questionnaire_response_id, undefined);
 });
 
-test('an unverifiable claim still sells the pass and flags it for staff rather than trapping the visitor', async () => {
+test('a claim with nothing signed on file sends them to the questionnaire instead of selling the pass', async () => {
   const deps = checkoutDependencies({ onFile: false });
-  await checkout.startThreeDayPassCheckout({
+  const error = await checkout.startThreeDayPassCheckout({
     ...deps, payload: declaredRequest, origin: 'https://xertfitness.com.au', now: 1_800_000_000_000,
-  });
-  assert.equal(deps.created.length, 1, 'payment must not be blocked on the lookup');
-  assert.equal(deps.created[0].parameters.metadata.xert_paperwork_verified, 'false');
+  }).then(() => null, caught => caught);
+  assert.ok(error, 'an unscreened visitor must not reach Stripe');
+  assert.equal(deps.created.length, 0);
+  const failure = checkout.publicCheckoutFailure(error);
+  assert.equal(failure.status, 409);
+  assert.equal(failure.code, checkout.QUESTIONNAIRE_NOT_ON_FILE);
+  assert.match(failure.message, /questionnaire/);
+});
+
+test('the three-day page opens the questionnaire when the claim is not on file', () => {
+  const page = readFileSync(new URL('../src/pages/CasualVisit.jsx', import.meta.url), 'utf8');
+  assert.match(page, /response\.status === 409 && body\.code === QUESTIONNAIRE_NOT_ON_FILE/);
+  assert.match(page, /const passReturnKey = threeDayPass \? '3daypass' : tenSessionPack \? '10pack' : null;/);
+  assert.match(page, /navigate\(`\/forms\/\$\{CASUAL_PEQ_SLUG\}\?return=\$\{passReturnKey\}`\)/);
 });
 
 test('a failed paperwork lookup stops before Stripe instead of guessing', async () => {

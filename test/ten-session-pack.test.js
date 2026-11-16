@@ -267,13 +267,18 @@ test('a returning visitor who already signed pays without the form, and the clai
   assert.equal(deps.created[0].parameters.metadata.questionnaire_response_id, undefined);
 });
 
-test('an unproven claim, or a lookup not deployed yet, still sells the pack and flags it for staff', async () => {
-  for (const scenario of [{ onFile: false }, { onFile: null }, { lookupError: { code: 'PGRST202', message: 'function not found' } }]) {
+test('an unproven claim sends them to the questionnaire, while a lookup not deployed yet still flags the sale', async () => {
+  for (const scenario of [{ onFile: false }, { onFile: null }]) {
     const deps = checkoutDependencies(scenario);
-    await checkout.startTenSessionPackCheckout({ ...deps, payload: declaredRequest, origin, now: 1_800_000_000_000 });
-    assert.equal(deps.created.length, 1, `payment must not be blocked: ${JSON.stringify(scenario)}`);
-    assert.equal(deps.created[0].parameters.metadata.xert_paperwork_verified, 'false');
+    const result = await failure(checkout.startTenSessionPackCheckout({ ...deps, payload: declaredRequest, origin, now: 1_800_000_000_000 }));
+    assert.equal(result.status, 409);
+    assert.equal(result.code, checkout.QUESTIONNAIRE_NOT_ON_FILE);
+    assert.equal(deps.created.length, 0, `an unscreened visitor must not reach Stripe: ${JSON.stringify(scenario)}`);
   }
+  const deps = checkoutDependencies({ lookupError: { code: 'PGRST202', message: 'function not found' } });
+  await checkout.startTenSessionPackCheckout({ ...deps, payload: declaredRequest, origin, now: 1_800_000_000_000 });
+  assert.equal(deps.created.length, 1);
+  assert.equal(deps.created[0].parameters.metadata.xert_paperwork_verified, 'false');
 });
 
 test('a failed paperwork lookup or proof check stops before Stripe instead of guessing', async () => {
