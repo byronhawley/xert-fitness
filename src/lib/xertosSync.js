@@ -19,6 +19,8 @@ const EDIT_REQUEST_BYTES = 32_768;
 const XERTOS_TIMEOUT_MS = 20_000;
 const CLAIM_LIMIT = 200;
 const PUSH_ROUNDS = 3;
+const FORM_CLAIM_LIMIT = 10;
+const FORM_ROUNDS = 3;
 
 export function xertosSyncEnvironment(env = {}) {
   const apiUrl = String(env.XERTOS_API_URL || '').trim().replace(/\/+$/, '');
@@ -257,6 +259,60 @@ export async function sendClassesToXertos(config, token, payload, idempotencyKey
   });
 }
 
+/** Forms signed here (a PEQ, the terms), sent so XertOS's forms list stays whole. */
+export async function sendFormsToXertos(config, token, payload, idempotencyKey, fetchImpl = fetch) {
+  return xertosFetch(fetchImpl, `${config.apiUrl}/v1/connected-sites/${encodeURIComponent(config.provider)}/forms/sync`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Sends every form response XertOS hasn't confirmed, oldest first, a few at a
+ * time (each carries a signature image). XertOS writes a response once only,
+ * so a repeat is harmless. Returns null when there was nothing to do, or the
+ * database isn't set up for it yet.
+ */
+export async function pushFormsToXertos(admin, config, token, trace, fetchImpl = fetch) {
+  const totals = { sent: 0, failed: 0, outcomes: {} };
+  for (let round = 0; round < FORM_ROUNDS; round += 1) {
+    const claim = await admin.rpc('xertos_forms_claim', { p_limit: FORM_CLAIM_LIMIT });
+    if (!claim || claim.error) {
+      if (claim?.error && !['42883', 'PGRST202'].includes(claim.error.code)) {
+        console.error('XertOS forms queue could not be read.', { requestId: trace.requestId, errorCode: String(claim.error.code || 'UNKNOWN').slice(0, 64) });
+      }
+      break;
+    }
+    const responses = Array.isArray(claim.data?.responses) ? claim.data.responses : [];
+    if (responses.length === 0) break;
+    const forms = Array.isArray(claim.data?.forms) ? claim.data.forms : [];
+    const key = `xert-forms-${createHash('sha256').update(responses.map(item => item.id).join(',')).digest('hex').slice(0, 40)}`;
+    const result = await sendFormsToXertos(config, token, { forms, responses }, key, fetchImpl)
+      .catch(error => ({ ok: false, status: 0, body: { error: { code: 'UNREACHABLE', message: error.message } } }));
+    if (!result.ok) {
+      const problem = xertosProblem(result);
+      await admin.rpc('xertos_forms_settle', { p_ok: false, p_results: [], p_error: problem });
+      console.error('XertOS forms push refused.', { requestId: trace.requestId, problem });
+      totals.failed += responses.length;
+      break;
+    }
+    const results = (Array.isArray(result.body?.results) ? result.body.results : [])
+      .filter(item => typeof item?.id === 'string')
+      .map(item => ({ id: item.id, outcome: typeof item.outcome === 'string' ? item.outcome : 'unknown' }));
+    await admin.rpc('xertos_forms_settle', { p_ok: true, p_results: results, p_error: null });
+    for (const item of results) totals.outcomes[item.outcome] = (totals.outcomes[item.outcome] || 0) + 1;
+    totals.sent += results.length;
+    // XertOS answered for fewer than it was sent: stop rather than loop on the same ones.
+    if (results.length < responses.length || responses.length < FORM_CLAIM_LIMIT) break;
+  }
+  return totals.sent || totals.failed ? totals : null;
+}
+
 /** How many classes XertOS answered each way, for the log and the scheduler. */
 export function summarizeXertosOutcomes(body) {
   const results = Array.isArray(body?.results) ? body.results : [];
@@ -378,6 +434,13 @@ export async function handleXertosDispatch(request, admin, trace, env = process.
     }
     totals.sent += classes.length;
     if (classes.length < CLAIM_LIMIT) break;
+  }
+
+  // Forms signed on the site since the last run.
+  const forms = await pushFormsToXertos(admin, config, token, trace, fetchImpl);
+  if (forms) {
+    totals.forms = forms;
+    totals.failed += forms.failed;
   }
 
   // A daily window that didn't reach XertOS is tried again here, hourly.

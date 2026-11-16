@@ -267,6 +267,73 @@ test('the dispatcher sends what is due and settles it', async () => {
   assert.deepEqual(admin.calls.find(call => call.name === 'xertos_sync_settle'), { name: 'xertos_sync_settle', args: { p_lease: 'lease-1', p_ok: true, p_error: null } });
 });
 
+test('signed forms waiting here are sent after the classes, and ticked off', async () => {
+  const forms = [{ id: 'form-1', title: 'Terms', slug: 'terms', questions: [] }];
+  const responses = [
+    { id: '11111111-1111-4111-8111-111111111111', form_id: 'form-1', answers: {}, created_at: '2026-11-16T00:00:00Z' },
+    { id: '22222222-2222-4222-8222-222222222222', form_id: 'form-1', answers: {}, created_at: '2026-11-16T00:01:00Z' },
+  ];
+  const admin = fakeAdmin({
+    xertos_sync_claim: { data: { lease: null, classes: [] }, error: null },
+    xertos_forms_claim: { data: { forms, responses }, error: null },
+    xertos_forms_settle: { data: 2, error: null },
+  });
+  const answer = {
+    results: [
+      { id: responses[0].id, outcome: 'imported', linked: true },
+      { id: responses[1].id, outcome: 'already_here', linked: false },
+    ],
+  };
+  const { fetchImpl, calls } = fakeXertos([
+    { status: 200, body: { accessToken: 'tok', tokenType: 'Bearer' } },
+    { status: 200, body: answer },
+  ]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.forms, { sent: 2, failed: 0, outcomes: { imported: 1, already_here: 1 } });
+  assert.equal(calls[1].url, 'https://api.xertos.test/v1/connected-sites/xert_fitness/forms/sync');
+  assert.match(calls[1].init.headers['Idempotency-Key'], /^xert-forms-[0-9a-f]{40}$/);
+  assert.deepEqual(calls[1].body, { forms, responses });
+  assert.deepEqual(admin.calls.find(call => call.name === 'xertos_forms_settle').args, {
+    p_ok: true,
+    p_results: [
+      { id: responses[0].id, outcome: 'imported' },
+      { id: responses[1].id, outcome: 'already_here' },
+    ],
+    p_error: null,
+  });
+});
+
+test('forms XertOS refuses wait and are reported, without losing the class push', async () => {
+  const admin = fakeAdmin({
+    xertos_sync_claim: { data: { lease: null, classes: [] }, error: null },
+    xertos_forms_claim: { data: { forms: [], responses: [{ id: '11111111-1111-4111-8111-111111111111', form_id: 'x' }] }, error: null },
+    xertos_forms_settle: { data: 0, error: null },
+  });
+  const { fetchImpl } = fakeXertos([
+    { status: 200, body: { accessToken: 'tok', tokenType: 'Bearer' } },
+    { status: 409, body: { code: 'SITE_PAUSED', title: 'paused' } },
+  ]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  assert.equal(result.status, 502);
+  assert.equal(result.body.forms.failed, 1);
+  const settle = admin.calls.find(call => call.name === 'xertos_forms_settle').args;
+  assert.equal(settle.p_ok, false);
+  assert.match(settle.p_error, /SITE_PAUSED|409/);
+});
+
+test('a database without the forms queue is left alone', async () => {
+  const admin = fakeAdmin({
+    xertos_sync_claim: { data: { lease: null, classes: [] }, error: null },
+    xertos_forms_claim: { data: null, error: { code: 'PGRST202', message: 'no function' } },
+  });
+  const { fetchImpl, calls } = fakeXertos([{ status: 200, body: { accessToken: 'tok', tokenType: 'Bearer' } }]);
+  const result = await handleXertosDispatch(dispatchRequest(), admin, trace(), ENV, fetchImpl);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.forms, undefined);
+  assert.equal(calls.length, 1);
+});
+
 test('a refused push is retried later with the reason kept', async () => {
   const admin = fakeAdmin({
     xertos_sync_claim: { data: { lease: 'lease-2', classes: [{ externalId: 'a' }] }, error: null },
