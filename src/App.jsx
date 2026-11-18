@@ -44,6 +44,7 @@ const WorkoutDisplay = lazy(() => import('./pages/WorkoutDisplay'));
 const CheckoutReturn = lazy(() => import('./pages/CheckoutReturn'));
 const NativeTaskBridge = lazy(() => import('./pages/NativeTaskBridge'));
 const PublicForm = lazy(() => import('./pages/PublicForm'));
+const PairsSignup = lazy(() => import('./pages/PairsSignup'));
 
 function RouteLoader() {
   return (
@@ -93,6 +94,9 @@ const AppRoutes = () => (
       <Route path="/3daypass" element={<CasualVisit key="three-day-pass" threeDayPass />} />
       <Route path="/10pack" element={<CasualVisit key="ten-session-pack" tenSessionPack />} />
       <Route path="/3months" element={<CasualVisit key="three-month-membership" threeMonth />} />
+      <Route path="/pairs" element={<PairsSignup />} />
+      {/* Pairs entries go through /pairs, which signs people in first. */}
+      <Route path="/forms/pairs-2026-11-19" element={<Navigate to="/pairs" replace />} />
       <Route path="/forms/:slug" element={<PublicForm />} />
       <Route path="/contact" element={<Contact />} />
       <Route path="/training-guide" element={<TrainingGuide />} />
