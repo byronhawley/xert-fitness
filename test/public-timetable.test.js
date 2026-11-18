@@ -78,3 +78,26 @@ test('the booking page offers the same calendar as the timetable', async () => {
   assert.match(booking, /initialDayKey=\{targetSession \? gymDateKey\(targetSession\.start_time\) : null\}/);
   assert.match(calendar, /renderSession \? renderSession\(session\) :/);
 });
+
+test('a calendar chip does not repeat the time a class name already carries', async () => {
+  const { chipTitle } = await import('../src/lib/classCalendar.js');
+  assert.equal(chipTitle('5:15am training session'), 'Training session');
+  assert.equal(chipTitle('6:15am Training session'), 'Training session');
+  assert.equal(chipTitle('Group class/ open gym 2:30pm'), 'Group class/ open gym');
+  assert.equal(chipTitle('8:00 am group class'), 'Group class');
+  assert.equal(chipTitle('Strength'), 'Strength');
+  assert.equal(chipTitle('HIIT 45'), 'HIIT 45');
+  // A name that is only a time is kept rather than shown blank.
+  assert.equal(chipTitle('6am'), '6am');
+});
+
+test('classes that have run stay on the timetable calendar', async () => {
+  const [timetable, data] = await Promise.all([
+    read('../src/pages/SoftLaunchTimetable.jsx'),
+    read('../src/lib/adminData.js'),
+  ]);
+  assert.match(timetable, /getClassSessions\(true, \{ since: /);
+  // The list view is still only what's coming up.
+  assert.match(timetable, /upcomingSessions\.map\(/);
+  assert.match(data, /\.gt\('start_time', new Date\(since \?\? now\)\.toISOString\(\)\)/);
+});

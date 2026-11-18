@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import ClassSessionCard, { CLASS_DOT_COLORS } from '@/components/public/ClassSessionCard';
 import {
   WEEKDAY_LABELS,
+  chipTitle,
   dateFromKey,
   groupSessionsByDay,
   localDateKey,
@@ -201,7 +202,7 @@ export default function PublicClassCalendar({ sessions, bookingsEnabled = false,
                         {cellSessions.slice(0, 3).map(session => (
                           <span key={session.id} className="flex items-center gap-1.5 truncate px-0.5 font-body text-[10px] leading-tight text-xert-pale/75">
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${CLASS_DOT_COLORS[session.class_type] || 'bg-xert-steel'}`} />
-                            <span className="truncate">{session.start_time ? `${chipTime(session.start_time)} ` : ''}{session.title}</span>
+                            <span className="truncate">{session.start_time ? `${chipTime(session.start_time)} ${chipTitle(session.title)}` : session.title}</span>
                           </span>
                         ))}
                         {cellSessions.length > 3 && (
