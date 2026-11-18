@@ -41,7 +41,7 @@ function Shell({ children }) {
           eyebrow={`XERT Fitness · ${PAIRS_EVENT_LABEL}`}
           title="Pairs"
           accent="Competition."
-          intro="Grab a partner and enter as a pair. Pick a team name and the category that suits you both: Everyday, Intermediate or Advanced."
+          intro="Grab a partner. Pick a team name and the category that suits you both: Everyday, Intermediate or Advanced."
           containerClassName="max-w-3xl"
         />
         <section className="mx-auto max-w-3xl px-6 pb-24 pt-6">{children}</section>
@@ -69,7 +69,7 @@ function SignInGate() {
       <h2 className="font-display text-3xl uppercase tracking-wide text-white">Sign in to enter</h2>
       <p className="mt-3 text-xert-pale/70">
         Entries are made from your XERT account. Already a member or booked a class online? Log in.
-        New to XERT? Create a free account. It takes a minute, and you'll come straight back here.
+        New to XERT? Create a free account.
       </p>
       <div className="mt-7 grid gap-3 sm:grid-cols-2">
         <Link to={authPathWithNext('/login', PAGE_PATH)} className="xert-btn-primary inline-flex min-h-[56px] items-center justify-center gap-2 px-6 font-display text-lg uppercase tracking-wide">
