@@ -1,4 +1,4 @@
-// The Pairs competition on 19 November 2026.
+// The Pairs competition on 19 December 2026.
 //
 // An entry is a response to an ordinary XERT form, so staff read, export and
 // pause entries in Admin > Forms like any other form, and the minute job that
@@ -9,9 +9,11 @@
 // XERT account: the response records the account (created_by) and its email,
 // and the form takes one entry per email.
 
+// The slug keeps the date first announced (19 Nov): the form, and any entries
+// already made, live under it. The competition itself is on 19 Dec.
 export const PAIRS_FORM_SLUG = 'pairs-2026-11-19';
-export const PAIRS_EVENT_DATE = '2026-11-19';
-export const PAIRS_EVENT_LABEL = '19.11.2026';
+export const PAIRS_EVENT_DATE = '2026-12-19';
+export const PAIRS_EVENT_LABEL = '19.12.2026';
 export const PAIRS_CATEGORIES = Object.freeze(['Everyday', 'Intermediate', 'Advanced']);
 
 // Fixed question ids: the page writes answers against these, and they stay the
@@ -24,7 +26,7 @@ export const PAIRS_QUESTION_IDS = Object.freeze({
 });
 
 // Entries stop at the end of competition day, Brisbane time (UTC+10, no DST).
-export const PAIRS_ENTRIES_CLOSE_AT = '2026-11-19T14:00:00.000Z';
+export const PAIRS_ENTRIES_CLOSE_AT = '2026-12-19T14:00:00.000Z';
 
 export const NAME_MAX = 80;
 export const TEAM_NAME_MAX = 60;
@@ -43,7 +45,7 @@ function question(id, type, label, extra = {}) {
 export function pairsFormDefinition() {
   return {
     title: `Pairs Competition ${PAIRS_EVENT_LABEL}`,
-    description: 'Enter your pair for the XERT Fitness Pairs Competition on 19.11.2026. Choose the category that suits your team: Everyday, Intermediate or Advanced.',
+    description: `Enter your pair for the XERT Fitness Pairs Competition on ${PAIRS_EVENT_LABEL}. Choose the category that suits your team: Everyday, Intermediate or Advanced.`,
     form_type: 'registration',
     slug: PAIRS_FORM_SLUG,
     questions: [
@@ -54,7 +56,7 @@ export function pairsFormDefinition() {
     ],
     is_active: true,
     show_progress_bar: false,
-    thank_you_message: 'Your pair is entered. See you on 19.11.2026!',
+    thank_you_message: `Your pair is entered. See you on ${PAIRS_EVENT_LABEL}!`,
     redirect_url: null,
     header_media_type: null,
     header_media_url: '',

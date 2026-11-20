@@ -27,7 +27,7 @@ export const PUBLIC_METADATA = Object.freeze({
   '/about': { title: 'About XERT Fitness | Kingaroy', description: 'Meet the purpose, coaching model and training philosophy behind XERT Fitness in Kingaroy.' },
   '/coaches': { title: 'Coaches and Practitioners | XERT Fitness', description: 'Meet the coaches and allied health practitioners supporting XERT Fitness members.' },
   '/events': { title: '2026 Event Calendar | XERT Fitness', description: 'Explore the 2026 South East Queensland events that shape XERT Fitness training blocks and shared member goals.' },
-  '/pairs': { title: 'Pairs Competition 19.11.2026 | XERT Fitness', description: 'Enter your pair for the XERT Fitness Pairs Competition on 19 November 2026: Everyday, Intermediate or Advanced.' },
+  '/pairs': { title: 'Pairs Competition 19.12.2026 | XERT Fitness', description: 'Enter your pair for the XERT Fitness Pairs Competition on 19 December 2026: Everyday, Intermediate or Advanced.' },
   '/booking': { title: 'Book Classes | XERT Fitness', description: 'Request a class or a personal training session with XERT Fitness in Kingaroy.' },
   '/contact': { title: 'Contact XERT Fitness | Kingaroy', description: 'Contact XERT Fitness about classes, coaching, allied health partnerships or your first session.' },
   '/training-guide': { title: 'Functional Training Guide | XERT Fitness', description: 'Learn how XERT approaches functional fitness, movement quality, conditioning and event preparation.' },
