@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  PAIRS_CATEGORIES, PAIRS_FORM_SLUG, PAIRS_QUESTION_IDS, pairsEntriesOpen, pairsEntryAnswers,
+  PAIRS_CATEGORIES, PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, PAIRS_QUESTION_IDS, pairsEntriesOpen, pairsEntryAnswers,
   pairsEntryErrors, pairsFormDefinition, pairsFormMatches, pairsSubmitErrorMessage,
 } from '../src/lib/pairsCompetition.js';
 
@@ -63,10 +63,12 @@ test('the page refuses to post into a form whose questions were changed', () => 
   assert.equal(pairsFormMatches({ ...form, questions: renamedOption }), false);
 });
 
-test('entries close at the end of competition day in Brisbane', () => {
-  assert.equal(pairsEntriesOpen(new Date('2026-11-18T12:00:00Z')), true);
-  assert.equal(pairsEntriesOpen(new Date('2026-11-19T23:59:00+10:00')), true);
-  assert.equal(pairsEntriesOpen(new Date('2026-11-20T00:00:00+10:00')), false);
+test('entries close at the end of competition day (19 Dec) in Brisbane', () => {
+  assert.equal(PAIRS_EVENT_LABEL, '19.12.2026');
+  assert.match(pairsFormDefinition().title, /19\.12\.2026/);
+  assert.equal(pairsEntriesOpen(new Date('2026-11-20T12:00:00Z')), true);
+  assert.equal(pairsEntriesOpen(new Date('2026-12-19T23:59:00+10:00')), true);
+  assert.equal(pairsEntriesOpen(new Date('2026-12-20T00:00:00+10:00')), false);
 });
 
 test('database refusals are worded for the entrant', () => {
