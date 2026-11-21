@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { requestText, sendJson } from './serverHttp.js';
+import { PassSaleRefused } from './xertosPassSale.js';
 
 export const XERTOS_PROVIDER = 'xert_fitness';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
@@ -75,6 +76,11 @@ export function client0BookingWritesEnabled(environment = process.env) {
     && environment.CLIENT0_BOOKING_WRITES_ENABLED === 'true';
 }
 
+/** Pass sales from the gym's tablet are recorded whenever the sync itself is on. */
+export function client0PassSalesEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true';
+}
+
 export function verifyXertosSignature({
   signatureHeader = '',
   timestampHeader = '',
@@ -121,7 +127,7 @@ export function xertosWebhookConfigError(environment = process.env) {
   return null;
 }
 
-export default async function xertosWebhookHandler(request, response, { runEdit } = {}) {
+export default async function xertosWebhookHandler(request, response, { runEdit, recordPassSale } = {}) {
   if (request.method !== 'POST') return sendJson(response, { error: 'Method not allowed' }, 405);
 
   const configError = xertosWebhookConfigError(process.env);
@@ -161,8 +167,31 @@ export default async function xertosWebhookHandler(request, response, { runEdit 
 
   if (payload?.action === 'ping') return sendJson(response, { ok: true });
 
+  // A pass paid for through XertOS at the gym's check-in tablet. It is kept
+  // here as the same record a pass bought on this site leaves, once.
+  if (payload?.action === 'passSale') {
+    if (!client0PassSalesEnabled(process.env) || typeof recordPassSale !== 'function') {
+      return sendJson(response, {
+        error: { code: 'ACTION_NOT_READY', message: 'XERT Fitness is not taking pass sales from XertOS yet.' },
+      }, 501);
+    }
+    try {
+      const result = await recordPassSale(payload);
+      return sendJson(response, { ok: true, recorded: result?.recorded === true });
+    } catch (error) {
+      if (error instanceof PassSaleRefused) {
+        return sendJson(response, { error: { code: error.code, message: error.message } }, 422);
+      }
+      console.error('xertos pass sale failed', error?.message);
+      return sendJson(response, {
+        error: { code: 'PASS_SALE_FAILED', message: 'XERT Fitness could not record this sale. Try again.' },
+      }, 500);
+    }
+  }
+
   // Unknown verbs never reach the database. Writes are exactly create/update/
-  // cancel of a class, and book/cancelBooking, through the site's own guards.
+  // cancel of a class, book/cancelBooking, and passSale above, through the
+  // site's own guards.
   if (CLIENT0_BOOKING_ACTIONS.has(payload?.action)) {
     if (!client0BookingWritesEnabled(process.env) || typeof runEdit !== 'function') {
       return sendJson(response, {
