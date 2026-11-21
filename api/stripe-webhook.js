@@ -8,6 +8,7 @@ import { createXertStripeClient } from '../src/lib/serverStripeClient.js';
 import { casualVisitPaymentFromCheckout } from '../src/lib/casualVisit.js';
 import xertosWebhookHandler from '../src/lib/xertosWebhook.js';
 import { handleXertosEdit } from '../src/lib/xertosSync.js';
+import { recordPassSale } from '../src/lib/xertosPassSale.js';
 
 // Stripe calls this after a successful checkout. We verify the signature,
 // record the paid order, and grant the member their session credits.
@@ -42,6 +43,12 @@ async function runXertosCalendarEdit(replayRequest, response, { now }) {
   // xertosWebhookHandler checked the signature over these exact bytes with the
   // versioned write secrets before handing the request on.
   return handleXertosEdit(replayRequest, admin, createRequestTrace(response), process.env, now, { signatureVerified: true });
+}
+
+async function recordXertosPassSale(payload) {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) throw new Error('XERT Fitness backend is not configured.');
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  return recordPassSale(admin, payload);
 }
 
 export function validStripeSignatureHeader(value) {
@@ -506,7 +513,10 @@ export default async function handler(request, response) {
   // existing twelve-function ceiling. Branch before any Stripe environment or
   // payment client is touched.
   if (request.query?.provider === 'xertos') {
-    return xertosWebhookHandler(request, response, { runEdit: runXertosCalendarEdit });
+    return xertosWebhookHandler(request, response, {
+      runEdit: runXertosCalendarEdit,
+      recordPassSale: recordXertosPassSale,
+    });
   }
 
   const trace = createRequestTrace(response);
