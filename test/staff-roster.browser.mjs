@@ -36,7 +36,7 @@ const step = async (name, fn) => {
   catch (error) { results.push({ name, ok: false, error: error.message }); console.log(`FAIL ${name}\n  ${error.stack}`); throw error; }
 };
 
-const { db } = await demoMonth({ month: MONTH, today });
+const { db } = await demoMonth({ month: MONTH, today, dueOn: addDays(today, 7) });
 // Stand-ins for the member booking tables the class details read (synthetic rows only).
 await db.exec(`
   create table public.session_bookings (id uuid primary key default gen_random_uuid(), user_id uuid not null, class_session_id uuid not null,
@@ -359,7 +359,7 @@ try {
     await panel(sunday).getByRole('button', { name: /^Evening/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
 
     // Away on one Tuesday.
-    const awayDay = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2 && date > firstMonday);
+    const awayDay = addDays(tuesday, 7);
     await phone.getByRole('radio', { name: /I’m away/ }).click();
     await dayButton(awayDay).click();
     await dayButton(awayDay).getByText('Away').waitFor();
@@ -511,11 +511,17 @@ try {
     // The fixture session from the previous step is still signed in; sign out first.
     await signedOut.page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.includes('auth-token')) localStorage.removeItem(key); });
     await signedOut.page.goto(`${origin}/coaching?tab=requests&month=${MONTH}`, { waitUntil: 'networkidle' });
-    const login = signedOut.page.getByRole('link', { name: 'Log in', exact: true });
+    const login = signedOut.page.getByRole('main').getByRole('link', { name: 'Log in', exact: true });
     await login.waitFor();
     const href = new URL(await login.getAttribute('href'), origin);
     assert.equal(href.pathname, '/login');
     assert.equal(href.searchParams.get('next'), `/coaching?tab=requests&month=${MONTH}`);
+    const header = signedOut.page.getByRole('navigation', { name: 'Main navigation' });
+    assert.equal(await header.getByRole('link', { name: 'Log in', exact: true }).getAttribute('href'), href.pathname + href.search);
+    await header.getByRole('button', { name: 'Open navigation menu' }).click();
+    const directory = signedOut.page.getByRole('dialog', { name: 'Menu' });
+    assert.equal(await directory.getByRole('link', { name: 'Log in' }).getAttribute('href'), href.pathname + href.search);
+    assert.equal(await directory.getByRole('link', { name: 'Join XERT' }).getAttribute('href'), '/register' + href.search);
   });
 
   await step('a recipient whose manager access was revoked sees "Admin access only", not the roster', async () => {
@@ -527,6 +533,11 @@ try {
     await revoked.page.goto(`${origin}/admin/roster?rosterTab=requests&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
     await revoked.page.getByText('Admin access only').waitFor();
     assert.equal(rpcLog.slice(before).length, 0, 'no roster data is requested for a non-manager');
+    await revoked.page.goto(origin, { waitUntil: 'networkidle' });
+    await revoked.page.getByRole('button', { name: 'Open navigation menu' }).click();
+    const shortcuts = revoked.page.getByRole('region', { name: 'Your shortcuts' });
+    await shortcuts.getByRole('link', { name: 'Upcoming classes' }).waitFor();
+    assert.equal(await shortcuts.getByRole('link', { name: 'Command centre' }).count(), 0);
     // And the server refuses the manager RPC even if called directly.
     await assert.rejects(() => serialRpc(coach('quinn').profileId, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` }), /MANAGER_ONLY/);
     await revoked.context.close();
@@ -591,6 +602,16 @@ try {
     await coachPage.getByRole('heading', { name: /Hi Sam Synthetic/ }).waitFor();
     await coachPage.getByText('Welcome to the XERT coach roster, Sam Synthetic').waitFor();
     await coachPage.getByRole('tab', { name: 'Home', selected: true }).waitFor();
+    const coachTabs = coachPage.getByRole('tablist', { name: 'Coach sections' });
+    await coachTabs.getByRole('tab', { selected: true }).focus();
+    await coachPage.keyboard.press('ArrowRight');
+    const classesTab = coachTabs.getByRole('tab', { name: /^My classes/ });
+    assert.ok(await classesTab.evaluate(el => el === document.activeElement));
+    await coachTabs.getByRole('tab', { name: 'Home', selected: true }).waitFor();
+    await coachPage.keyboard.press('Enter');
+    await coachPage.waitForURL(url => url.searchParams.get('tab') === 'roster');
+    await coachPage.goBack();
+    await coachTabs.getByRole('tab', { name: 'Home', selected: true }).waitFor();
     await coachPage.getByText(/Availability for/).first().waitFor();
     assert.equal(new URL(coachPage.url()).pathname, '/coaching');
     const { rows } = await db.query(`select m.profile_id, i.accepted_by from public.staff_members m join public.staff_roster_invites i on i.staff_id = m.id where m.id = $1`, [samStaff.id]);

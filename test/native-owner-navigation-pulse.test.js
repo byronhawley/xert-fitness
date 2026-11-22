@@ -64,7 +64,7 @@ test('iPad and iPhone expose owner priority routing without stacking an admin st
   assert.ok((root.match(/XertOwnerNavigationPulseBadge\(pulse: ownerPulse\)/g) || []).length >= 2);
   assert.ok((root.match(/onOpenAdmin\(priority\.workspace\)/g) || []).length >= 2);
   assert.match(phoneDock, /HStack\(spacing: 0\)[\s\S]*ForEach\(items\)/);
-  assert.match(phoneDock, /frame\(height: dynamicTypeSize\.isAccessibilitySize \? 80 : 66\)/);
+  assert.match(phoneDock, /dynamicTypeSize\.isAccessibilitySize[\s\S]*LazyVGrid/);
   assert.doesNotMatch(phoneDock, /taskStrip|ownerPriorityControl|safeAreaInset/);
   assert.match(root, /if item == \.account, isAdmin[\s\S]*XertOwnerNavigationPulseBadge\(pulse: ownerPulse\)/);
   assert.match(root, /if item == \.account, isAdmin[\s\S]*Label\("Owner Command Centre", systemImage: XertOwnerWorkspace\.overview\.icon\)/);

@@ -61,7 +61,7 @@ test('compact dock keeps one clean five-tab bar with contextual access to owner 
   );
   assert.match(root, /XertNavigationDock\([\s\S]*items: memberWorkspaceOrder/);
   assert.match(dock, /HStack\(spacing: 0\)[\s\S]*ForEach\(items\)/);
-  assert.match(dock, /frame\(height: dynamicTypeSize\.isAccessibilitySize \? 80 : 66\)/);
+  assert.match(dock, /LazyVGrid\(columns:[\s\S]*frame\(minHeight: 52\)/);
   assert.match(dock, /accessibilityAction\(named: "Open XERT quick switcher"\)/);
   assert.match(dock, /Label\("Quick switcher", systemImage: "magnifyingglass"\)/);
   assert.match(dock, /if selected[\s\S]*Button\("Return to \\\(previousRoute\.navigationTitle\)"/);
@@ -193,7 +193,7 @@ test('native navigation exposes a searchable contextual command switcher', async
   assert.match(root, /accessibilityAction\(named: "Open XERT quick switcher"/);
   assert.match(root, /Label\("Quick switcher", systemImage: "magnifyingglass"\)/);
   assert.match(root, /selectMemberDestination\(destination, source: \.commandPalette\)/);
-  assert.match(root, /ViewThatFits\(in: \.horizontal\)/);
+  assert.match(root, /DisclosureGroup\("Saved workspaces"[\s\S]*workspaceMap/);
   assert.match(root, /guard store\.profile\?\.isAdmin == true else \{ return \}/);
   assert.match(root, /\.sheet\(isPresented: \$showingNavigationCommands, onDismiss: completeCommandDismissal\)/);
   assert.match(root, /opensAdminAfterCommandDismissal = true[\s\S]*completeCommandDismissal/);
@@ -482,7 +482,7 @@ test('navigation carries operational state and native interaction feedback', asy
   assert.match(haptics, /private static let selectionGenerator = UISelectionFeedbackGenerator\(\)/);
   assert.match(haptics, /selectionGenerator\.prepare\(\)/);
   assert.match(root, /matchedGeometryEffect\(id: "primary-navigation-selection"/);
-  assert.match(root, /dynamicTypeSize\.isAccessibilitySize \? 80 : 66/);
+  assert.match(root, /dynamicTypeSize\.isAccessibilitySize[\s\S]*LazyVGrid/);
   assert.match(root, /activeUpcomingBookings[\s\S]*let now = Date\(\)[\s\S]*isActiveClassPlace[\s\S]*start_time >= now/);
   assert.match(root, /guard selection != item else \{[\s\S]*onReselect\(item\)/);
   assert.match(root, /handleReselection[\s\S]*store\.refresh\(\)/);

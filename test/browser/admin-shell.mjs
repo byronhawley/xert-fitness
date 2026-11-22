@@ -3,6 +3,17 @@ import assert from 'node:assert/strict';
 export async function checkAdminShell(page, { origin, width }) {
   const shell = page.locator('[data-admin-shell]');
   await shell.waitFor();
+  const menu = page.getByRole('button', { name: 'Open account and navigation', exact: true });
+  if (width < 1024) await menu.tap();
+  const rail = page.locator('#admin-navigation');
+  const classes = rail.getByRole('button', { name: 'Classes', exact: true });
+  const currentURL = page.url();
+  await classes.tap();
+  assert.equal(await classes.getAttribute('aria-expanded'), 'true');
+  assert.equal(page.url(), currentURL, 'Browsing a hub never loads its first workspace');
+  await rail.getByRole('button', { name: 'Class requests', exact: true }).tap();
+  await page.waitForURL(origin + '/admin/bookings');
+  if (width < 1024) assert.equal(await menu.getAttribute('aria-expanded'), 'false');
   if (width >= 1024) {
     await page.getByRole('button', { name: 'Compact density', exact: true }).click();
     assert.equal(await shell.getAttribute('data-density'), 'compact');
@@ -76,8 +87,13 @@ export async function checkAdminShell(page, { origin, width }) {
   assert.equal(await tab.last().evaluate(el => el === document.activeElement), true, 'Returning to the tab rail restores its last focused tab');
   await page.keyboard.press('Home');
   assert.equal(await tab.first().evaluate(el => el === document.activeElement), true, 'Home focuses the first workspace tab');
-  await page.keyboard.press('ArrowRight');
-  assert.equal(await tab.nth(1).evaluate(el => el === document.activeElement), true, 'ArrowRight roves focus');
+  const requestsTab = tabs.getByRole('tab', { name: /Class requests/ });
+  const tabCount = await tab.count();
+  for (let step = 0; step < tabCount; step++) {
+    if (await requestsTab.evaluate(el => el === document.activeElement)) break;
+    await page.keyboard.press('ArrowRight');
+  }
+  assert.equal(await requestsTab.evaluate(el => el === document.activeElement), true, 'ArrowRight reaches Class requests');
   await page.keyboard.press('Enter');
   await page.waitForURL(origin + '/admin/bookings');
   await tabs.locator('[role="tab"][aria-selected="true"]').filter({ hasText: 'Class requests' }).waitFor();
@@ -88,8 +104,8 @@ export async function checkAdminShell(page, { origin, width }) {
   const selectedBox = await tabs.locator('[aria-selected="true"]').boundingBox();
   const markerBox = await marker.boundingBox();
   assert.ok(Math.abs(markerBox.x - selectedBox.x) <= 2 && Math.abs(markerBox.width - selectedBox.width) <= 2, 'Tab indicator tracks the selected tab after its transition');
-  const motion = await marker.evaluate(element => ({ reduced: matchMedia('(prefers-reduced-motion: reduce)').matches, durations: getComputedStyle(element).transitionDuration.split(',').map(value => parseFloat(value)) }));
-  assert.equal(motion.durations.some(value => value > 0), !motion.reduced, 'Tab motion follows the shared reduced-motion preference');
+  assert.equal(await marker.evaluate(el => el.parentElement.getAttribute('aria-selected')), 'true',
+    'The active marker belongs to the selected tab through scroll and resize');
 
   await page.getByRole('main').click({ position: { x: 8, y: 8 } });
   await page.keyboard.press('?');

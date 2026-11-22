@@ -1,5 +1,5 @@
 // @ts-nocheck -- cmdk's polymorphic JavaScript wrappers are isolated here.
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'lucide-react';
 import { CommandDialog, CommandInput, CommandList, CommandGroup, CommandItem } from '@/components/ui/command';
 import { adminSearchMembers } from '@/lib/adminData';
@@ -63,7 +63,10 @@ export default function CommandPalette({ open, onOpenChange, onNavigate, onReloa
   };
   const memberSearchRequested = /^member\s+/i.test(query);
   const memberSearchTerm = query.replace(/^member\s+/i, '').trim();
-  const commands = memberSearchRequested ? [] : rankCommands(COMMANDS, query, history);
+  const commands = useMemo(
+    () => open && !memberSearchRequested ? rankCommands(COMMANDS, query, history) : [],
+    [open, memberSearchRequested, query, history],
+  );
   return <CommandDialog open={open} onOpenChange={value => { if (!busy.current) onOpenChange(value); }} title="Find an owner task" commandProps={{ shouldFilter: false }} plain={Boolean(action)}>
     {action ? <AdminWorkspaceBoundary key={action.id} onReload={onReload}><Suspense fallback={<div className="admin-command-stage" role="status">Loading command options…</div>}><AdminCommandActions command={action} onBack={() => setAction(null)} onComplete={remember} onBusyChange={value => { busy.current = value; }} /></Suspense></AdminWorkspaceBoundary> : <>
       <CommandInput value={query} onValueChange={setQuery} placeholder="Find a task, or type member + name…" inputMode="search" enterKeyHint="search" />

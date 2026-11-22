@@ -3029,6 +3029,7 @@ private struct AdminWorkspaceSwitcher: View {
     @ObservedObject var admin: AdminStore
     let session: AuthSession
     @State private var query = ""
+    @State private var expandedHub: XertOwnerWorkspaceSection?
     let current: XertOwnerWorkspace
     let recent: [XertOwnerWorkspace]
     let pinned: [XertOwnerWorkspace]
@@ -3058,7 +3059,7 @@ private struct AdminWorkspaceSwitcher: View {
     }
 
     private var matchingRecent: [XertOwnerWorkspace] {
-        recent.filter { $0.matches(query) }
+        recent.filter { !pinned.contains($0) && $0.matches(query) }
     }
 
     private var matchingPinned: [XertOwnerWorkspace] {
@@ -3132,17 +3133,28 @@ private struct AdminWorkspaceSwitcher: View {
                             .listRowBackground(Color.xertInk)
                     }
                 } else {
-                    actionSection("Quick actions", actions: AdminOwnerLauncherAction.allCases)
-                    workspaceSection("Needs attention", workspaces: attentionWorkspaces)
                     workspaceSection("Pinned", workspaces: matchingPinned)
-                    workspaceSection("Recent", workspaces: matchingRecent)
-
-                    Section("All workspaces") {
+                    Section("Workspaces") {
                         workspaceRow(.overview)
+                        ForEach(XertOwnerWorkspaceSection.allCases) { section in
+                            DisclosureGroup(isExpanded: Binding(
+                                get: { expandedHub == section },
+                                set: { expandedHub = $0 ? section : nil }
+                            )) {
+                                ForEach(XertOwnerWorkspace.workspaces(in: section)) { workspace in
+                                    workspaceRow(workspace)
+                                }
+                            } label: {
+                                Label(section.rawValue, systemImage: section.icon)
+                                    .font(.body.weight(.semibold))
+                                    .frame(minHeight: 44)
+                            }
+                            .listRowBackground(Color.xertInk)
+                        }
                     }
-                    ForEach(XertOwnerWorkspaceSection.allCases) { section in
-                        workspaceSection(section.rawValue, workspaces: XertOwnerWorkspace.workspaces(in: section))
-                    }
+                    workspaceSection("Needs attention", workspaces: attentionWorkspaces)
+                    workspaceSection("Recent", workspaces: matchingRecent)
+                    actionSection("Quick actions", actions: AdminOwnerLauncherAction.allCases)
                 }
 
                 if hasNoResults {

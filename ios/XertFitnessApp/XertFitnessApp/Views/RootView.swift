@@ -338,7 +338,7 @@ struct RootView: View {
                 onSelectWorkspace: openWorkspaceFromMap,
                 onSelect: executeNavigationCommand
             )
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .alert("XERT", isPresented: Binding(
@@ -1385,7 +1385,6 @@ private struct XertNavigationRail: View {
 
 private struct XertNavigationDock: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var selection: XertPrimaryDestination
     let isAdmin: Bool
     let statusSnapshot: XertNavigationStatusSnapshot
@@ -1401,25 +1400,21 @@ private struct XertNavigationDock: View {
     @Namespace private var selectionNamespace
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(items) { item in
-                navigationButton(item)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 3), spacing: 2) {
+                    controls
+                }
+            } else {
+                HStack(spacing: 0) { controls }
             }
         }
-        .frame(height: dynamicTypeSize.isAccessibilitySize ? 80 : 66)
-        .background {
-            LinearGradient(
-                colors: [Color.xertDeep.opacity(0.92), Color.xertInk.opacity(0.98)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.xertInk.ignoresSafeArea(edges: .bottom))
+        .overlay(alignment: .top) {
+            Rectangle().fill(Color.xertSteel.opacity(0.32)).frame(height: 1)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.xertSteel.opacity(0.28), lineWidth: 1)
-        }
-        .shadow(color: Color.black.opacity(0.26), radius: 14, y: 5)
         .simultaneousGesture(
             DragGesture(minimumDistance: 36)
                 .onEnded { value in
@@ -1429,20 +1424,37 @@ private struct XertNavigationDock: View {
                     onStep(horizontal < 0 ? .next : .previous)
                 }
         )
-        .padding(.horizontal, 10)
-        .padding(.top, 7)
-        .padding(.bottom, 5)
-        .background {
-            LinearGradient(
-                colors: [Color.xertNavy.opacity(0.08), Color.xertInk.opacity(0.98)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea(edges: .bottom)
-        }
         .accessibilityAction(named: "Open XERT quick switcher") {
             onOpenCommands()
         }
+    }
+
+    @ViewBuilder
+    private var controls: some View {
+        ForEach(items) { item in
+            navigationButton(item)
+        }
+        Button(action: onOpenCommands) {
+            VStack(spacing: 3) {
+                Image(systemName: "square.grid.2x2")
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(height: 26)
+                Text("Menu").font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(Color.xertPale)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .leading) {
+            if !dynamicTypeSize.isAccessibilitySize {
+                Rectangle().fill(Color.xertSteel.opacity(0.25)).frame(width: 1, height: 26)
+            }
+        }
+        .accessibilityLabel("Menu")
+        .accessibilityHint("Search destinations and open workspace actions")
+        .accessibilityIdentifier("xert-navigation-menu")
     }
 
     private func navigationButton(_ item: XertPrimaryDestination) -> some View {
@@ -1454,65 +1466,38 @@ private struct XertNavigationDock: View {
                 return
             }
             XertHaptics.play(.selection)
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { selection = item }
+            selection = item
         } label: {
-            VStack(spacing: 4) {
+            VStack(spacing: 3) {
                 ZStack {
-                    if item == .booking {
-                        RoundedRectangle(cornerRadius: 11, style: .continuous)
-                            .fill(selected ? Color.xertPale : Color.xertSteel)
-                            .frame(width: 40, height: 34)
-                            .shadow(color: Color.xertSteel.opacity(0.35), radius: 8, y: 3)
+                    if selected {
+                        Capsule()
+                            .fill(Color.xertSteel)
+                            .matchedGeometryEffect(id: "primary-navigation-selection", in: selectionNamespace)
                     }
                     Image(systemName: selected ? item.selectedIcon : item.icon)
-                        .font(.system(size: item == .booking ? 17 : 18, weight: .semibold))
-                        .foregroundStyle(item == .booking ? Color.xertNavy : selected ? Color.xertSteel : Color.xertPale.opacity(0.62))
-                        .frame(width: 38, height: 34)
-
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundStyle(selected ? Color.xertInk : Color.xertPale)
                     if let status {
-                        XertNavigationStatusBadge(status: status)
-                            .offset(x: 16, y: -12)
+                        XertNavigationStatusBadge(status: status).offset(x: 15, y: -8)
                     }
-
                     if item == .account, isAdmin {
-                        XertOwnerNavigationPulseBadge(pulse: ownerPulse)
-                            .offset(x: -16, y: -12)
+                        XertOwnerNavigationPulseBadge(pulse: ownerPulse).offset(x: -15, y: -8)
                     }
                 }
+                .frame(width: 42, height: 26)
                 Text(item.title)
-                    .font(.caption2.weight(selected ? .bold : .semibold))
-                    .textCase(.uppercase)
-                    .tracking(0.8)
-                    .foregroundStyle(selected ? Color.xertOffWhite : Color.xertPale.opacity(0.55))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.72)
+                    .font(.caption.weight(selected ? .bold : .medium))
+                    .foregroundStyle(selected ? Color.xertOffWhite : Color.xertPale)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background {
-                if selected {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.xertSteel.opacity(0.19), Color.xertSteel.opacity(0.06)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        .matchedGeometryEffect(id: "primary-navigation-selection", in: selectionNamespace)
-                }
-            }
-            .overlay(alignment: .top) {
-                if selected {
-                    Capsule()
-                        .fill(Color.xertSteel)
-                        .frame(width: item == .booking ? 42 : 28, height: 3)
-                }
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 2)
+            .padding(.vertical, 3)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 52)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
         .accessibilityLabel(item.title)
         .accessibilityValue(selected ? "Selected" : "")
         .accessibilityHint(accessibilityHint(for: item, status: status, selected: selected))
@@ -1792,7 +1777,8 @@ private struct XertNavigationCommandPalette: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var query = ""
     @State private var showingWorkspaceOrderEditor = false
-    @FocusState private var searchFocused: Bool
+    @State private var showingWorkspaceMap = false
+    @State private var expandedSections: Set<XertNavigationCommandSection> = [.now, .pinned, .navigate]
     let commands: [XertNavigationCommand]
     let workspace: XertNavigationWorkspaceOverview
     let workspaceNodes: [XertNavigationWorkspaceNode]
@@ -1809,51 +1795,63 @@ private struct XertNavigationCommandPalette: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                workspaceHeader
-                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    workspaceMap
+        let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let groups = Dictionary(grouping: filteredCommands, by: \.section)
+        return NavigationStack {
+            List {
+                if !searching {
+                    workspaceHeader
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.xertInk)
+                    DisclosureGroup("Saved workspaces", isExpanded: $showingWorkspaceMap) {
+                        workspaceMap
+                        workspaceCounts
+                    }
+                    .listRowBackground(Color.xertInk)
                 }
-                Group {
-                    if filteredCommands.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 28, weight: .semibold))
-                                .foregroundStyle(Color.xertSteel)
-                            Text("No matching XERT actions")
-                                .font(.headline)
-                                .foregroundStyle(Color.xertOffWhite)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else {
-                        List {
-                            ForEach(XertNavigationCommandSection.allCases) { section in
-                                let sectionCommands = filteredCommands.filter { $0.section == section }
-                                if !sectionCommands.isEmpty {
-                                    Section {
-                                        ForEach(sectionCommands) { command in
-                                            commandRow(command)
-                                        }
-                                    } header: {
-                                        Text(section.rawValue)
-                                            .font(.caption2.weight(.bold))
-                                            .textCase(.uppercase)
-                                            .foregroundStyle(Color.xertSteel)
+                if groups.isEmpty {
+                    Label("No matching XERT actions", systemImage: "magnifyingglass")
+                        .foregroundStyle(Color.xertPale)
+                        .listRowBackground(Color.xertInk)
+                }
+                ForEach(XertNavigationCommandSection.allCases) { section in
+                    if let rows = groups[section] {
+                        Section {
+                            if searching || expandedSections.contains(section) {
+                                ForEach(rows) { command in commandRow(command) }
+                            }
+                        } header: {
+                            if searching {
+                                Text(section.rawValue)
+                            } else {
+                                Button {
+                                    if expandedSections.contains(section) {
+                                        expandedSections.remove(section)
+                                    } else {
+                                        expandedSections.insert(section)
                                     }
+                                } label: {
+                                    HStack {
+                                        Text(section.rawValue)
+                                        Spacer()
+                                        Text(String(rows.count)).font(.caption.monospacedDigit())
+                                        Image(systemName: expandedSections.contains(section) ? "chevron.up" : "chevron.down")
+                                    }
+                                    .frame(minHeight: 44)
+                                    .contentShape(Rectangle())
                                 }
+                                .accessibilityValue(expandedSections.contains(section) ? "Expanded" : "Collapsed")
                             }
                         }
-                        .listStyle(.plain)
-                        .scrollContentBackground(.hidden)
                     }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .background(Color.xertNavy.ignoresSafeArea())
-            .navigationTitle("Quick Switcher")
+            .navigationTitle("Menu")
             .navigationBarTitleDisplayMode(.inline)
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search XERT")
-            .focused($searchFocused)
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Find a class, page or action")
             .toolbar {
                 if canCustomizeWorkspaceOrder {
                     ToolbarItem(placement: .navigationBarLeading) {
@@ -1870,7 +1868,6 @@ private struct XertNavigationCommandPalette: View {
                         .foregroundStyle(Color.xertSteel)
                 }
             }
-            .onAppear { searchFocused = true }
             .sheet(isPresented: $showingWorkspaceOrderEditor) {
                 XertWorkspaceOrderEditor(
                     destinations: workspaceOrder,
@@ -1979,31 +1976,21 @@ private struct XertNavigationCommandPalette: View {
     }
 
     private var workspaceHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                workspaceIdentity
-                Spacer(minLength: 8)
-                pinControl
-                workspaceCounts
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                workspaceIdentity
-                HStack(spacing: 12) {
-                    pinControl
-                    workspaceCounts
-                }
-            }
+        HStack(spacing: 10) {
+            workspaceIdentity
+            Spacer(minLength: 0)
+            pinControl
         }
         .font(.caption.weight(.bold))
         .foregroundStyle(Color.xertSteel)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(minHeight: 58)
-        .background(Color.xertDeep.opacity(0.96))
+        .background(Color.xertInk)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Color.xertSteel.opacity(0.2)).frame(height: 1)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(
             "Current task \(workspace.currentRoute.navigationTitle), \(workspace.backCount) back, \(workspace.forwardCount) forward"
         )
@@ -2023,7 +2010,7 @@ private struct XertNavigationCommandPalette: View {
                     .foregroundStyle(Color.xertOffWhite)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                Text("Current workspace task")
+                Text("Current task")
                     .font(.caption2.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(Color.xertPale.opacity(0.55))
@@ -2045,7 +2032,7 @@ private struct XertNavigationCommandPalette: View {
             Button(action: { onTogglePin(route) }) {
                 Image(systemName: isPinned ? "pin.fill" : "pin")
                     .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 44, height: 44)
                     .background(Color.xertSteel.opacity(isPinned ? 0.22 : 0.1))
             }
             .buttonStyle(.plain)
@@ -2084,6 +2071,7 @@ private struct XertNavigationCommandPalette: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("xert-menu-command")
         .listRowBackground(Color.xertInk)
         .listRowSeparatorTint(Color.xertSteel.opacity(0.16))
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {

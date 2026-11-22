@@ -49,15 +49,6 @@ test('today status uses gym date and makes no unsupported opening-hours claim', 
   assert.equal(model.todayStatus([], now), 'No more published classes today · Check the timetable');
 });
 
-test('view transitions leave modified, external and hash navigation to the router/browser', () => {
-  assert.equal(typeof model.shouldTransition, 'function');
-  const click = { button: 0, defaultPrevented: false };
-  assert.equal(model.shouldTransition(click, '/coaches'), true);
-  for (const to of ['/#facility', '#main', 'https://example.com', 'tel:123']) assert.equal(model.shouldTransition(click, to), false);
-  assert.equal(model.shouldTransition({ ...click, ctrlKey: true }, '/coaches'), false);
-  assert.equal(model.shouldTransition({ ...click, button: 1 }, '/coaches'), false);
-});
-
 test('desktop cleanup and layout can share a media query from the current generated breakpoint', () => {
   assert.equal(typeof navTokens.navDesktopMediaQuery, 'function');
   assert.equal(navTokens.navDesktopMediaQuery({ getPropertyValue: key => key === '--nav-breakpoint-desktop' ? ' 72rem ' : '' }), '(min-width: 72rem)');

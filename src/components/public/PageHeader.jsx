@@ -15,7 +15,7 @@ export default function PageHeader({
   children = null,
 }) {
   return (
-    <header className="relative overflow-hidden pb-4" style={{ paddingTop: 'calc(max(var(--nav-height-expanded), var(--public-nav-control-height, 0px)) + var(--space-section) + var(--space-inline) / 2 + env(safe-area-inset-top))' }}>
+    <header className="relative overflow-hidden pb-4" style={{ paddingTop: 'calc(var(--public-nav-offset) + var(--space-section) + var(--space-inline) / 2)' }}>
       <div aria-hidden="true" className="xert-glow-top absolute inset-0 pointer-events-none" />
       <div className={`relative ${containerClassName} mx-auto px-6`}>
         <div className="mb-5 flex items-center gap-3 xert-enter xert-enter-left">

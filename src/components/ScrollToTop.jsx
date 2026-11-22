@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useLocation, useNavigationType } from "react-router-dom";
 
 const getHashId = (hash) => {
@@ -12,11 +12,16 @@ const getHashId = (hash) => {
 };
 
 export default function ScrollToTop() {
-  const { pathname, hash } = useLocation();
+  const { pathname, hash, key } = useLocation();
   const navigationType = useNavigationType();
+  const initialKey = useRef(key);
+  // Repeat selections of the current anchor should bring it back into view.
+  // Query-only page updates without an anchor retain their scroll position.
+  const anchorKey = hash ? key : null;
 
   useEffect(() => {
-    if (navigationType === "POP") return;
+    if (initialKey.current !== anchorKey) initialKey.current = null;
+    if (navigationType === "POP" && (!hash || initialKey.current === null)) return;
 
     if (hash) {
       const id = getHashId(hash);
@@ -59,7 +64,7 @@ export default function ScrollToTop() {
     }
 
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [pathname, hash, navigationType]);
+  }, [pathname, hash, anchorKey, navigationType]);
 
   return null;
 }

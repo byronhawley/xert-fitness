@@ -16,7 +16,7 @@ test('attachment export never masks the original xcodebuild result and is opt-in
     await mkdir(path.join(root, 'bin'));
     const stub = async (name, contents) => writeFile(path.join(root, 'bin', name), `#!/usr/bin/env bash\n${contents}\n`, { mode: 0o755 });
     await stub('xcodebuild', 'mkdir -p build/test-results.xcresult\nexit "$MOCK_TEST_STATUS"');
-    await stub('sleep', 'exec /usr/bin/sleep 0.5');
+    await stub('sleep', 'command -p sleep 0.5');
     await stub('xcrun', `
 if [[ "$1 $2 $3" == "simctl list devices" ]]; then
   printf 'iPhone Fixture (FAKE-SIMULATOR) (Shutdown)\\n'

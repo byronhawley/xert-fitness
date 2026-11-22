@@ -3,7 +3,7 @@ import { fitboxHandoff } from '@/lib/launchSettings';
 import { gymTimeLabel, GYM_TIME_ZONE } from '@/lib/gymTime';
 import { accountSummary, nextClassAction, nextPublicClass, todayStatus } from './navState';
 import useMenuData from './useMenuData';
-import NavLink from './NavLink';
+import { Link as NavLink } from 'react-router-dom';
 
 function classTime(value) {
   return `${new Date(value).toLocaleDateString('en-AU', { timeZone: GYM_TIME_ZONE, weekday: 'short', day: 'numeric', month: 'short' })} · ${gymTimeLabel(value)}`;
@@ -30,15 +30,13 @@ export default function MenuInformation({ user, profile, close }) {
         <NavLink to={action.to} onClick={close} className="public-menu-text-action">{action.label}</NavLink>
       </> : <><p>No upcoming classes published.</p><NavLink to="/timetable" onClick={close} className="public-menu-text-action">View timetable</NavLink></>}
     </section>
-    <section aria-label="Your account" className="public-menu-card">
-      {account.signedIn ? <>
+    {account.signedIn && <section aria-label="Your account" className="public-menu-card">
         <h2 className="public-menu-account-name">{account.name}</h2>
         {!data ? <p role="status">Loading your next booking…</p> : data.bookings === null ? <>
           <p>Your bookings are unavailable.</p><button type="button" className="public-menu-text-action" onClick={retry}>Retry your bookings</button>
         </> : account.nextBooking ? <p>Next booking: {account.nextBooking.session_title || account.nextBooking.title || 'Class'} · {classTime(account.nextBooking.start_time)} · {account.nextBooking.status}</p> : <p>No upcoming bookings.</p>}
         <NavLink to="/account" onClick={close} className="public-menu-text-action">Account</NavLink>
-      </> : <div className="public-menu-account-actions"><NavLink to="/login" onClick={close} className="public-nav-account">Log In</NavLink><NavLink to="/register" onClick={close} className="public-menu-text-action">Join XERT</NavLink></div>}
-    </section>
+    </section>}
     <div className="public-menu-contact">
       {phone ? <a href={`tel:${phone.replace(/\s+/g, '')}`} className="public-menu-text-action">Call the gym · {phone}</a> : <NavLink to="/contact" onClick={close} className="public-menu-text-action">Contact XERT</NavLink>}
       <p>{typeof data?.contact?.opening_hours === 'string' && data.contact.opening_hours.trim() ? data.contact.opening_hours : data?.classes ? todayStatus(sessions) : 'Check the timetable for today’s classes.'}</p>

@@ -40,6 +40,35 @@ const BLOCKED = {
   STAFF_INACTIVE: ['Your coach access is paused', 'Talk to the manager if this is a mistake.'],
 };
 
+function CoachSectionTabs({ tabs, selected, counts, select }) {
+  const [focused, setFocused] = useState(null);
+  const handleKey = event => {
+    const buttons = Array.from(event.currentTarget.querySelectorAll('[role="tab"]'));
+    const index = buttons.indexOf(event.target);
+    if (index < 0) return;
+    const targets = {
+      ArrowLeft: (index + buttons.length - 1) % buttons.length,
+      ArrowRight: (index + 1) % buttons.length,
+      Home: 0,
+      End: buttons.length - 1,
+    };
+    if (!(event.key in targets)) return;
+    event.preventDefault();
+    buttons[targets[event.key]].focus();
+  };
+
+  return <div role="tablist" aria-label="Coach sections" className="coaching-tabs coaching-sections mb-5"
+    onKeyDown={handleKey}
+    onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(null); }}>
+    {tabs.map(item => <button key={item.key} type="button" role="tab" id={`coach-tab-${item.key}`}
+      aria-selected={selected === item.key} aria-controls="coach-panel" tabIndex={(focused || selected) === item.key ? 0 : -1}
+      onFocus={() => setFocused(item.key)} onClick={() => { if (selected !== item.key) select(item.key); }}>
+      <span>{item.label}</span>
+      {counts[item.key] > 0 && <span className="coaching-count" aria-label={`, ${counts[item.key]} need you`}>{counts[item.key]}</span>}
+    </button>)}
+  </div>;
+}
+
 function Shell({ children }) {
   return (
     <div className="relative min-h-screen bg-xert-navy">
@@ -113,15 +142,9 @@ export default function Coaching({ client: injected = null }) {
         <p className="font-body text-xs uppercase tracking-wider text-xert-pale/60">Coach</p>
         <h1 className="font-display text-4xl uppercase text-xert-offwhite">Hi {me.staff.display_name}</h1>
       </header>
-      <div role="tablist" aria-label="Coach sections" className="coaching-tabs mb-5" style={/** @type {React.CSSProperties} */ ({ '--coaching-tab-count': tabs.length })}>
-        {tabs.map(item => (
-          <button key={item.key} type="button" role="tab" id={`coach-tab-${item.key}`} aria-selected={tab === item.key} aria-controls="coach-panel" onClick={() => setParam('tab', item.key)}>
-            {item.label}{counts[item.key] ? <span className="coaching-count" aria-label={`, ${counts[item.key]} need you`}>{counts[item.key]}</span> : null}
-          </button>
-        ))}
-      </div>
+      <CoachSectionTabs tabs={tabs} selected={tab} counts={counts} select={key => setParam('tab', key)} />
       {error && <div className="mb-4"><Banner tone="warning" title="Couldn’t refresh" action={<button type="button" className={GHOST} onClick={loadMe}>Try again</button>}>{error.message} Showing what was last loaded.</Banner></div>}
-      <section id="coach-panel" role="tabpanel" aria-labelledby={`coach-tab-${tab}`}>
+      <section id="coach-panel" role="tabpanel" tabIndex={0} aria-labelledby={`coach-tab-${tab}`}>
         {tab === 'home' && <CoachHome client={client} me={me} today={today} joined={location.state?.joined || null} />}
         {tab === 'roster' && <CoachRoster client={client} today={today} notify={notify} onChanged={loadMe} />}
         {tab === 'add' && canBook && <CoachAddToClass client={client} notify={notify} />}
