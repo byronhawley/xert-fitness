@@ -511,11 +511,17 @@ try {
     // The fixture session from the previous step is still signed in; sign out first.
     await signedOut.page.evaluate(() => { for (const key of Object.keys(localStorage)) if (key.includes('auth-token')) localStorage.removeItem(key); });
     await signedOut.page.goto(`${origin}/coaching?tab=requests&month=${MONTH}`, { waitUntil: 'networkidle' });
-    const login = signedOut.page.getByRole('link', { name: 'Log in', exact: true });
+    const login = signedOut.page.getByRole('main').getByRole('link', { name: 'Log in', exact: true });
     await login.waitFor();
     const href = new URL(await login.getAttribute('href'), origin);
     assert.equal(href.pathname, '/login');
     assert.equal(href.searchParams.get('next'), `/coaching?tab=requests&month=${MONTH}`);
+    const header = signedOut.page.getByRole('navigation', { name: 'Main navigation' });
+    assert.equal(await header.getByRole('link', { name: 'Log in', exact: true }).getAttribute('href'), href.pathname + href.search);
+    await header.getByRole('button', { name: 'Open navigation menu' }).click();
+    const directory = signedOut.page.getByRole('dialog', { name: 'Menu' });
+    assert.equal(await directory.getByRole('link', { name: 'Log in' }).getAttribute('href'), href.pathname + href.search);
+    assert.equal(await directory.getByRole('link', { name: 'Join XERT' }).getAttribute('href'), '/register' + href.search);
   });
 
   await step('a recipient whose manager access was revoked sees "Admin access only", not the roster', async () => {
@@ -527,6 +533,11 @@ try {
     await revoked.page.goto(`${origin}/admin/roster?rosterTab=requests&rosterMonth=${MONTH}`, { waitUntil: 'networkidle' });
     await revoked.page.getByText('Admin access only').waitFor();
     assert.equal(rpcLog.slice(before).length, 0, 'no roster data is requested for a non-manager');
+    await revoked.page.goto(origin, { waitUntil: 'networkidle' });
+    await revoked.page.getByRole('button', { name: 'Open navigation menu' }).click();
+    const shortcuts = revoked.page.getByRole('region', { name: 'Your shortcuts' });
+    await shortcuts.getByRole('link', { name: 'Upcoming classes' }).waitFor();
+    assert.equal(await shortcuts.getByRole('link', { name: 'Command centre' }).count(), 0);
     // And the server refuses the manager RPC even if called directly.
     await assert.rejects(() => serialRpc(coach('quinn').profileId, 'staff_roster_planning_snapshot', { p_month: `${MONTH}-01` }), /MANAGER_ONLY/);
     await revoked.context.close();

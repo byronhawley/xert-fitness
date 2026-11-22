@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowUpRight, CalendarCheck, CalendarDays, CalendarRange, ChartNoAxesColumnIncreasing, Compass, Dumbbell, House, LayoutGrid, MapPin, PanelsTopLeft, Ticket, UsersRound, UserRound } from 'lucide-react';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
+import { authPathWithNext } from '@/lib/authRedirect';
 import { usePtAvailability } from '@/lib/usePtAvailability';
 import MobileSheet from './nav/MobileSheet';
 import './nav/public-nav.css';
@@ -30,6 +31,11 @@ export default function PublicNav() {
   const location = useLocation();
   const { session, profile, isAdmin } = useSupabaseAuth();
   const pt = usePtAvailability();
+  const returnPath = ['/account', '/coaching'].includes(location.pathname)
+    ? location.pathname + location.search + location.hash
+    : location.pathname === '/coach-invite' ? '/coach-invite' : null;
+  const accountPath = session ? '/account' : returnPath ? authPathWithNext('/login', returnPath) : '/login';
+  const joinPath = returnPath ? authPathWithNext('/register', returnPath) : '/register';
   const close = useCallback(() => setMenuOpen(false), []);
   useEffect(() => { close(); }, [location, close]);
 
@@ -42,7 +48,7 @@ export default function PublicNav() {
           className="public-nav-link">{link.label}</Link>)}
       </div>
       <div className="public-nav-actions">
-        <Link to={session ? '/account' : '/login'} className="public-nav-account"><UserRound aria-hidden="true" size={17} />{session ? 'Account' : 'Log in'}</Link>
+        <Link to={accountPath} className="public-nav-account"><UserRound aria-hidden="true" size={17} />{session ? 'Account' : 'Log in'}</Link>
         <Link to="/booking" aria-label="Book a class" className="public-nav-book">Book<span className="public-nav-book-long"> a class</span><ArrowUpRight aria-hidden="true" size={16} /></Link>
         <button ref={triggerRef} type="button" onClick={() => setMenuOpen(value => !value)}
           aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
@@ -52,6 +58,7 @@ export default function PublicNav() {
     </div>
     {menuOpen && <MobileSheet shortcuts={session ? (isAdmin ? [...memberLinks, ownerLink] : memberLinks) : []}
       groups={[{ title: 'Training', links: pt.enabled ? [...training, personalTraining] : training }, { title: 'The gym', links: gym }]}
-      current={location.pathname + location.hash} user={session?.user} profile={profile} close={close} triggerRef={triggerRef} />}
+      current={location.pathname + location.hash} accountPath={accountPath} joinPath={joinPath}
+      user={session?.user} profile={profile} close={close} triggerRef={triggerRef} />}
   </nav>;
 }

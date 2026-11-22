@@ -4,7 +4,7 @@ import { ArrowRight, ArrowUpRight, ChevronDown, Clock3, UserRound, X } from 'luc
 
 const MenuInformation = lazy(() => import('./MenuInformation'));
 
-export default function MobileSheet({ groups, shortcuts, current, user, profile, close, triggerRef }) {
+export default function MobileSheet({ groups, shortcuts, current, accountPath, joinPath, user, profile, close, triggerRef }) {
   const dialogRef = useRef(null);
   const dragStart = useRef(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -73,8 +73,8 @@ export default function MobileSheet({ groups, shortcuts, current, user, profile,
       </div>
     </div>
     <footer className="public-menu-footer">
-      <Link to={user ? '/account' : '/login'} onClick={close} className="public-menu-account"><UserRound size={18} aria-hidden="true" />{user ? 'My account' : 'Log in'}</Link>
-      {!user && <Link to="/register" onClick={close} className="public-menu-account">Join XERT</Link>}
+      <Link to={accountPath} onClick={close} className="public-menu-account"><UserRound size={18} aria-hidden="true" />{user ? 'My account' : 'Log in'}</Link>
+      {!user && <Link to={joinPath} onClick={close} className="public-menu-account">Join XERT</Link>}
       <Link to="/booking" onClick={close} className="public-nav-book">Book a class<ArrowRight size={16} aria-hidden="true" /></Link>
     </footer>
   </dialog>;
