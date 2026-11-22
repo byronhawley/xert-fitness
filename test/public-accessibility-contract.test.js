@@ -32,10 +32,10 @@ test('extracted navigation preserves keyboard containment and names useful sheet
   assert.match(nav, /aria-label="Next class"/);
   assert.match(nav, /Retry class information/);
   assert.match(nav, /aria-label="Close navigation menu"/);
-  assert.match(nav, /role="dialog"/);
-  assert.match(nav, /aria-modal="true"/);
-  assert.match(nav, /e\.key === 'Escape'/);
-  assert.match(nav, /e\.key !== 'Tab'/);
+  assert.match(nav, /<dialog\b/);
+  assert.match(nav, /dialog\.showModal\(\)/);
+  assert.match(nav, /onCancel=\{event => \{ event.preventDefault\(\); close\(\);/);
+  assert.match(nav, /event\.key !== 'Tab'/);
   assert.match(nav, /\.focus\(/);
   assert.match(nav, /document\.body\.style\.overflow/);
 });

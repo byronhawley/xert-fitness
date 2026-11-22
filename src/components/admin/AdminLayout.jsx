@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  LogOut, ExternalLink, X, Search, CircleAlert, ChevronRight, PanelLeftClose, PanelLeftOpen, SlidersHorizontal, Keyboard,
+  LogOut, ExternalLink, X, Search, CircleAlert, ChevronRight, PanelLeftClose, PanelLeftOpen, SlidersHorizontal, Keyboard, LayoutGrid,
 } from 'lucide-react';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { getAdminBadgeCounts } from '@/lib/adminData';
@@ -22,6 +22,7 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
   const [desktopNavigation, setDesktopNavigation] = useState(
     () => window.matchMedia(navDesktopMediaQuery()).matches,
   );
+  const [expandedHub, setExpandedHub] = useState(() => hubForSection(activeSection).key);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [badges, setBadges] = useState({});
   const [badgesUnavailable, setBadgesUnavailable] = useState(false);
@@ -49,6 +50,7 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
   useEffect(() => {
     setSidebarOpen(false);
     setPaletteOpen(false);
+    setExpandedHub(hubForSection(activeSection).key);
     if (mainRef.current) mainRef.current.scrollTop = 0;
   }, [activeSection]);
 
@@ -202,27 +204,34 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
           {ADMIN_HUBS.map(hub => {
             const HubIcon = hub.icon;
             const isCurrentHub = currentHub.key === hub.key;
+            const expanded = expandedHub === hub.key && !(desktopNavigation && shell.collapsed);
+            const single = hub.items.length === 1;
             const count = hubBadge(hub);
             return (
               <div key={hub.key} className="py-0.5">
-                <button type="button" onClick={() => navigateTo(hub.items[0])}
+                <button type="button" onClick={() => {
+                  if (single) { navigateTo(hub.items[0]); return; }
+                  if (desktopNavigation && shell.collapsed) shell.setCollapsed(false);
+                  setExpandedHub(expanded ? null : hub.key);
+                }}
                   aria-label={hub.label} title={hub.label}
                   aria-current={isCurrentHub && hub.items.length === 1 ? 'page' : undefined}
-                  aria-expanded={hub.items.length > 1 ? isCurrentHub : undefined}
+                  aria-expanded={single ? undefined : expanded}
+                  aria-controls={expanded && !single ? `hub-${hub.key}` : undefined}
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${isCurrentHub ? 'bg-white/[0.06] text-xert-offwhite' : 'text-xert-pale/60 hover:bg-white/[0.04] hover:text-xert-offwhite'}`}>
                   <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-colors ${isCurrentHub ? 'bg-xert-steel text-xert-navy' : 'bg-white/[0.05] text-xert-steel'}`}>
                     <HubIcon className="h-[18px] w-[18px]" />
                   </span>
                   <span className="admin-hub-label min-w-0 flex-1">
                     <span className="block font-body text-sm font-semibold">{hub.label}</span>
-                    <span className="block truncate font-body text-[11px] text-xert-pale/40">{hub.detail}</span>
                   </span>
+                  {!single && <ChevronRight aria-hidden="true" size={16} className={`admin-hub-chevron ${expanded ? 'rotate-90' : ''}`} />}
                   {count > 0 && !isCurrentHub && (
                     <span className="shrink-0 rounded-full bg-xert-steel/20 px-2 py-0.5 font-body text-[11px] font-semibold tabular-nums text-xert-steel">{count}</span>
                   )}
                 </button>
-                {isCurrentHub && hub.items.length > 1 && !(desktopNavigation && shell.collapsed) && (
-                  <div className="mb-1 ml-[3.1rem] mt-1 space-y-0.5 border-l border-white/[0.06] pl-3">
+                {expanded && !single && (
+                  <div id={`hub-${hub.key}`} className="mb-1 ml-[3.1rem] mt-1 space-y-0.5 border-l border-white/[0.06] pl-3">
                     {hub.items.map(item => {
                       const active = activeSection === item.key;
                       return (
@@ -277,7 +286,7 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
       {/* ── Main ────────────────────────────────────────────────────────── */}
       <div ref={workspaceRef} data-admin-workspace className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="relative z-30 shrink-0 border-b border-white/[0.06] bg-surface-sidebar/90 backdrop-blur">
+        <header className="relative z-30 shrink-0 border-b border-white/[0.06] bg-surface-sidebar">
           <div className="admin-shell-toolbar flex items-center justify-between gap-3 px-4 pb-2 pt-[max(0.625rem,env(safe-area-inset-top))] sm:px-8 sm:pt-4">
             <div className="admin-shell-identity flex min-w-0 items-center gap-3">
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-xert-steel/15 text-xert-steel lg:hidden">
@@ -306,8 +315,8 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
             {desktopNavigation && <button type="button" className="admin-shell-control" onClick={() => shell.setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts"><Keyboard /></button>}
             <button ref={menuButtonRef} type="button" onClick={() => setSidebarOpen(true)} aria-label="Open account and navigation"
               aria-expanded={sidebarOpen} aria-controls="admin-navigation"
-              className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] font-display text-sm text-xert-steel transition-colors hover:border-xert-steel/60 lg:hidden">
-              {initials}
+              className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] px-2.5 font-body text-sm text-xert-steel transition-colors hover:border-xert-steel/60 lg:hidden">
+              <LayoutGrid aria-hidden="true" size={17} /><span className="ml-1.5">Menu</span>
             </button>
             <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Search admin tools" title="Search admin tools"
               className="flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 font-body text-sm text-xert-pale/60 transition-colors hover:border-xert-steel/60 hover:text-xert-offwhite">
@@ -330,7 +339,7 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
 
         {/* Thumb-reachable owner jobs. The full catalogue remains in More. */}
         <nav aria-label="Owner shortcuts" data-admin-mobile-dock
-          className="relative z-30 shrink-0 border-t border-white/[0.06] bg-surface-sidebar/95 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1 backdrop-blur lg:hidden">
+          className="relative z-30 shrink-0 border-t border-white/[0.06] bg-surface-sidebar pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1 lg:hidden">
           <div className="grid grid-cols-6">
             {ADMIN_MOBILE_WORKSPACES.map(item => {
               const active = currentHub.key === item.hub;

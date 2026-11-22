@@ -19,38 +19,29 @@ export async function checkPublicNavigation(page, { origin, signedIn, failures }
   const nav = page.locator('[data-public-nav]');
   await nav.waitFor();
   await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForFunction(() => Math.abs(document.querySelector('[data-public-nav]').getBoundingClientRect().height - 76) < 2);
+  const barHeight = (await nav.boundingBox()).height;
   await page.evaluate(() => window.scrollTo(0, 600));
-  await page.waitForFunction(() => Math.abs(document.querySelector('[data-public-nav]').getBoundingClientRect().height - 56) < 2);
-  const trigger = page.locator('button[aria-controls="mobile-navigation"]');
-  const mobile = await trigger.isVisible();
-  if (!mobile) {
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const before = await page.locator('[data-nav-indicator]').boundingBox();
+  assert.equal((await nav.boundingBox()).height, barHeight, 'Scroll keeps targets in place');
+  const trigger = nav.getByRole('button', { name: 'Open navigation menu' });
+  const desktop = await nav.locator('.public-nav-links').isVisible();
+  await nav.getByRole('link', { name: 'Book a class' }).waitFor();
+  if (desktop) {
     await nav.getByRole('link', { name: 'Coaches', exact: true }).click();
     await page.waitForURL(origin + '/coaches');
-    await nav.locator('.public-nav-link[aria-current="page"]').filter({ hasText: 'Coaches' }).waitFor({ state: 'visible' });
-    await page.locator('[data-nav-indicator]').waitFor({ state: 'visible' });
-    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    const after = await page.locator('[data-nav-indicator]').boundingBox();
-    const state = await page.locator('[data-nav-links]').evaluate(el => ({
-      indicatorX: el.querySelector('[data-nav-indicator]').style.getPropertyValue('--indicator-x'), indicatorWidth: el.querySelector('[data-nav-indicator]').style.getPropertyValue('--indicator-width'),
-      active: el.querySelector('[aria-current="page"]')?.textContent,
-      bounds: el.getBoundingClientRect().toJSON(),
-    }));
-    assert.ok(before && after && Math.abs(before.x - after.x) > 10, `Active underline moves to the selected item: ${JSON.stringify({ before, after, state })}`);
+    await nav.locator('.public-nav-link[aria-current="page"]').filter({ hasText: 'Coaches' }).waitFor();
     await page.goto(origin, { waitUntil: 'networkidle' });
-    return;
   }
-
   await trigger.click();
+  const sheet = page.locator('#mobile-navigation');
+  await sheet.getByRole('link', { name: 'Facility', exact: true }).waitFor();
+  assert.equal(await sheet.getByRole('region', { name: 'Next class' }).count(), 0, 'Menu opens without loading optional gym details');
+  await sheet.getByRole('button', { name: 'Next class & gym details' }).click();
   const nextClass = page.getByRole('region', { name: 'Next class', exact: true });
   await nextClass.getByText('Foundation Strength', { exact: true }).waitFor();
   assert.match(await nextClass.innerText(), /Sam/);
   assert.match(await nextClass.innerText(), /2\s+(?:spots|places)/i);
   const requestLink = nextClass.getByRole('link', { name: /request/i });
   assert.match(await requestLink.getAttribute('href'), /\/timetable\?session=22222222-2222-4222-8222-222222222222/);
-  const sheet = page.locator('#mobile-navigation');
   if (signedIn) {
     assert.match(await sheet.innerText(), /Alex/i);
     assert.match(await sheet.innerText(), /next booking/i);
@@ -59,14 +50,17 @@ export async function checkPublicNavigation(page, { origin, signedIn, failures }
     await sheet.getByRole('link', { name: /join/i }).waitFor();
   }
   assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden', 'Menu locks the page');
-  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.keyboard.press('Escape');
   await sheet.waitFor({ state: 'detached' });
-  assert.notEqual(await page.evaluate(() => document.body.style.overflow), 'hidden', 'Desktop crossing restores page scroll');
+  assert.notEqual(await page.evaluate(() => document.body.style.overflow), 'hidden');
+  assert.equal(await trigger.evaluate(el => el === document.activeElement), true);
+  if (desktop) return;
 
   await page.setViewportSize({ width: 390, height: 844 });
   failures.public_class_availability = 1;
   await page.reload({ waitUntil: 'networkidle' });
   await trigger.click();
+  await sheet.getByRole('button', { name: 'Next class & gym details' }).click();
   const retry = page.getByRole('button', { name: 'Retry class information', exact: true });
   await retry.waitFor();
   assert.doesNotMatch(await nextClass.innerText(), /2\s+(?:spots|places)/i, 'A failed availability load cannot promise a place count');
@@ -78,7 +72,7 @@ export async function checkPublicNavigation(page, { origin, signedIn, failures }
   await trigger.click();
   const scroller = page.locator('[data-nav-sheet-scroll]');
   await scroller.evaluate(el => { el.scrollTop = 0; });
-  const handle = await page.locator('.public-menu-top').boundingBox();
+  const handle = await page.locator('.public-menu-grip').boundingBox();
   assert.ok(handle);
   const before = await sheet.boundingBox();
   await touchDrag(page, { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2, distance: 150,
@@ -91,11 +85,14 @@ export async function checkPublicNavigation(page, { origin, signedIn, failures }
   assert.notEqual(await page.evaluate(() => document.body.style.overflow), 'hidden', 'Swipe dismissal unlocks page scroll');
 
   await trigger.click();
+  await sheet.getByRole('button', { name: 'Next class & gym details' }).click();
+  await nextClass.getByText('Foundation Strength', { exact: true }).waitFor();
+  await page.setViewportSize({ width: 390, height: 550 });
   await scroller.evaluate(el => { el.scrollTop = 80; });
   const scrollStart = await scroller.evaluate(el => el.scrollTop);
   assert.ok(scrollStart > 0, 'Fixture content can scroll independently');
   const scrollBox = await scroller.boundingBox();
   await touchDrag(page, { x: scrollBox.x + scrollBox.width / 2, y: scrollBox.y + 100, distance: 140 });
-  assert.equal(await trigger.getAttribute('aria-expanded'), 'true', 'A downward gesture started within scrolled content does not dismiss the sheet');
+  assert.equal(await nav.locator('[aria-controls="mobile-navigation"]').getAttribute('aria-expanded'), 'true', 'A downward gesture started within scrolled content does not dismiss the sheet');
   await page.keyboard.press('Escape');
 }

@@ -64,7 +64,7 @@ test('native chrome uses advanced surfaces without rebuilding decorative navigat
   const kit = await read('../ios/XertFitnessApp/XertFitnessApp/AdminDesignSystem.swift');
   assert.match(kit, /case \.raised: return XertTokens.surfaceRaised/);
   assert.match(kit, /strokeBorder\(XertTokens.borderHairline/);
-  assert.match(root, /private struct XertNavigationDock: View[\s\S]*RoundedRectangle\(cornerRadius: 18, style: \.continuous\)/);
+  assert.match(root, /private struct XertNavigationDock: View[\s\S]*background\(Color\.xertInk\.ignoresSafeArea\(edges: \.bottom\)\)/);
   assert.match(root, /matchedGeometryEffect\(id: "primary-navigation-selection"/);
   assert.doesNotMatch(root, /let width = size\.width \/ CGFloat\(items\.count\)/);
 });

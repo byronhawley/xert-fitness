@@ -113,7 +113,7 @@ export default function Hero() {
       />
 
       {/* Nav spacer */}
-      <div className="relative z-10 shrink-0" style={{ height: 'calc(max(var(--nav-height-expanded), var(--public-nav-control-height, 0px)) + var(--public-announcement-height, 0px) + env(safe-area-inset-top))' }} />
+      <div className="relative z-10 shrink-0" style={{ height: 'calc(var(--public-nav-offset) + var(--public-announcement-height, 0px))' }} />
 
       {/* Main hero content */}
       <div ref={contentRef} className="relative z-10 flex-1 flex flex-col justify-center px-6 pt-4 pb-8 sm:px-10 sm:pt-8 sm:pb-16 lg:px-16 will-change-transform" style={{ transform: 'translate3d(0,0,0)' }}>

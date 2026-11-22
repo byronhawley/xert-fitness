@@ -194,7 +194,7 @@ test('the memberships page is a real, indexable, listed route', () => {
     '../src/components/public/PublicNav.jsx',
     '../src/components/public/PublicFooter.jsx',
   ]) {
-    assert.match(read(file), /\{ to: '\/memberships', label: 'Memberships & Passes' \}/, file);
+    assert.match(read(file), /\{ to: '\/memberships', label: 'Memberships & Passes'[, }]/, file);
   }
 });
 

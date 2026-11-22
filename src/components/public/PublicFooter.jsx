@@ -55,10 +55,10 @@ export default function PublicFooter() {
           {/* Links */}
           <div>
             <p className="mb-2 font-display text-xs uppercase tracking-widest text-xert-steel">Navigate</p>
-            <div className="grid grid-cols-2 gap-x-6">
+            <div className="grid gap-x-6 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8rem),1fr))]">
               {links.map(l => (
                 <Link key={l.to} to={l.to}
-                  className="flex min-h-11 items-center font-body text-sm text-xert-pale/70 transition-colors hover:text-xert-steel">
+                  className="flex min-h-11 min-w-0 items-center [overflow-wrap:anywhere] font-body text-sm text-xert-pale/70 transition-colors hover:text-xert-steel">
                   {l.label}
                 </Link>
               ))}

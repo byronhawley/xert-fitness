@@ -32,8 +32,3 @@ export function todayStatus(rows, now = new Date()) {
   const count = future(published(rows), now).filter(row => gymDateKey(row.start_time) === gymDateKey(now)).length;
   return count ? `${count} upcoming class${count === 1 ? '' : 'es'} today · Visits by booking` : 'No more published classes today · Check the timetable';
 }
-
-export function shouldTransition(event, to) {
-  return !event.defaultPrevented && event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
-    && typeof to === 'string' && to.startsWith('/') && !to.startsWith('//') && !to.includes('#');
-}

@@ -23,9 +23,9 @@
 .admin-resize:hover, .admin-resize:focus-visible { background: var(--accent-default); }
 .admin-tabs-wrap { position: relative; min-width: 0; }
 .admin-tabs { position: relative; display: flex; gap: var(--space-row-compact); overflow-x: auto; scrollbar-width: none; padding-inline: var(--space-row-comfortable); }
-.admin-tabs button { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-row-compact); min-height: var(--control-height); padding: var(--space-row-compact) var(--space-row-comfortable); color: var(--text-muted); border-bottom: var(--nav-indicator-height) solid transparent; font-size: var(--nav-font-body); }
+.admin-tabs button { position: relative; flex-shrink: 0; display: flex; align-items: center; gap: var(--space-row-compact); min-height: var(--control-height); padding: var(--space-row-compact) var(--space-row-comfortable); color: var(--text-muted); border-bottom: var(--nav-indicator-height) solid transparent; font-size: var(--nav-font-body); }
 .admin-tabs button[aria-selected="true"] { color: var(--text-primary); background: var(--surface-raised); }
-.admin-tab-indicator { position: absolute; bottom: 0; left: 0; pointer-events: none; height: var(--nav-indicator-height); background: var(--accent-default); transition: transform var(--duration-standard) var(--nav-easing-standard), width var(--duration-standard) var(--nav-easing-standard); }
+.admin-tab-indicator { position: absolute; inset: auto 0 0; pointer-events: none; height: var(--nav-indicator-height); background: var(--accent-default); }
 .admin-tabs-wrap::before, .admin-tabs-wrap::after { content: ''; pointer-events: none; position: absolute; z-index: 1; inset-block: 0; width: var(--space-row-comfortable); opacity: 0; }
 .admin-tabs-wrap::before { left: 0; background: linear-gradient(to right, var(--surface-base), transparent); }
 .admin-tabs-wrap::after { right: 0; background: linear-gradient(to left, var(--surface-base), transparent); }
@@ -51,3 +51,11 @@
 .admin-skeleton-metric { min-height: var(--admin-skeleton-metric-height); }
 .admin-skeleton-cell { min-height: var(--admin-skeleton-calendar-cell); }
 .admin-shell[data-desktop="true"] .admin-skeleton-cell { min-height: var(--admin-skeleton-calendar-cell-wide); }
+
+.admin-shell[data-collapsed="true"] .admin-hub-chevron { display: none; }
+.admin-shell #admin-navigation nav button { min-height: 44px; }
+.admin-shell #admin-navigation nav button[aria-current="page"] { box-shadow: inset 3px 0 var(--accent-default); }
+.admin-hub-chevron { flex-shrink: 0; color: var(--accent-default); }
+.admin-shell [data-admin-mobile-dock] button { color: var(--text-secondary); }
+.admin-shell [data-admin-mobile-dock] button[aria-current="page"] > span:first-child { background: var(--accent-default); }
+.admin-shell [data-admin-mobile-dock] button[aria-current="page"] svg { color: var(--text-inverse); }

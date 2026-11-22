@@ -591,9 +591,9 @@ enum XertNavigationCommandSection: String, CaseIterable, Identifiable {
     case now = "Now"
     case discover = "Available Classes"
     case pinned = "Pinned Workspaces"
-    case recent = "Workspace History"
-    case navigate = "Navigate"
     case owner = "Owner Operations"
+    case navigate = "Navigate"
+    case recent = "Workspace History"
     case system = "System"
 
     var id: Self { self }
