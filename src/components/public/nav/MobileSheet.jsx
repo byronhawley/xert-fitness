@@ -4,7 +4,7 @@ import { ArrowRight, ArrowUpRight, ChevronDown, Clock3, UserRound, X } from 'luc
 
 const MenuInformation = lazy(() => import('./MenuInformation'));
 
-export default function MobileSheet({ groups, current, user, profile, close, triggerRef }) {
+export default function MobileSheet({ groups, shortcuts, current, user, profile, close, triggerRef }) {
   const dialogRef = useRef(null);
   const dragStart = useRef(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -51,6 +51,12 @@ export default function MobileSheet({ groups, current, user, profile, close, tri
       <button type="button" aria-label="Close navigation menu" onClick={close} className="public-menu-close"><X size={21} aria-hidden="true" /></button>
     </header>
     <div data-nav-sheet-scroll className="public-menu-scroll">
+      {shortcuts.length > 0 && <section aria-label="Your shortcuts" className="public-menu-shortcuts">
+        {shortcuts.map(({ to, label, icon: Icon }) => <Link key={to} to={to} onClick={close}
+          aria-current={to === current ? 'location' : undefined} className="public-menu-shortcut">
+          <Icon size={18} aria-hidden="true" />{label}
+        </Link>)}
+      </section>}
       <div className="public-menu-groups">
         {groups.map(group => <section key={group.title} aria-label={group.title}>
           <h3>{group.title}</h3>

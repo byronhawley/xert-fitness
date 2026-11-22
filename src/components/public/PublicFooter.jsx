@@ -15,6 +15,7 @@ const NAV_LINKS = [
   { to: '/memberships', label: 'Memberships & Passes' },
   { to: '/booking', label: 'Book A Class' },
   { to: '/coaches', label: 'Coaches' },
+  { to: '/coaching', label: 'Coach dashboard' },
   { to: '/events', label: 'Event Calendar' },
   { to: '/about', label: 'About XERT' },
   { to: '/training-guide', label: 'Training Guide' },

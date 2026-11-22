@@ -41,6 +41,11 @@
 }
 
 .coaching-check { display: inline-block; width: 1.1em; text-align: center; color: var(--text-secondary); }
+.coaching-sections { grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.7rem), 1fr)); gap: 5px; padding: 5px; }
+.coaching-sections button { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; min-height: 48px; padding: 6px 8px; background: var(--surface-overlay); font-size: .875rem; line-height: 1.25; overflow-wrap: anywhere; }
+.coaching-sections button[aria-selected="true"] { background: var(--surface-raised); color: var(--text-primary); box-shadow: inset 0 -3px var(--accent-default); }
+.coaching-sections button:focus-visible { outline: 2px solid var(--accent-default); outline-offset: -2px; }
+.coaching-sections .coaching-count { margin: 0; }
 .coaching-check[data-state="done"] { color: var(--state-success); }
 .coaching-check[data-state="todo"] { color: var(--state-warning); }
 .coaching-shortcut { display: flex; align-items: center; justify-content: space-between; min-height: 56px; }

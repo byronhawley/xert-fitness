@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ArrowUpRight, CalendarDays, CalendarRange, Compass, Dumbbell, House, LayoutGrid, MapPin, Ticket, UsersRound, UserRound } from 'lucide-react';
+import { ArrowUpRight, CalendarCheck, CalendarDays, CalendarRange, ChartNoAxesColumnIncreasing, Compass, Dumbbell, House, LayoutGrid, MapPin, PanelsTopLeft, Ticket, UsersRound, UserRound } from 'lucide-react';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { usePtAvailability } from '@/lib/usePtAvailability';
 import MobileSheet from './nav/MobileSheet';
@@ -12,6 +12,11 @@ const training = [
   { to: '/coaches', label: 'Coaches', icon: UsersRound },
 ];
 const personalTraining = { to: '/pt', label: 'Personal Training', icon: Dumbbell };
+const memberLinks = [
+  { to: '/account#bookings', label: 'Upcoming classes', icon: CalendarCheck },
+  { to: '/account#progress', label: 'Training progress', icon: ChartNoAxesColumnIncreasing },
+];
+const ownerLink = { to: '/admin', label: 'Command centre', icon: PanelsTopLeft };
 const gym = [
   { to: '/', label: 'Home', icon: House },
   { to: '/#facility', label: 'Facility', icon: Compass },
@@ -23,7 +28,7 @@ export default function PublicNav() {
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef(null);
   const location = useLocation();
-  const { session, profile } = useSupabaseAuth();
+  const { session, profile, isAdmin } = useSupabaseAuth();
   const pt = usePtAvailability();
   const close = useCallback(() => setMenuOpen(false), []);
   useEffect(() => { close(); }, [location, close]);
@@ -45,7 +50,8 @@ export default function PublicNav() {
           className="public-nav-trigger min-w-11 min-h-11"><LayoutGrid aria-hidden="true" size={18} /><span>Menu</span></button>
       </div>
     </div>
-    {menuOpen && <MobileSheet groups={[{ title: 'Training', links: pt.enabled ? [...training, personalTraining] : training }, { title: 'The gym', links: gym }]}
+    {menuOpen && <MobileSheet shortcuts={session ? (isAdmin ? [...memberLinks, ownerLink] : memberLinks) : []}
+      groups={[{ title: 'Training', links: pt.enabled ? [...training, personalTraining] : training }, { title: 'The gym', links: gym }]}
       current={location.pathname + location.hash} user={session?.user} profile={profile} close={close} triggerRef={triggerRef} />}
   </nav>;
 }

@@ -47,6 +47,10 @@
 .public-menu-top h2 { font: 400 clamp(2.25rem, 6vw, 3.4rem)/1 var(--font-display); color: var(--text-primary); }
 .public-menu-close { display: grid; place-items: center; min-width: 44px; min-height: 44px; border-radius: 50%; background: var(--surface-overlay); }
 .public-menu-scroll { padding: 0 18px 14px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
+.public-menu-shortcuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr)); gap: 6px; margin: 4px 0 14px; }
+.public-menu-shortcut { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-overlay); color: var(--text-primary); font-size: .875rem; font-weight: 650; line-height: 1.25; }
+.public-menu-shortcut svg { color: var(--accent-default); flex-shrink: 0; }
+.public-menu-shortcut:hover, .public-menu-shortcut[aria-current] { border-color: var(--accent-default); }
 .public-menu-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: 12px 24px; }
 .public-menu-groups h3, .public-menu-eyebrow { font: 700 .72rem/1.4 var(--font-body); text-transform: uppercase; letter-spacing: .12em; color: var(--accent-default); }
 .public-menu-groups h3 { padding-block: 8px 5px; border-bottom: 1px solid var(--border-strong); }

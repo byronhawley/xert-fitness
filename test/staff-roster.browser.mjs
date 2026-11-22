@@ -36,7 +36,7 @@ const step = async (name, fn) => {
   catch (error) { results.push({ name, ok: false, error: error.message }); console.log(`FAIL ${name}\n  ${error.stack}`); throw error; }
 };
 
-const { db } = await demoMonth({ month: MONTH, today });
+const { db } = await demoMonth({ month: MONTH, today, dueOn: addDays(today, 7) });
 // Stand-ins for the member booking tables the class details read (synthetic rows only).
 await db.exec(`
   create table public.session_bookings (id uuid primary key default gen_random_uuid(), user_id uuid not null, class_session_id uuid not null,
@@ -359,7 +359,7 @@ try {
     await panel(sunday).getByRole('button', { name: /^Evening/ }).and(phone.locator('[aria-pressed="true"]')).waitFor();
 
     // Away on one Tuesday.
-    const awayDay = datesOfMonth(MONTH).find(date => weekdayOf(date) === 2 && date > firstMonday);
+    const awayDay = addDays(tuesday, 7);
     await phone.getByRole('radio', { name: /I’m away/ }).click();
     await dayButton(awayDay).click();
     await dayButton(awayDay).getByText('Away').waitFor();
@@ -591,6 +591,16 @@ try {
     await coachPage.getByRole('heading', { name: /Hi Sam Synthetic/ }).waitFor();
     await coachPage.getByText('Welcome to the XERT coach roster, Sam Synthetic').waitFor();
     await coachPage.getByRole('tab', { name: 'Home', selected: true }).waitFor();
+    const coachTabs = coachPage.getByRole('tablist', { name: 'Coach sections' });
+    await coachTabs.getByRole('tab', { selected: true }).focus();
+    await coachPage.keyboard.press('ArrowRight');
+    const classesTab = coachTabs.getByRole('tab', { name: /^My classes/ });
+    assert.ok(await classesTab.evaluate(el => el === document.activeElement));
+    await coachTabs.getByRole('tab', { name: 'Home', selected: true }).waitFor();
+    await coachPage.keyboard.press('Enter');
+    await coachPage.waitForURL(url => url.searchParams.get('tab') === 'roster');
+    await coachPage.goBack();
+    await coachTabs.getByRole('tab', { name: 'Home', selected: true }).waitFor();
     await coachPage.getByText(/Availability for/).first().waitFor();
     assert.equal(new URL(coachPage.url()).pathname, '/coaching');
     const { rows } = await db.query(`select m.profile_id, i.accepted_by from public.staff_members m join public.staff_roster_invites i on i.staff_id = m.id where m.id = $1`, [samStaff.id]);

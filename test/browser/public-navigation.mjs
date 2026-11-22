@@ -35,6 +35,27 @@ export async function checkPublicNavigation(page, { origin, signedIn, failures }
   const sheet = page.locator('#mobile-navigation');
   await sheet.getByRole('link', { name: 'Facility', exact: true }).waitFor();
   assert.equal(await sheet.getByRole('region', { name: 'Next class' }).count(), 0, 'Menu opens without loading optional gym details');
+  const shortcuts = sheet.getByRole('region', { name: 'Your shortcuts' });
+  if (signedIn) {
+    await shortcuts.getByRole('link', { name: 'Command centre' }).waitFor();
+    assert.equal(await shortcuts.getByRole('link', { name: 'Training progress' }).getAttribute('href'), '/account#progress');
+    await shortcuts.getByRole('link', { name: 'Upcoming classes' }).click();
+    await page.waitForURL(origin + '/account#bookings');
+    const atBookings = () => page.waitForFunction(() => {
+      const target = document.getElementById('bookings')?.getBoundingClientRect();
+      const header = document.querySelector('[data-public-nav]')?.getBoundingClientRect();
+      return target && header && target.top >= header.bottom - 1 && target.top < innerHeight / 2;
+    });
+    await atBookings();
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await trigger.click();
+    await shortcuts.getByRole('link', { name: 'Upcoming classes' }).click();
+    await atBookings();
+    await page.goBack();
+    await trigger.click();
+  } else {
+    assert.equal(await shortcuts.count(), 0);
+  }
   await sheet.getByRole('button', { name: 'Next class & gym details' }).click();
   const nextClass = page.getByRole('region', { name: 'Next class', exact: true });
   await nextClass.getByText('Foundation Strength', { exact: true }).waitFor();
