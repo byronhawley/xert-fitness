@@ -1437,9 +1437,9 @@ private struct XertNavigationDock: View {
         Button(action: onOpenCommands) {
             VStack(spacing: 3) {
                 Image(systemName: "square.grid.2x2")
-                    .font(.system(size: 17, weight: .semibold))
-                    .frame(height: 25)
-                Text("Menu").font(.caption2.weight(.semibold))
+                    .font(.system(size: 19, weight: .semibold))
+                    .frame(height: 26)
+                Text("Menu").font(.caption.weight(.semibold))
             }
             .foregroundStyle(Color.xertPale)
             .frame(maxWidth: .infinity)
@@ -1476,7 +1476,7 @@ private struct XertNavigationDock: View {
                             .matchedGeometryEffect(id: "primary-navigation-selection", in: selectionNamespace)
                     }
                     Image(systemName: selected ? item.selectedIcon : item.icon)
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: 19, weight: .semibold))
                         .foregroundStyle(selected ? Color.xertInk : Color.xertPale)
                     if let status {
                         XertNavigationStatusBadge(status: status).offset(x: 15, y: -8)
@@ -1485,9 +1485,9 @@ private struct XertNavigationDock: View {
                         XertOwnerNavigationPulseBadge(pulse: ownerPulse).offset(x: -15, y: -8)
                     }
                 }
-                .frame(width: 40, height: 25)
+                .frame(width: 42, height: 26)
                 Text(item.title)
-                    .font(.caption2.weight(selected ? .bold : .medium))
+                    .font(.caption.weight(selected ? .bold : .medium))
                     .foregroundStyle(selected ? Color.xertOffWhite : Color.xertPale)
                     .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
             }
