@@ -22,7 +22,9 @@ final class NavigationMenuUITests: XCTestCase {
         capture("Navigation menu", app)
         search.tap()
         search.typeText("Account")
-        let result = app.buttons.containing(NSPredicate(format: "label CONTAINS[c] 'Account'")).firstMatch
+        let result = app.buttons.matching(identifier: "xert-menu-command")
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Open Account"))
+            .firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5))
         result.tap()
         XCTAssertTrue(app.buttons["xert-navigation-account"].waitForExistence(timeout: 8))

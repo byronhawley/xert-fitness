@@ -2071,6 +2071,7 @@ private struct XertNavigationCommandPalette: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("xert-menu-command")
         .listRowBackground(Color.xertInk)
         .listRowSeparatorTint(Color.xertSteel.opacity(0.16))
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
