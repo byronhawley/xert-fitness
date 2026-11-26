@@ -35,6 +35,20 @@ export function gymDateKey(value) {
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
+/**
+ * Bring-a-friend day: the last Saturday of the month, on the gym's calendar.
+ * A Saturday is the last one when the Saturday a week later is in the next
+ * month. The database applies the same rule (class_bookings_guest_visit_day).
+ */
+export function isBringAFriendDay(value) {
+  const key = gymDateKey(value);
+  if (!key) return false;
+  const [year, month, day] = key.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return weekday === 6 && day + 7 > daysInMonth;
+}
+
 /** e.g. `6:00 am` — the time printed on the door. */
 export function gymTimeLabel(value) {
   const date = toDate(value);

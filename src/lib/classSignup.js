@@ -258,6 +258,7 @@ export const SIGNUP_ERRORS = {
   CLASS_FULL: 'That was the last spot — this class just filled up. Join the waitlist and we will contact you if one frees up.',
   CLASS_WAITLISTED: 'Someone is already waiting for a place in this class, so they go first. Join the waitlist to be next in line.',
   ALREADY_SIGNED_UP: 'That email is already signed up for this class.',
+  GUEST_VISIT_NOT_AVAILABLE: 'Bring-a-friend is only on the last Saturday of the month. Untick “I am a guest of a member” to book this class.',
   ALREADY_BOOKED_AS_MEMBER: 'You already have a place in this class through your XERT account.',
   CLASS_STARTED: 'This class has already started.',
   CLASS_NOT_OPEN: 'This class is not open for sign-ups.',

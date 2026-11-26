@@ -39,8 +39,37 @@ test('the form only offers it to somebody who is not a member', () => {
   const form = read('../src/components/public/BookingRequestForm.jsx');
   assert.match(form, /I am a guest of a member \(bring a friend\)/);
   assert.match(form, /hasMembership === false && \(/);
-  // A member ticking it in a previous answer must not leak into the send.
-  assert.match(form, /guest_visit: hasMembership === false && guestVisit/);
+  // A member ticking it in a previous answer, or a tick left over from a
+  // bring-a-friend class, must not leak into the send.
+  assert.match(form, /const asGuest = hasMembership === false && friendDay && guestVisit;/);
+  assert.match(form, /guest_visit: asGuest,/);
+  assert.doesNotMatch(form, /guest_visit: hasMembership === false && guestVisit/);
+});
+
+test('it is only offered on bring-a-friend day, the last Saturday of the month', async () => {
+  const form = read('../src/components/public/BookingRequestForm.jsx');
+  assert.match(form, /const friendDay = isBringAFriendDay\(session\?\.start_time\);/);
+  assert.match(form, /\{friendDay && <label/);
+  const { isBringAFriendDay } = await import('../src/lib/gymTime.js');
+  for (const [at, expected] of [
+    ['2026-11-28T08:00:00+10:00', true],   // last Saturday of November
+    ['2026-11-21T08:00:00+10:00', false],  // a Saturday, not the last
+    ['2026-11-27T08:00:00+10:00', false],  // the Friday before
+    ['2026-10-31T08:00:00+10:00', true],   // last day of the month is the Saturday
+    ['2027-01-30T08:00:00+10:00', true],
+    ['2026-11-27T22:30:00Z', true],        // already Saturday morning in Kingaroy
+    [null, false],
+  ]) assert.equal(isBringAFriendDay(at), expected, String(at));
+});
+
+test('the database refuses a guest sign-up on any other day, whatever sent it', () => {
+  const sql = read('../supabase/migrations/20261126010000_bring_a_friend_last_saturday.sql');
+  assert.match(sql, /extract\(isodow from \(p_at at time zone 'Australia\/Brisbane'\)::date\) = 6/);
+  assert.match(sql, /extract\(month from \(p_at at time zone 'Australia\/Brisbane'\)::date \+ 7\)\s*<> extract\(month/);
+  assert.match(sql, /raise exception 'GUEST_VISIT_NOT_AVAILABLE'/);
+  assert.match(sql, /before insert or update of guest_visit, class_session_id on public\.class_bookings/);
+  // Somebody who ticks it on an old copy of the site is told why in words.
+  assert.match(read('../src/lib/classSignup.js'), /GUEST_VISIT_NOT_AVAILABLE: 'Bring-a-friend is only on the last Saturday of the month\./);
 });
 
 test('staff can see and export who came in free', () => {

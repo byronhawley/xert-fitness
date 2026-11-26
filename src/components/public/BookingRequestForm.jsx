@@ -3,7 +3,7 @@ import { submitClassSignup } from '@/lib/submitForms';
 import FormCheckbox from '@/components/public/FormCheckbox';
 import { friendlySignupError, signupErrorDetail } from '@/lib/classSignup';
 import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
-import { gymDateTimeLabel } from '@/lib/gymTime';
+import { gymDateTimeLabel, isBringAFriendDay } from '@/lib/gymTime';
 
 const chipClasses = 'min-h-11 px-3 py-2 text-sm font-body rounded-full border transition-colors';
 const chipActive = 'border-xert-steel bg-xert-steel text-xert-navy';
@@ -81,6 +81,9 @@ export default function BookingRequestForm({
   // is the only chance to record it: on the floor a guest looks like anybody
   // else who has not paid yet.
   const [guestVisit, setGuestVisit] = useState(false);
+  // Only offered on bring-a-friend day, the last Saturday of the month.
+  const friendDay = isBringAFriendDay(session?.start_time);
+  const asGuest = hasMembership === false && friendDay && guestVisit;
   const [rejected, setRejected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -100,14 +103,14 @@ export default function BookingRequestForm({
     setErrorDetail('');
     try {
       const result = await submitClassSignup({
-        ...form, join_waitlist: joinWaitlist, guest_visit: hasMembership === false && guestVisit,
+        ...form, join_waitlist: joinWaitlist, guest_visit: asGuest,
       });
       // The answer and their details travel with the result so the page can
       // offer a non-member the passes without asking for any of it twice.
       onSuccess?.({
         ...result,
         has_membership: hasMembership,
-        guest_visit: hasMembership === false && guestVisit,
+        guest_visit: asGuest,
         full_name: form.full_name, email: form.email, phone: form.phone,
       });
     } catch (submitError) {
@@ -200,7 +203,7 @@ export default function BookingRequestForm({
         </div>
         {hasMembership === false && (
           <div className="mt-3 border border-xert-steel/20 p-3">
-            <label className="flex min-h-11 cursor-pointer items-center gap-3">
+            {friendDay && <label className="flex min-h-11 cursor-pointer items-center gap-3">
               <input type="checkbox" checked={guestVisit}
                 onChange={event => setGuestVisit(event.target.checked)} className="peer sr-only" />
               <span aria-hidden="true" className={`flex h-5 w-5 shrink-0 items-center justify-center border-2 ${guestVisit ? 'border-xert-steel bg-xert-steel text-xert-navy' : 'border-xert-steel/40'} peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-xert-offwhite`}>
@@ -209,9 +212,9 @@ export default function BookingRequestForm({
               <span className="font-body text-sm text-xert-offwhite">
                 I am a guest of a member (bring a friend)
               </span>
-            </label>
-            <p className="mt-2 font-body text-xs leading-relaxed text-xert-pale/65">
-              {guestVisit
+            </label>}
+            <p className={`${friendDay ? 'mt-2 ' : ''}font-body text-xs leading-relaxed text-xert-pale/65`}>
+              {asGuest
                 ? 'Nothing to pay — your spot is held and the team will know you are a guest. Next you sign the pre-exercise questionnaire, which every guest needs before training.'
                 : 'No problem — once your spot is held we will open the pre-exercise questionnaire and show you the ways to pay.'}
             </p>
