@@ -29,6 +29,8 @@ test('the shared visitor page sells the three-day pass and never treats a return
     assert.doesNotMatch(returned, /Payment received|team has been told/);
     assert.match(returned, /receipt/);
     assert.match(returned, /XERT team/);
+    // The pass is on their XertOS profile by now: the tablet is where they use it.
+    assert.match(returned, /check in on the tablet at the front/);
     assert.doesNotMatch(returned, /three classes|from purchase/i);
   } finally { await server.close(); }
 });

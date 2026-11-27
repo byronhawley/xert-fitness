@@ -243,6 +243,11 @@ export default function CasualVisit({ threeDayPass = false, tenSessionPack = fal
                     ? 'If your payment completed, Stripe will email your 10 Session Pack receipt. Show it to the XERT team before training; the team will arrange your sessions.'
                     : 'Thanks — your receipt is on its way by email, and the team has been told you are here. If you have not filled in the pre-exercise questionnaire yet, do that before you train.'}
               </p>
+              {!threeMonth && (
+                <p data-testid="tablet-check-in" className="mt-4 border-l-2 border-xert-steel pl-4 font-body text-base font-semibold leading-relaxed text-xert-offwhite">
+                  Next, check in on the tablet at the front: type your first name and tap your name.
+                </p>
+              )}
               {!threeMonth && <Link to="/forms/peq-casual" className="mt-6 inline-flex min-h-12 items-center justify-center bg-xert-steel px-5 font-display text-sm uppercase tracking-wide text-xert-navy transition-colors hover:bg-xert-pale">
                 Fill in the questionnaire
               </Link>}
