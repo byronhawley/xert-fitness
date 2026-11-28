@@ -11,6 +11,7 @@ export const ADMIN_SECTION_KEYS = Object.freeze([
   'calendar',
   'roster',
   'workouts',
+  'pairs',
   'bookings',
   'pt-requests',
   'availability',

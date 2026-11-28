@@ -38,6 +38,7 @@ export const ADMIN_HUBS = Object.freeze([
       { key: 'pt-requests', label: 'Personal training', detail: 'PT enquiries to approve', icon: Dumbbell },
       { key: 'availability', label: 'Opening hours', detail: 'Bookable times and closures', icon: CalendarRange },
       { key: 'workouts', label: 'Club TV workout', detail: 'What the in-club screen shows', icon: Tv },
+      { key: 'pairs', label: 'Pairs comp', detail: 'Every pair entered, by division', icon: Trophy },
     ],
   },
   {
