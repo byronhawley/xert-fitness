@@ -24,6 +24,7 @@ import {
   pairsEntriesOpen,
 } from './pairsCompetition.js';
 import { pairsSplitQuestion } from './pairsBoard.js';
+import { PAIRS_RUN_SHEET } from './pairsRunSheet.js';
 
 export const PAIRS_ACTIONS = Object.freeze(['pairsBoard', 'pairsEnter', 'pairsSetArchived']);
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -54,6 +55,7 @@ export function pairsBoardForXertos(board, now = new Date()) {
     entriesCloseAt: PAIRS_ENTRIES_CLOSE_AT,
     entriesOpen: open && form.isActive === true,
     entriesSwitchedOff: form.isActive !== true,
+    runSheet: PAIRS_RUN_SHEET,
     form: { id: form.id, updatedAt: form.updatedAt, questions: Array.isArray(form.questions) ? form.questions : [] },
     divisions: {
       categoryQuestionId: PAIRS_QUESTION_IDS.category,

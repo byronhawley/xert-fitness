@@ -8,8 +8,9 @@ import { useSupabaseAuth } from '@/lib/SupabaseAuthContext';
 import { authPathWithNext } from '@/lib/authRedirect';
 import { supabase } from '@/lib/supabase';
 import { loadPublicForm, saveOwnerForm, submitPublicForm } from '@/lib/xertForms';
+import { PAIRS_WORKOUTS, pairsSlotTime } from '@/lib/pairsRunSheet';
 import {
-  NAME_MAX, PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, TEAM_NAME_MAX,
+  NAME_MAX, PAIRS_CATEGORIES, PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, TEAM_NAME_MAX,
   pairsAsksTeamName, pairsCategories, pairsChoiceOptions, pairsEntriesOpen, pairsEntryAnswers,
   pairsEntryErrors, pairsExtraQuestions, pairsFormDefinition, pairsFormMatches, pairsSubmitErrorMessage,
 } from '@/lib/pairsCompetition';
@@ -35,6 +36,37 @@ function writeEntered(userId) {
   try { window.localStorage.setItem(ENTERED_KEY, userId); } catch { /* private mode: the server still refuses a second entry */ }
 }
 
+// When each division is on the floor, so pairs know their morning before they enter.
+function OnTheDay() {
+  return (
+    <section aria-labelledby="pairs-on-the-day" className="mx-auto max-w-3xl px-6 pb-24">
+      <h2 id="pairs-on-the-day" className="font-display text-2xl uppercase tracking-wide text-white">On the day · Sat 19 Dec</h2>
+      <p className="mt-1 text-sm text-xert-pale/60">Three workouts, one an hour. Your division has 20 minutes on each, then you judge the next division, then rest.</p>
+      <div className="mt-4 overflow-hidden border border-white/10">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-white/5 text-xs uppercase tracking-[0.12em] text-xert-steel">
+            <tr>
+              <th scope="col" className="px-3 py-2 font-semibold">Division</th>
+              {PAIRS_WORKOUTS.map(workout => <th key={workout} scope="col" className="px-3 py-2 font-semibold">WOD {workout}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {PAIRS_CATEGORIES.map(division => (
+              <tr key={division} className="border-t border-white/10">
+                <th scope="row" className="px-3 py-2 font-display text-base uppercase tracking-wide text-white">{division}</th>
+                {PAIRS_WORKOUTS.map(workout => (
+                  <td key={workout} className="px-3 py-2 tabular-nums text-xert-pale/80">{pairsSlotTime(workout, division).split('–')[0]}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs text-xert-pale/50">Prizes and thank-yous from 10:30am.</p>
+    </section>
+  );
+}
+
 function Shell({ children }) {
   return (
     <div className="min-h-screen bg-xert-navy text-xert-offwhite">
@@ -47,7 +79,8 @@ function Shell({ children }) {
           intro="Grab a partner. Pick a team name and the category that suits you both: Everyday, Intermediate or Advanced."
           containerClassName="max-w-3xl"
         />
-        <section className="mx-auto max-w-3xl px-6 pb-24 pt-6">{children}</section>
+        <section className="mx-auto max-w-3xl px-6 pb-10 pt-6">{children}</section>
+        <OnTheDay />
       </main>
       <PublicFooter />
     </div>

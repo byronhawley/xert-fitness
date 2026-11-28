@@ -43,6 +43,11 @@ the screen.
     "entriesCloseAt": "2026-12-19T14:00:00.000Z",
     "entriesOpen": true,
     "entriesSwitchedOff": false,
+    "runSheet": [
+      { "kind": "workout", "workout": 1, "division": "Everyday", "start": "7:00am", "end": "7:20am",
+        "judgedBy": "Advanced", "resting": "Intermediate" },
+      { "kind": "break", "label": "Transition / prep", "start": "8:00am", "end": "8:15am" }
+    ],
     "form": { "id": "uuid", "updatedAt": "…", "questions": [ … ] },
     "divisions": {
       "categoryQuestionId": "pairs-category",
@@ -64,6 +69,9 @@ the screen.
 - A division is a category × a split option. An entry whose answers do not
   fit a known category or split still belongs on the board, in a "not set"
   group.
+- `runSheet` is the day in order: three workouts, each division on the floor
+  for 20 minutes (M/M and F/F together), then judging the next division, then
+  resting. The order is the same for every workout. Show it as is.
 - Entries with `archivedAt` set have been removed. Show them only in a
   "Removed" list that can be restored from.
 
@@ -106,5 +114,7 @@ while the same email has another entry in. An unknown id answers 404
 
 The forms sync still copies each new response to XertOS once. An entry made
 through `pairsEnter` comes back that way too, under the same `entryId`, so
-XertOS should treat it as the same entry. Heats, check-in and scoring are not
-here yet. They wait on Byron's answers about how the comp runs.
+XertOS should treat it as the same entry. Check-in, scoring and a leaderboard are not
+here yet, by Byron's choice: judges fill in a paper score card per team per
+workout, and scores go into a spreadsheet on the laptop. Both are printed and
+downloaded from the XERT admin board.

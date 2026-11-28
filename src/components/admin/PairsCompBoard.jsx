@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, RefreshCw, Search, Users } from 'lucide-react';
+import { Clock, Download, Printer, ExternalLink, RefreshCw, Search, Users } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { archiveFormResponse, listFormResponses } from '@/lib/xertForms';
 import { PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, pairsEntriesOpen } from '@/lib/pairsCompetition';
 import { pairsBoard } from '@/lib/pairsBoard';
+import { PAIRS_WORKOUTS, pairsScoreCardsHtml, pairsScoreColumns, pairsRunSheet, pairsScoreSheetRows } from '@/lib/pairsRunSheet';
+import { downloadCsv } from '@/lib/csv';
 import { gymDateTimeLabel } from '@/lib/gymTime';
 import AdminConfirmDialog from './AdminConfirmDialog';
 import { ADMIN_BUTTON, ADMIN_INPUT_BARE, ADMIN_PAGE, ADMIN_PANEL, ADMIN_TEXT, AdminPageHeader } from './ui';
@@ -51,6 +53,43 @@ function Column({ column }) {
   );
 }
 
+// The day at a glance: each workout's slots with how many pairs are on the
+// floor, and the breaks between.
+function RunSheet({ rows }) {
+  const workouts = PAIRS_WORKOUTS.map(workout => rows.filter(row => row.workout === workout));
+  const breaks = rows.filter(row => row.kind === 'break');
+  return (
+    <section aria-label="Run sheet" className={`${ADMIN_PANEL} mb-6 p-4`}>
+      <h3 className="mb-3 flex items-center gap-2 font-display text-2xl uppercase tracking-wide text-xert-offwhite">
+        <Clock className="h-5 w-5 text-xert-steel" aria-hidden="true" /> Run sheet · Sat 19 Dec
+      </h3>
+      <div className="grid gap-3 sm:grid-cols-3">
+        {workouts.map((slots, index) => (
+          <div key={PAIRS_WORKOUTS[index]} className="min-w-0 border border-white/10 p-3">
+            <p className="mb-2 font-body text-xs font-semibold uppercase tracking-[0.14em] text-xert-steel">Workout {PAIRS_WORKOUTS[index]}</p>
+            <ul className="space-y-1.5">
+              {slots.map(row => (
+                <li key={row.division} className="font-body text-sm">
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="text-xert-offwhite"><span className="tabular-nums text-xert-pale/70">{row.start}</span> {row.division}</span>
+                    <span className="shrink-0 text-xs text-xert-pale/60">{row.pairs} {row.pairs === 1 ? 'pair' : 'pairs'}</span>
+                  </span>
+                  <span className="block text-xs text-xert-pale/50">Judged by {row.judgedBy} · {row.resting} resting</span>
+                </li>
+              ))}
+            </ul>
+            {breaks[index] && (
+              <p className="mt-2 border-t border-white/10 pt-2 font-body text-xs text-xert-pale/60">
+                {breaks[index].start}{breaks[index].end ? `–${breaks[index].end}` : ''} · {breaks[index].label}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const LIVE_SOURCE = Object.freeze({
   async form() {
     const { data, error } = await supabase.from('xert_forms').select('*')
@@ -88,6 +127,21 @@ export default function PairsCompBoard({ onNavigate, source = LIVE_SOURCE }) {
   useEffect(() => { load(); }, [load]);
 
   const board = useMemo(() => (form ? pairsBoard(form, responses, search) : null), [form, responses, search]);
+  // The run sheet and the spreadsheet always cover every pair, whatever is searched.
+  const everyone = useMemo(() => (form ? pairsBoard(form, responses) : null), [form, responses]);
+  // A card per pair per workout, opened as its own page to print.
+  const printScoreCards = () => {
+    const page = window.open('', '_blank');
+    if (!page) { setError('Allow pop-ups for this site to print the score cards.'); return; }
+    page.document.open();
+    page.document.write(pairsScoreCardsHtml(everyone, `Pairs comp ${PAIRS_EVENT_LABEL} score cards`));
+    page.document.close();
+    page.focus();
+    setTimeout(() => page.print(), 300);
+  };
+  const downloadScoreSheet = () => {
+    downloadCsv(`pairs-comp-${PAIRS_EVENT_LABEL.replace(/\./g, '-')}-scores.csv`, pairsScoreSheetRows(everyone), pairsScoreColumns(everyone));
+  };
 
   const archive = async () => {
     setBusy(true);
@@ -107,6 +161,8 @@ export default function PairsCompBoard({ onNavigate, source = LIVE_SOURCE }) {
     <div className={ADMIN_PAGE}>
       <AdminPageHeader eyebrow="Classes" title="Pairs comp" description={`Every pair entered for ${PAIRS_EVENT_LABEL}, sorted into its division. People enter at xertfitness.com.au/pairs.`}>
         <button type="button" className={ADMIN_BUTTON.ghost} onClick={load} disabled={loading}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh</button>
+        <button type="button" className={ADMIN_BUTTON.ghost} onClick={printScoreCards} disabled={!everyone?.total}><Printer className="h-4 w-4" /> Score cards</button>
+        <button type="button" className={ADMIN_BUTTON.ghost} onClick={downloadScoreSheet} disabled={!everyone?.total}><Download className="h-4 w-4" /> Score spreadsheet</button>
         <a className={ADMIN_BUTTON.ghost} href="/pairs" target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /> Entry page</a>
       </AdminPageHeader>
 
@@ -136,6 +192,8 @@ export default function PairsCompBoard({ onNavigate, source = LIVE_SOURCE }) {
             </label>
           </div>
           {search && <p className="mb-4 font-body text-xs text-xert-pale/60">Showing {board.shown} of {board.total}.</p>}
+
+          <RunSheet rows={pairsRunSheet(everyone)} />
 
           <div className="space-y-6">
             {board.divisions.map(division => (
