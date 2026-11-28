@@ -330,8 +330,10 @@ export default function AdminLayout({ activeSection, onSectionChange, hasUnsaved
           )}
         </header>
 
-        {/* Content */}
-        <main ref={mainRef} data-admin-scroll-region className="relative min-h-0 flex-1 touch-pan-y overflow-y-auto overscroll-y-contain lg:[scrollbar-gutter:stable]">
+        {/* Content. Vertical scrolling only, but pinch-zoom must stay allowed:
+            touch-pan-y on its own blocked pinch, so once iPhone Safari zoomed in
+            (tapping a small box) nobody could pinch back out of the admin. */}
+        <main ref={mainRef} data-admin-scroll-region className="relative min-h-0 flex-1 touch-pan-y touch-pinch-zoom overflow-y-auto overscroll-y-contain lg:[scrollbar-gutter:stable]">
           <div className="relative">
             {children}
           </div>
