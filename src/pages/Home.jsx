@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import PublicNav from '@/components/public/PublicNav';
 import Hero from '@/components/public/Hero';
 import Countdown from '@/components/public/Countdown';
+import PairsCompPromo from '@/components/public/PairsCompPromo';
 import WhatXertIs from '@/components/public/WhatXertIs';
 import EventWall from '@/components/public/EventWall';
 import TrainingStyle from '@/components/public/TrainingStyle';
@@ -52,6 +53,7 @@ export default function Home() {
 
       <main id="main">
         <Hero />
+        <PairsCompPromo />
         <Countdown
           targetDate={settings.target_launch_date || DEFAULT_TARGET_LAUNCH_DATE}
           enabled={settings.countdown_enabled !== false}

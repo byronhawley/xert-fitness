@@ -80,6 +80,12 @@ export function pairsEntriesOpen(now = new Date()) {
   return now.getTime() < Date.parse(PAIRS_ENTRIES_CLOSE_AT);
 }
 
+/** Whole days until comp day in Kingaroy: 0 on the day itself. */
+export function pairsDaysToGo(now = new Date()) {
+  const start = Date.parse(`${PAIRS_EVENT_DATE}T00:00:00+10:00`);
+  return Math.max(0, Math.ceil((start - now.getTime()) / 86400000));
+}
+
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 
 // ─── Following the live form ─────────────────────────────────────────────

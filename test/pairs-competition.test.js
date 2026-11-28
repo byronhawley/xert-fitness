@@ -146,3 +146,15 @@ test('an archived entry lets the person enter again, whatever their phone rememb
   assert.match(sql, /r\.created_by = auth\.uid\(\)/);
   assert.match(sql, /revoke all on function public\.xert_my_form_entry_exists\(text\) from public, anon;/);
 });
+
+test('the homepage advertises the comp until entries close', async () => {
+  const { pairsDaysToGo } = await import('../src/lib/pairsCompetition.js');
+  assert.equal(pairsDaysToGo(new Date('2026-11-28T02:00:00Z')), 21);
+  assert.equal(pairsDaysToGo(new Date('2026-12-18T13:59:00Z')), 1);
+  assert.equal(pairsDaysToGo(new Date('2026-12-19T03:00:00Z')), 0, 'comp day itself');
+  const home = readFileSync(new URL('../src/pages/Home.jsx', import.meta.url), 'utf8');
+  assert.match(home, /<Hero \/>\n\s*<PairsCompPromo \/>/);
+  const promo = readFileSync(new URL('../src/components/public/PairsCompPromo.jsx', import.meta.url), 'utf8');
+  assert.match(promo, /if \(!pairsEntriesOpen\(now\)\) return null;/);
+  assert.match(promo, /to="\/pairs"/);
+});

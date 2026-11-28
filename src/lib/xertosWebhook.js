@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { requestText, sendJson } from './serverHttp.js';
 import { PassSaleRefused } from './xertosPassSale.js';
+import { PAIRS_ACTIONS, PairsRefused } from './xertosPairs.js';
 
 export const XERTOS_PROVIDER = 'xert_fitness';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
@@ -81,6 +82,16 @@ export function client0PassSalesEnabled(environment = process.env) {
   return environment.CLIENT0_SYNC_ENABLED === 'true';
 }
 
+/**
+ * The Pairs competition from XertOS (reading entries, entering, removing) stays
+ * off unless sync and its own gate are both true. Reads carry entrants'
+ * contact details, so they are behind the same gate as the writes.
+ */
+export function client0PairsEnabled(environment = process.env) {
+  return environment.CLIENT0_SYNC_ENABLED === 'true'
+    && environment.CLIENT0_PAIRS_ENABLED === 'true';
+}
+
 export function verifyXertosSignature({
   signatureHeader = '',
   timestampHeader = '',
@@ -127,7 +138,7 @@ export function xertosWebhookConfigError(environment = process.env) {
   return null;
 }
 
-export default async function xertosWebhookHandler(request, response, { runEdit, recordPassSale } = {}) {
+export default async function xertosWebhookHandler(request, response, { runEdit, recordPassSale, runPairs } = {}) {
   if (request.method !== 'POST') return sendJson(response, { error: 'Method not allowed' }, 405);
 
   const configError = xertosWebhookConfigError(process.env);
@@ -185,6 +196,27 @@ export default async function xertosWebhookHandler(request, response, { runEdit,
       console.error('xertos pass sale failed', error?.message);
       return sendJson(response, {
         error: { code: 'PASS_SALE_FAILED', message: 'XERT Fitness could not record this sale. Try again.' },
+      }, 500);
+    }
+  }
+
+  // The Pairs competition, managed by Byron and entered by members in XertOS.
+  if (PAIRS_ACTIONS.includes(payload?.action)) {
+    if (!client0PairsEnabled(process.env) || typeof runPairs !== 'function') {
+      return sendJson(response, {
+        error: { code: 'ACTION_NOT_READY', message: 'XERT Fitness is not running Pairs through XertOS yet. Enter at xertfitness.com.au/pairs.' },
+      }, 501);
+    }
+    try {
+      const result = await runPairs(payload);
+      return sendJson(response, { ok: true, ...result });
+    } catch (error) {
+      if (error instanceof PairsRefused) {
+        return sendJson(response, { error: { code: error.code, message: error.message } }, error.status);
+      }
+      console.error('xertos pairs action failed', payload.action, error?.message);
+      return sendJson(response, {
+        error: { code: 'PAIRS_FAILED', message: 'XERT Fitness could not do that just now. Try again.' },
       }, 500);
     }
   }

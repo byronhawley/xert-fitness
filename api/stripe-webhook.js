@@ -9,6 +9,7 @@ import { casualVisitPaymentFromCheckout } from '../src/lib/casualVisit.js';
 import xertosWebhookHandler from '../src/lib/xertosWebhook.js';
 import { handleXertosEdit } from '../src/lib/xertosSync.js';
 import { recordPassSale } from '../src/lib/xertosPassSale.js';
+import { runPairsAction } from '../src/lib/xertosPairs.js';
 
 // Stripe calls this after a successful checkout. We verify the signature,
 // record the paid order, and grant the member their session credits.
@@ -49,6 +50,12 @@ async function recordXertosPassSale(payload) {
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) throw new Error('XERT Fitness backend is not configured.');
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   return recordPassSale(admin, payload);
+}
+
+async function runXertosPairs(payload) {
+  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) throw new Error('XERT Fitness backend is not configured.');
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  return runPairsAction(admin, payload);
 }
 
 export function validStripeSignatureHeader(value) {
@@ -516,6 +523,7 @@ export default async function handler(request, response) {
     return xertosWebhookHandler(request, response, {
       runEdit: runXertosCalendarEdit,
       recordPassSale: recordXertosPassSale,
+      runPairs: runXertosPairs,
     });
   }
 
