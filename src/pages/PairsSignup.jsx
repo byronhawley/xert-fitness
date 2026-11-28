@@ -28,6 +28,9 @@ const errorStyle = { color: 'var(--state-danger-text)', borderColor: 'var(--stat
 function readEntered(userId) {
   try { return window.localStorage.getItem(ENTERED_KEY) === userId; } catch { return false; }
 }
+function forgetEntered() {
+  try { window.localStorage.removeItem(ENTERED_KEY); } catch { /* nothing stored */ }
+}
 function writeEntered(userId) {
   try { window.localStorage.setItem(ENTERED_KEY, userId); } catch { /* private mode: the server still refuses a second entry */ }
 }
@@ -304,8 +307,24 @@ export default function PairsSignup() {
       .catch(err => { if (active) { setForm(null); setLoadError(err.message); } });
     return () => { active = false; };
   }, [reload]);
+  // Whether this account has an entry that still stands comes from the
+  // database: an entry staff have archived no longer counts, so the person
+  // can enter again. The note on the phone is only a fallback for when that
+  // check cannot be made.
   useEffect(() => {
-    if (user?.id && readEntered(user.id)) setEntered(current => current || { previous: true });
+    if (!user?.id) return undefined;
+    let active = true;
+    supabase.rpc('xert_my_form_entry_exists', { p_slug: PAIRS_FORM_SLUG })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          if (readEntered(user.id)) setEntered(current => current || { previous: true });
+          return;
+        }
+        if (data) { writeEntered(user.id); setEntered(current => current || { previous: true }); }
+        else { forgetEntered(); setEntered(current => (current?.entry ? current : null)); }
+      });
+    return () => { active = false; };
   }, [user?.id]);
 
   const onEntered = value => {

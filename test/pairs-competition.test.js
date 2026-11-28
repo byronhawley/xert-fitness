@@ -133,3 +133,16 @@ test('the site routes /pairs and sends the bare form link through the sign-in pa
   const redirect = app.indexOf(`path="/forms/${PAIRS_FORM_SLUG}"`);
   assert.ok(redirect > 0 && redirect < app.indexOf('path="/forms/:slug"'));
 });
+
+test('an archived entry lets the person enter again, whatever their phone remembers', () => {
+  const page = readFileSync(new URL('../src/pages/PairsSignup.jsx', import.meta.url), 'utf8');
+  assert.match(page, /supabase\.rpc\('xert_my_form_entry_exists', \{ p_slug: PAIRS_FORM_SLUG \}\)/);
+  // The phone's note is forgotten when the database says there is no entry,
+  // and only trusted when the database cannot be asked.
+  assert.match(page, /else \{ forgetEntered\(\); setEntered/);
+  assert.match(page, /if \(error\) \{\s*if \(readEntered\(user\.id\)\)/);
+  const sql = readFileSync(new URL('../supabase/migrations/20261128010000_my_form_entry_exists.sql', import.meta.url), 'utf8');
+  assert.match(sql, /and r\.archived_at is null/);
+  assert.match(sql, /r\.created_by = auth\.uid\(\)/);
+  assert.match(sql, /revoke all on function public\.xert_my_form_entry_exists\(text\) from public, anon;/);
+});
