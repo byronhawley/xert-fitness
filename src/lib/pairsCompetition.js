@@ -82,49 +82,125 @@ export function pairsEntriesOpen(now = new Date()) {
 
 const clean = value => String(value ?? '').replace(/\s+/g, ' ').trim();
 
+// ─── Following the live form ─────────────────────────────────────────────
+// Staff edit the Pairs form in the builder like any other form. The page has
+// to follow those edits, or one change stops every entry: a required question
+// added in the builder is one the page never asked, and the database refuses
+// the entry for it ("Please complete every required question"). So the page
+// asks every question the live form has. The team name is asked while the
+// form still has it, the categories are whatever the form offers, and any
+// other question appears below them as it is set up in the builder.
+
+const CORE_IDS = new Set(Object.values(PAIRS_QUESTION_IDS));
+const LAYOUT_TYPES = new Set(['section_break', 'statement']);
+const CHOICE_TYPES = new Set(['single_choice', 'dropdown', 'yes_no']);
+// What the page can ask beyond the core fields. Anything else (a signature, a
+// file) would need its own control; pairsFormMatches refuses such a form
+// rather than post an entry the database will reject.
+export const PAIRS_EXTRA_TYPES = new Set(['single_choice', 'dropdown', 'yes_no', 'multiple_choice',
+  'short_text', 'long_text', 'email', 'phone', 'number', 'date']);
+
+const questionsOf = form => (Array.isArray(form?.questions) ? form.questions.filter(Boolean) : []);
+const questionById = (form, id) => questionsOf(form).find(item => item.id === id) || null;
+
+/** Questions the live form has beyond the core four, in the form's order. */
+export function pairsExtraQuestions(form) {
+  return questionsOf(form).filter(item => !CORE_IDS.has(item.id) && !LAYOUT_TYPES.has(item.type) && !item.hidden);
+}
+
+/** The options a choice question offers. */
+export function pairsChoiceOptions(question) {
+  if (question?.type === 'yes_no') return ['Yes', 'No'];
+  return (Array.isArray(question?.options) ? question.options : []).map(String).filter(Boolean);
+}
+
+/** Whether the live form still asks for a team name. */
+export function pairsAsksTeamName(form) {
+  const item = questionById(form, PAIRS_QUESTION_IDS.teamName);
+  return Boolean(item && !item.hidden);
+}
+
+/** The categories the live form offers (the built-in three without a form). */
+export function pairsCategories(form) {
+  const item = form ? questionById(form, PAIRS_QUESTION_IDS.category) : null;
+  const options = item ? pairsChoiceOptions(item) : [];
+  return options.length ? options : [...PAIRS_CATEGORIES];
+}
+
+function extraPresent(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return clean(value) !== '';
+}
+
 /**
  * Field-by-field problems with an entry, worded for the person filling it in.
- * @param {{ teamName?: string, teammateOne?: string, teammateTwo?: string, category?: string }} [entry]
- * @returns {{ teamName?: string, teammateOne?: string, teammateTwo?: string, category?: string }}
+ * Without a form it checks the original four fields, as it always did.
+ * @param {{ teamName?: string, teammateOne?: string, teammateTwo?: string, category?: string, extras?: Record<string, any> }} [entry]
+ * @param {object} [form] the live form, so its own questions are checked too
+ * @returns {Record<string, string>}
  */
-export function pairsEntryErrors(entry = {}) {
-  /** @type {{ teamName?: string, teammateOne?: string, teammateTwo?: string, category?: string }} */
+export function pairsEntryErrors(entry = {}, form = null) {
+  /** @type {Record<string, string>} */
   const errors = {};
   const teamName = clean(entry.teamName);
   const one = clean(entry.teammateOne);
   const two = clean(entry.teammateTwo);
-  if (!teamName) errors.teamName = 'Give your pair a team name.';
-  else if (teamName.length > TEAM_NAME_MAX) errors.teamName = `Keep the team name to ${TEAM_NAME_MAX} characters.`;
+  if (!form || pairsAsksTeamName(form)) {
+    if (!teamName) errors.teamName = 'Give your pair a team name.';
+    else if (teamName.length > TEAM_NAME_MAX) errors.teamName = `Keep the team name to ${TEAM_NAME_MAX} characters.`;
+  }
   if (!one) errors.teammateOne = 'Enter your name.';
   else if (one.length > NAME_MAX) errors.teammateOne = `Keep names to ${NAME_MAX} characters.`;
   if (!two) errors.teammateTwo = "Enter your teammate's name.";
   else if (two.length > NAME_MAX) errors.teammateTwo = `Keep names to ${NAME_MAX} characters.`;
   else if (one && one.toLowerCase() === two.toLowerCase()) errors.teammateTwo = 'Your teammate needs to be a different person.';
-  if (!PAIRS_CATEGORIES.includes(entry.category)) errors.category = 'Choose a category.';
+  if (!pairsCategories(form).includes(entry.category)) errors.category = 'Choose a category.';
+  for (const item of form ? pairsExtraQuestions(form) : []) {
+    const value = entry.extras?.[item.id];
+    if (item.required && !extraPresent(value)) {
+      errors[item.id] = CHOICE_TYPES.has(item.type) || item.type === 'multiple_choice'
+        ? `Choose ${clean(item.question) ? `a ${clean(item.question).toLowerCase()}` : 'an option'}.`
+        : `Fill in ${clean(item.question) || 'this question'}.`;
+    } else if (CHOICE_TYPES.has(item.type) && extraPresent(value) && !pairsChoiceOptions(item).includes(value)) {
+      errors[item.id] = 'Choose one of the options listed.';
+    }
+  }
   return errors;
 }
 
-/** The answers object the form takes, keyed by the fixed question ids. */
-export function pairsEntryAnswers(entry) {
-  return {
-    [PAIRS_QUESTION_IDS.teamName]: clean(entry.teamName),
+/**
+ * The answers object the form takes, keyed by the live form's question ids.
+ * Without a form it answers the original four, as it always did.
+ */
+export function pairsEntryAnswers(entry, form = null) {
+  const answers = {
     [PAIRS_QUESTION_IDS.teammateOne]: clean(entry.teammateOne),
     [PAIRS_QUESTION_IDS.teammateTwo]: clean(entry.teammateTwo),
     [PAIRS_QUESTION_IDS.category]: entry.category,
   };
+  // A team name the form no longer has would be refused as an unknown answer.
+  if (!form || pairsAsksTeamName(form)) answers[PAIRS_QUESTION_IDS.teamName] = clean(entry.teamName);
+  for (const item of form ? pairsExtraQuestions(form) : []) {
+    const value = entry.extras?.[item.id];
+    if (!extraPresent(value)) continue;
+    if (item.type === 'number') answers[item.id] = Number(value);
+    else answers[item.id] = Array.isArray(value) ? value : clean(value);
+  }
+  return Object.fromEntries(Object.entries(answers).sort(([a], [b]) => a.localeCompare(b)));
 }
 
-/** True when the live form still has every question this page answers. */
+/**
+ * True when the page can take an entry for the live form: it still has both
+ * teammates and a category with options, and every other question is one the
+ * page knows how to ask.
+ */
 export function pairsFormMatches(form) {
-  const questions = Array.isArray(form?.questions) ? form.questions : [];
-  const byId = new Map(questions.map(item => [item?.id, item]));
-  const category = byId.get(PAIRS_QUESTION_IDS.category);
+  const one = questionById(form, PAIRS_QUESTION_IDS.teammateOne);
+  const two = questionById(form, PAIRS_QUESTION_IDS.teammateTwo);
+  const category = questionById(form, PAIRS_QUESTION_IDS.category);
   return Boolean(
-    byId.get(PAIRS_QUESTION_IDS.teamName)
-    && byId.get(PAIRS_QUESTION_IDS.teammateOne)
-    && byId.get(PAIRS_QUESTION_IDS.teammateTwo)
-    && category
-    && PAIRS_CATEGORIES.every(option => (category.options || []).includes(option)),
+    one && two && category && pairsChoiceOptions(category).length
+    && pairsExtraQuestions(form).every(item => PAIRS_EXTRA_TYPES.has(item.type)),
   );
 }
 

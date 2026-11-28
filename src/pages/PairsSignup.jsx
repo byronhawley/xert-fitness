@@ -9,9 +9,9 @@ import { authPathWithNext } from '@/lib/authRedirect';
 import { supabase } from '@/lib/supabase';
 import { loadPublicForm, saveOwnerForm, submitPublicForm } from '@/lib/xertForms';
 import {
-  NAME_MAX, PAIRS_CATEGORIES, PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, TEAM_NAME_MAX,
-  pairsEntriesOpen, pairsEntryAnswers, pairsEntryErrors, pairsFormDefinition,
-  pairsFormMatches, pairsSubmitErrorMessage,
+  NAME_MAX, PAIRS_EVENT_LABEL, PAIRS_FORM_SLUG, TEAM_NAME_MAX,
+  pairsAsksTeamName, pairsCategories, pairsChoiceOptions, pairsEntriesOpen, pairsEntryAnswers,
+  pairsEntryErrors, pairsExtraQuestions, pairsFormDefinition, pairsFormMatches, pairsSubmitErrorMessage,
 } from '@/lib/pairsCompetition';
 
 const PAGE_PATH = '/pairs';
@@ -133,12 +133,17 @@ function AdminSetup({ onCreated }) {
 
 function EntryForm({ form, user, profile, onEntered }) {
   const accountName = String(profile?.full_name || user?.user_metadata?.full_name || '').trim();
-  const [entry, setEntry] = useState({ teamName: '', teammateOne: accountName, teammateTwo: '', category: '' });
+  const [entry, setEntry] = useState({ teamName: '', teammateOne: accountName, teammateTwo: '', category: '', extras: {} });
   const [touched, setTouched] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
-  const errors = useMemo(() => (touched ? pairsEntryErrors(entry) : {}), [entry, touched]);
+  const errors = useMemo(() => (touched ? pairsEntryErrors(entry, form) : {}), [entry, form, touched]);
   const set = key => event => setEntry(current => ({ ...current, [key]: event.target.value }));
+  const setExtra = (id, value) => setEntry(current => ({ ...current, extras: { ...current.extras, [id]: value } }));
+  // The page asks what the live form asks, so the builder's edits show here.
+  const asksTeamName = pairsAsksTeamName(form);
+  const categories = pairsCategories(form);
+  const extras = pairsExtraQuestions(form);
 
   useEffect(() => {
     if (accountName) setEntry(current => (current.teammateOne ? current : { ...current, teammateOne: accountName }));
@@ -148,20 +153,20 @@ function EntryForm({ form, user, profile, onEntered }) {
     event.preventDefault();
     setTouched(true);
     setError('');
-    if (Object.keys(pairsEntryErrors(entry)).length) return;
+    if (Object.keys(pairsEntryErrors(entry, form)).length) return;
     setSending(true);
     try {
       await submitPublicForm({
         slug: PAIRS_FORM_SLUG,
         formUpdatedAt: form.updated_at,
-        answers: pairsEntryAnswers(entry),
+        answers: pairsEntryAnswers(entry, form),
         name: accountName || entry.teammateOne.trim(),
         email: user.email,
         phone: profile?.phone || '',
         elapsedSeconds: 0,
         sourceURL: window.location.href,
       });
-      onEntered({ ...entry });
+      onEntered({ ...entry, extraLines: extras.map(item => [item.question, entry.extras[item.id]]).filter(([, value]) => value && String(value).trim()) });
     } catch (err) {
       const message = pairsSubmitErrorMessage(err);
       if (message === 'ALREADY_ENTERED') onEntered(null);
@@ -179,9 +184,9 @@ function EntryForm({ form, user, profile, onEntered }) {
       <p className="mt-2 text-sm text-xert-pale/60">Entering as {user.email}</p>
 
       <div className="mt-7 grid gap-5">
-        <Field id="pairs-team" label="Pair team name" error={errors.teamName}>
+        {asksTeamName && <Field id="pairs-team" label="Pair team name" error={errors.teamName}>
           <input id="pairs-team" className={input} maxLength={TEAM_NAME_MAX} autoComplete="off" value={entry.teamName} onChange={set('teamName')} aria-invalid={Boolean(errors.teamName)} aria-describedby={errors.teamName ? 'pairs-team-error' : undefined} />
-        </Field>
+        </Field>}
         <div className="grid gap-5 sm:grid-cols-2">
           <Field id="pairs-one" label="Teammate 1 (you)" error={errors.teammateOne}>
             <input id="pairs-one" className={input} maxLength={NAME_MAX} autoComplete="name" autoCapitalize="words" value={entry.teammateOne} onChange={set('teammateOne')} aria-invalid={Boolean(errors.teammateOne)} aria-describedby={errors.teammateOne ? 'pairs-one-error' : undefined} />
@@ -194,7 +199,7 @@ function EntryForm({ form, user, profile, onEntered }) {
         <fieldset>
           <legend className="xert-label">Category</legend>
           <div role="radiogroup" className="grid gap-3 sm:grid-cols-3">
-            {PAIRS_CATEGORIES.map(option => {
+            {categories.map(option => {
               const chosen = entry.category === option;
               return (
                 <label key={option} className={`relative flex min-h-[96px] cursor-pointer flex-col justify-between rounded-2xl border p-4 transition-colors ${chosen ? 'border-xert-steel bg-xert-steel/15' : 'border-xert-steel/20 bg-white/[0.03] hover:border-xert-steel/60'}`}>
@@ -203,13 +208,15 @@ function EntryForm({ form, user, profile, onEntered }) {
                     {option}
                     {chosen && <Check className="h-5 w-5 text-xert-steel" aria-hidden="true" />}
                   </span>
-                  <span className="mt-2 text-xs text-xert-pale/60">{CATEGORY_NOTES[option]}</span>
+                  {CATEGORY_NOTES[option] && <span className="mt-2 text-xs text-xert-pale/60">{CATEGORY_NOTES[option]}</span>}
                 </label>
               );
             })}
           </div>
           {errors.category && <p className="mt-1.5 text-sm" style={{ color: 'var(--state-danger-text)' }}>{errors.category}</p>}
         </fieldset>
+
+        {extras.map(item => <ExtraQuestion key={item.id} item={item} value={entry.extras[item.id]} error={errors[item.id]} onChange={value => setExtra(item.id, value)} input={input} />)}
       </div>
 
       {error && <p role="alert" className="mt-6 rounded-xl border p-3 text-sm" style={errorStyle}>{error}</p>}
@@ -220,6 +227,46 @@ function EntryForm({ form, user, profile, onEntered }) {
   );
 }
 
+// A question staff added to the Pairs form in the builder, asked the way the
+// form sets it up: choices as buttons, everything else as a box.
+function ExtraQuestion({ item, value, error, onChange, input }) {
+  const id = `pairs-extra-${item.id}`;
+  const label = `${item.question || 'Question'}${item.required ? '' : ' (optional)'}`;
+  const errorLine = error ? <p id={`${id}-error`} className="mt-1.5 text-sm" style={{ color: 'var(--state-danger-text)' }}>{error}</p> : null;
+  if (['single_choice', 'dropdown', 'yes_no', 'multiple_choice'].includes(item.type)) {
+    const many = item.type === 'multiple_choice';
+    const chosen = many ? (Array.isArray(value) ? value : []) : value;
+    return (
+      <fieldset>
+        <legend className="xert-label">{label}</legend>
+        {item.description && <p className="mb-2 text-xs text-xert-pale/60">{item.description}</p>}
+        <div role={many ? 'group' : 'radiogroup'} className="grid gap-3 sm:grid-cols-3">
+          {pairsChoiceOptions(item).map(option => {
+            const on = many ? chosen.includes(option) : chosen === option;
+            const toggle = () => onChange(many ? (on ? chosen.filter(x => x !== option) : [...chosen, option]) : option);
+            return (
+              <label key={option} className={`flex min-h-14 cursor-pointer items-center justify-between rounded-2xl border px-4 py-3 transition-colors ${on ? 'border-xert-steel bg-xert-steel/15' : 'border-xert-steel/20 bg-white/[0.03] hover:border-xert-steel/60'}`}>
+                <input type={many ? 'checkbox' : 'radio'} name={id} value={option} checked={on} onChange={toggle} className="sr-only" />
+                <span className="font-display text-xl uppercase tracking-wide text-white">{option}</span>
+                {on && <Check className="h-5 w-5 text-xert-steel" aria-hidden="true" />}
+              </label>
+            );
+          })}
+        </div>
+        {errorLine}
+      </fieldset>
+    );
+  }
+  const types = { email: 'email', phone: 'tel', number: 'number', date: 'date' };
+  return (
+    <Field id={id} label={label} hint={item.description || undefined} error={error}>
+      {item.type === 'long_text'
+        ? <textarea id={id} rows={4} className="xert-input w-full text-base" value={value || ''} onChange={event => onChange(event.target.value)} aria-invalid={Boolean(error)} />
+        : <input id={id} type={types[item.type] || 'text'} className={input} value={value || ''} onChange={event => onChange(event.target.value)} aria-invalid={Boolean(error)} aria-describedby={error ? `${id}-error` : undefined} />}
+    </Field>
+  );
+}
+
 function Entered({ entry }) {
   return (
     <div className="xert-card p-6 text-center sm:p-10" role="status">
@@ -227,8 +274,12 @@ function Entered({ entry }) {
       <h2 className="font-display text-4xl uppercase tracking-wide text-white">You're in</h2>
       {entry ? (
         <p className="mt-4 text-xert-pale/75">
-          <strong className="text-white">{entry.teamName.trim()}</strong> ({entry.teammateOne.trim()} &amp; {entry.teammateTwo.trim()}) is entered in{' '}
-          <strong className="text-white">{entry.category}</strong> for {PAIRS_EVENT_LABEL}.
+          {entry.teamName?.trim()
+            ? <><strong className="text-white">{entry.teamName.trim()}</strong> ({entry.teammateOne.trim()} &amp; {entry.teammateTwo.trim()})</>
+            : <strong className="text-white">{entry.teammateOne.trim()} &amp; {entry.teammateTwo.trim()}</strong>} {entry.teamName?.trim() ? 'is' : 'are'} entered in{' '}
+          <strong className="text-white">{entry.category}</strong>
+          {(entry.extraLines || []).map(([label, value]) => <span key={label}>, {label}: <strong className="text-white">{Array.isArray(value) ? value.join(', ') : value}</strong></span>)}
+          {' '}for {PAIRS_EVENT_LABEL}.
         </p>
       ) : (
         <p className="mt-4 text-xert-pale/75">This account has already entered a pair for {PAIRS_EVENT_LABEL}.</p>
